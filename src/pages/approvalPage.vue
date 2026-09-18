@@ -42,6 +42,33 @@
               :start-time="orderDatas?.created"
               @submit="onNodeSubmit"
             />
+
+            <!--
+              「选择接收团队」的接收方单独成一个节点：
+              它命中终结类结论（CLOSE_FLOW_RESULTS），**不是** chain 里的审批人 ——
+              所以链路里没有它，只能在时间线上补一个节点才看得见。
+            -->
+            <v-timeline-item v-if="receiver" class="mb-6" dot-color="#1055C9" size="small">
+              <template #icon>
+                <v-icon color="white" size="14">mdi-inbox-arrow-down</v-icon>
+              </template>
+
+              <div class="d-flex align-center gap-2">
+                <v-chip color="primary" label size="x-small" variant="flat">
+                  <span class="text-[9px]">接收团队</span>
+                </v-chip>
+
+                <v-avatar class="mr-1" size="22">
+                  <v-img v-if="receiver.avatar" cover :src="proxyAvatar(receiver.avatar)" />
+                  <v-icon v-else size="13">mdi-account</v-icon>
+                </v-avatar>
+
+                <span class="text-[12px]">{{ receiver.name }}</span>
+                <span v-if="receiver.email" class="text-[11px] text-medium-emphasis">{{ receiver.email }}</span>
+              </div>
+
+              <div class="mt-1 text-[11px] text-medium-emphasis">流程到此结束：后面接的环节不再有人办理</div>
+            </v-timeline-item>
           </v-timeline>
         </v-container>
 
@@ -93,7 +120,7 @@
   } from '@/types/approval'
   // 以 headers（产品字段）为 key 生成一条产品信息用于展示，接入真实数据后替换
   import useClipboard from 'vue-clipboard3'
-  import { sendFeishuCard } from '@/api/api'
+  import { proxyAvatar, sendFeishuCard } from '@/api/api'
   import ApprovalNode from '@/components/ApprovalNode.vue'
   import ProductInfoCard from '@/components/ProductInfoCard.vue'
   import SelectNode from '@/components/streamNodes/SelectNode.vue'
@@ -105,6 +132,7 @@
     collectStepResultOptions,
     mergeExtraMembers,
     rebuildChain,
+    receiverOf,
   } from '@/types/approval'
   import { flowContextOfOrder } from '@/utils/approvalFlow'
   import { getApprovalOrder, getApprovalOrderByNo, updateApprovalOrder } from '@/utils/collection'
@@ -215,6 +243,12 @@
     const flow = orderDatas.value?.chain?.flow
     return flow?.length ? collectStepResultOptions(flow) : {}
   })
+
+  /**
+   * 「选择接收团队」的接收方：在时间线上单独渲染成一个节点。
+   * 它命中终结类结论、不在 chain 里，所以只能从办理流水里取（见 receiverOf）。
+   */
+  const receiver = computed(() => receiverOf(orderDatas.value))
 
   const currentApprover = computed<ApprovalChainItem | undefined>(() => {
     const chain = runtime.value.chain

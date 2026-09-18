@@ -295,6 +295,29 @@ export const REJECT_RESULTS: ReadonlyArray<string> = ['reject']
  */
 export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT]
 
+/**
+ * 取「选择接收团队」的办理结果（接收方），用于在时间线上**单独渲染一个节点**。
+ *
+ * 为什么单独取：命中 CLOSE_FLOW_RESULTS 的结论会终止流程，接收方**不是**任何一个
+ * chain 环节的审批人（它不在 chain 里），所以只能从办理流水里取出来单独展示。
+ * 同一单可能被驳回重审过，取**最后一条** pick_members 结论。
+ */
+export function receiverOf (order: ApprovalOrder | null | undefined): ApprovalChainItem | undefined {
+  const decisions = order?.chain?.decisions ?? []
+  for (let i = decisions.length - 1; i >= 0; i--) {
+    const d = decisions[i]
+    if (d.result !== PICK_MEMBERS_RESULT) {
+      continue
+    }
+    const raw = d.extra?.members
+    const one = Array.isArray(raw) ? raw[0] : raw
+    if (one && typeof one === 'object') {
+      return one as ApprovalChainItem
+    }
+  }
+  return undefined
+}
+
 /** 分支：一条命名的走向，可以挂直属审批人 + 顺序步骤（步骤里可再嵌分支组，即分支内的分支） */
 export interface ApprovalBranch {
   id: string
