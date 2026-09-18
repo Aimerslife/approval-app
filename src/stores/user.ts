@@ -196,14 +196,16 @@ export const useUserStore = defineStore('user', () => {
         try {
             const rec = await pb
                 .collection(PREF_COLLECTION)
-                .getFirstListItem<Record<string, unknown>>(`user = "${uid}"`)
+                // 泛型里带上 id：只写 Record<string, unknown> 的话 rec.id 是 unknown，
+                // 赋给 preferencesRecordId（string）会报 TS2322
+                .getFirstListItem<{ id: string } & Record<string, unknown>>(`user = "${uid}"`)
             preferencesRecordId = rec.id
             preferences.value = pickPreferences(rec)
         } catch {
             // 没有记录（404），或集合还没建（还没跑 migration）——都按「首次」处理
             const legacy = (user.value?.preferences ?? {}) as Record<string, unknown>
             try {
-                const created = await pb.collection(PREF_COLLECTION).create<Record<string, unknown>>({
+                const created = await pb.collection(PREF_COLLECTION).create<{ id: string } & Record<string, unknown>>({
                     user: uid,
                     ...pickPreferences(legacy),
                 })
@@ -241,7 +243,7 @@ export const useUserStore = defineStore('user', () => {
             } else {
                 const created = await pb
                     .collection(PREF_COLLECTION)
-                    .create<Record<string, unknown>>({ user: uid, ...next })
+                    .create<{ id: string } & Record<string, unknown>>({ user: uid, ...next })
                 preferencesRecordId = created.id
             }
         } catch (err) {

@@ -129,7 +129,8 @@ function goAgreement() {
 interface SnackbarMessage {
     text: string
     color: string
-    variant: string
+    /** 必须是字面量联合（Vuetify 的 Variant），写 string 会与 v-snackbar-queue 的类型对不上（TS2322） */
+    variant: 'elevated' | 'flat' | 'tonal' | 'outlined' | 'plain' | 'text'
     onDismiss: (reason: any) => void
 }
 

@@ -238,7 +238,7 @@ export function graphToFlowFrom(
                     id: be.id,
                     name,
                     // 兼容旧结构：单条件取首条；多条件走 conditions + logic
-                    condition: list[0] ?? null,
+                    condition: asSingleCondition(list[0]),
                     logic,
                     conditions: list.length ? list : undefined,
                     steps: walk.steps,
@@ -272,7 +272,7 @@ export function graphToFlowFrom(
                 id: be.id,
                 name,
                 // 兼容旧结构：单条件取首条；多条件走 conditions + logic
-                condition: list[0] ?? null,
+                condition: asSingleCondition(list[0]),
                 logic,
                 conditions: list.length ? list : undefined,
                 steps: walk.steps,
@@ -618,10 +618,27 @@ function rejectBackBranches(targetId: string): ApprovalBranch[] {
     ]
 }
 
+/**
+ * legacy 的**单条件**字段（`condition`）只接受"平条件"（BranchCondition）。
+ * `conditions` 里的元素是 `ConditionExpr`，可能是条件、也可能是嵌套条件组 ——
+ * 直接把 `ConditionExpr` 赋给 `condition` 过不了类型检查（TS2322）。
+ * 条件组不写进 `condition`：新数据一律看 `conditions`，legacy 字段只作兼容读取。
+ */
+function asSingleCondition(expr: ConditionExpr | undefined): BranchCondition | null {
+    if (!expr || Array.isArray(expr) || !('field' in expr)) return null
+    return expr
+}
+
+/** 该分支首个"平条件"的字段名（条件组不算）——同 asSingleCondition 的收窄理由 */
+function firstConditionField(b: ApprovalBranch): string | undefined {
+    const first = asSingleCondition(branchConditions(b)[0])
+    return first?.field
+}
+
 /** 该分支组里是否已有「驳回 → targetId」的回退分支：重复保存时避免叠加 */
 function hasRejectBack(branches: ApprovalBranch[], targetId: string): boolean {
     return branches.some(
-        b => b.loopBackTo?.stepId === targetId && branchConditions(b)[0]?.field === 'result',
+        b => b.loopBackTo?.stepId === targetId && firstConditionField(b) === 'result',
     )
 }
 

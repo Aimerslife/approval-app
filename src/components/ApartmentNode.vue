@@ -9,25 +9,25 @@
             item-value="id" activatable open-on-click color="#E8F0FE" active-class="tree-active-item"
             v-model:activated="activated" @update:activated="onActivated">
             <template v-slot:title="{ item }">
-                <template v-if="item.type === 'dept'">
-                    <span class="text-[13px] font-weight-medium">{{ item.title }}</span>
-                    <span class="text-[12px] text-grey ml-1">({{ item.member_count }}人)</span>
+                <template v-if="itemOf(item).type === 'dept'">
+                    <span class="text-[13px] font-weight-medium">{{ itemOf(item).title }}</span>
+                    <span class="text-[12px] text-grey ml-1">({{ itemOf(item).member_count }}人)</span>
                 </template>
                 <template v-else>
-                    <span class="text-[13px]">{{ item.title }}</span>
-                    <v-chip v-if="item.is_tenant_manager" size="x-small" color="error" variant="tonal"
+                    <span class="text-[13px]">{{ itemOf(item).title }}</span>
+                    <v-chip v-if="itemOf(item).is_tenant_manager" size="x-small" color="error" variant="tonal"
                         class="ml-1">管理员</v-chip>
-                    <v-chip v-if="item.is_leader" size="x-small" color="warning" variant="tonal"
+                    <v-chip v-if="itemOf(item).is_leader" size="x-small" color="warning" variant="tonal"
                         class="ml-1">负责人</v-chip>
                 </template>
             </template>
             <template v-slot:prepend="{ item, isOpen }">
-                <v-icon v-if="item.type === 'dept'" size="20" color="#1055C9">
-                    {{ item.has_child ? (isOpen ? 'mdi-layers-outline' : 'mdi-layers') :
+                <v-icon v-if="itemOf(item).type === 'dept'" size="20" color="#1055C9">
+                    {{ itemOf(item).has_child ? (isOpen ? 'mdi-layers-outline' : 'mdi-layers') :
                         'mdi-account-group' }}
                 </v-icon>
                 <v-avatar v-else size="24">
-                    <v-img v-if="item.avatar" :src="item.avatar" cover />
+                    <v-img v-if="itemOf(item).avatar" :src="itemOf(item).avatar" cover />
                     <v-icon v-else size="12">mdi-account</v-icon>
                 </v-avatar>
             </template>
@@ -66,6 +66,15 @@ const props = defineProps({
         default: () => [],
     },
 })
+
+/**
+ * Vuetify 的 treeview 插槽把 `item` 推成 `unknown` —— 因为 `treeItems` 这个 prop 是用
+ * 运行时声明（`type: Array`）定义的，元素类型传不下去，模板里直接取 item.xxx 会报 TS18046。
+ * 这里收窄一次，模板统一写成 itemOf(item).xxx，比在每个字段上各转一次清楚。
+ */
+function itemOf(raw: unknown): TreeItem {
+    return raw as TreeItem
+}
 
 const emit = defineEmits(['update:activated']);
 
