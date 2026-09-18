@@ -317,7 +317,13 @@
         只显示一个名字字符串看不出是谁；渲染口径与下方「抄送」一致。
       -->
       <div v-if="pickedReceiver" class="mt-2 d-flex align-center gap-2">
-        <v-chip class="mr-1" color="primary" label size="x-small" variant="flat">
+        <v-chip
+          class="mr-1"
+          color="primary"
+          label
+          size="x-small"
+          variant="flat"
+        >
           <span class="text-[9px]">接收团队</span>
         </v-chip>
 
@@ -394,10 +400,10 @@
 </template>
 
 <script lang="ts" setup>
-  // proxyAvatar：飞书头像要经服务端代理才能在浏览器里正常显示（接收团队那块要用头像）
-  import { proxyAvatar, type UserBrief } from '@/api/api'
   import type { ApprovalChainItem, NodeSubmitPayload } from '@/types/approval'
   import dayjs from 'dayjs'
+  // proxyAvatar：飞书头像要经服务端代理才能在浏览器里正常显示（接收团队那块要用头像）
+  import { proxyAvatar, type UserBrief } from '@/api/api'
   import { APPROVAL_RESULTS, PICK_MEMBERS_RESULT } from '@/types/approval'
   import { buildColorScale, pickColorStep } from '@/utils/color'
   import { formatDate, formatTimeDiff, getPinyinInitials } from '@/utils/utils'
@@ -517,9 +523,9 @@
     const extra = manager.value?.extra
     if (!extra) return []
     return Object.entries(extra)
-        // members（接收团队）已在上方单独成块渲染，这里不重复
-        .filter(([key]) => key !== 'members')
-        .filter(([key]) => !EXTRA_HIDDEN_KEYS.test(key))
+      // members（接收团队）已在上方单独成块渲染，这里不重复
+      .filter(([key]) => key !== 'members')
+      .filter(([key]) => !EXTRA_HIDDEN_KEYS.test(key))
       .filter(([, v]) => v !== undefined && v !== null && v !== '')
       .map(([key, v]) => ({
         key,
