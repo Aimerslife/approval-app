@@ -284,6 +284,17 @@ export const APPROVAL_STATUS = {
  *  业务上若要把「建议弃置」「报废清仓」也算驳回终态，往这里加即可。 */
 export const REJECT_RESULTS: ReadonlyArray<string> = ['reject']
 
+/**
+ * 命中即**终结流程**的结论：这一步办完流程就结束，后面的环节不再展开、也就没人有权限办。
+ *
+ * 目前只有「选择接收人员」：接收方是**结果**（谁接下这批货），不是下一环的审批人。
+ * 所以模板里配这条结论的那个分支，后面接什么都不会生效（建议直接连到结束节点）。
+ *
+ * 与 REJECT_RESULTS 的唯一区别在终态判定：这里的终结算**通过**（流程正常走完），
+ * REJECT_RESULTS 算驳回。见 outcomeOf()。
+ */
+export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT]
+
 /** 分支：一条命名的走向，可以挂直属审批人 + 顺序步骤（步骤里可再嵌分支组，即分支内的分支） */
 export interface ApprovalBranch {
   id: string
@@ -695,6 +706,15 @@ export function rebuildChain (
     return { ...context, result: d.result, ...d.extra }
   }
 
+  /**
+   * 该结论是否**终结流程**（见 CLOSE_FLOW_RESULTS）。
+   * 命中就不再往后展开：后面的环节不进 chain、也就没人有权限办 ——
+   * 「选择接收团队」就是这种：接收方是结果，不是下一环的审批人。
+   */
+  function closesFlow (d: NodeDecision | undefined): boolean {
+    return !!d && CLOSE_FLOW_RESULTS.includes(d.result)
+  }
+
   /** 生成一个 chain 环节并回填其结论；返回结论（undefined = 该环节待办） */
   function pushStep (stepId: string): NodeDecision | undefined {
     const d = takeDecision(stepId)
@@ -725,6 +745,12 @@ export function rebuildChain (
     if (!d) {
       // 还没有重审结论 → 它就停在这一步等着重审
       currentStep = chain.length - 1
+      return false
+    }
+    // 重审时选了终结类结论 → 同样到此结束
+    if (closesFlow(d)) {
+      done = true
+      terminalBranch = null
       return false
     }
     const form = formOf(d)
@@ -769,6 +795,12 @@ export function rebuildChain (
         currentStep = chain.length - 1
         return false
       }
+      // 终结类结论：分支内的步骤同样到此为止
+      if (closesFlow(d)) {
+        done = true
+        terminalBranch = null
+        return false
+      }
       form = formOf(d)
     }
     return true
@@ -786,6 +818,12 @@ export function rebuildChain (
         const d = pushStep(node.id)
         if (!d) {
           currentStep = chain.length - 1
+          return false
+        }
+        // 终结类结论（如「选择接收团队」）：这一步办完流程即结束，后面接的环节不会生效
+        if (closesFlow(d)) {
+          done = true
+          terminalBranch = null
           return false
         }
         form = formOf(d)

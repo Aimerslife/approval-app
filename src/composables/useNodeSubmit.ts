@@ -1,6 +1,5 @@
 import type {
   ApprovalAttachment,
-  ApprovalChainItem,
   ApprovalOrder,
   NodeDecision,
   NodeSubmitPayload,
@@ -128,40 +127,20 @@ export function useNodeSubmit (options: {
       const rebuilt = rebuildChain(flow, decisions, terminalMap, context)
 
       /*
-             * 3.5 「选择接收人员」：把办理人选的人**填充到下一环节**。
-             *
-             * 为什么写 extraMembers 而不是改 flow：flow 是**模板**，改它会波及这张模板
-             * 之后新建的所有单据；extraMembers 是「本单在运行期追加的成员」——
-             * 抄送 / 转办用的就是它，展示时由 mergeExtraMembers 合并回 chain，不新增数据结构。
-             *
-             * 没选人：**拦下来**（与"审批意见必填"同一档）—— 结论已经定了、人也该定，
-             * 放过去的话下一环还是空的、单子照样卡住，却看不出是谁漏的。
-             */
-      const picked = payload.result === PICK_MEMBERS_RESULT ? toFilledMembers(payload.extra?.members) : []
-      if (payload.result === PICK_MEMBERS_RESULT && picked.length === 0) {
-        options.onMessage?.('请选择接收人员', 'warning')
+       * 3.5 「选择接收团队」：只校验"选了没有"，**不往后续环节写人**。
+       *
+       * 为什么不填充下一环（早先那版写过，已按业务口径改掉）：
+       * 「选择接收团队」是**终结**结论 —— 接收方是结果（谁接下这批货），不是下一环的审批人。
+       * 选完之后流程即结束、后面的环节不再展开，也就没人有权限办 ——
+       * 终止这件事由 rebuildChain 按 CLOSE_FLOW_RESULTS 完成（见 types/approval.ts）。
+       * 选中的人记在本环节的办理流水里（decisions[].extra.members），时间线按「接收人员」展示。
+       *
+       * 没选人仍然拦下来（与"审批意见必填"同一档）：这条结论就是"选了谁"，不选等于没办。
+       */
+      if (payload.result === PICK_MEMBERS_RESULT && !hasPickedMember(payload.extra?.members)) {
+        options.onMessage?.('请选择接收团队', 'warning')
         payload.done(false)
         return null
-      }
-      const nextIndex = payload.index + 1
-      const nextStepId = rebuilt.stepIds[nextIndex]
-      let extraMembers: Record<string, ApprovalChainItem[]> | undefined
-      if (picked.length > 0) {
-        if (nextStepId) {
-          // 已在这一环的人不重复加（会签名单里出现两个同名的人，看起来像两个人）
-          const exist = rebuilt.chain[nextIndex] ?? []
-          const fresh = picked.filter(m =>
-            !exist.some(x => (x.email && x.email === m.email) || (!x.email && x.name === m.name)),
-          )
-          if (fresh.length > 0) {
-            const old = snapshot?.extraMembers?.[nextStepId] ?? []
-            extraMembers = { ...snapshot?.extraMembers, [nextStepId]: [...old, ...fresh] }
-          }
-        } else {
-          // 后面没有环节可填（结论绑在了最后一环）：不拦提交，但要说明白，
-          // 否则用户以为人已经指派好了
-          options.onMessage?.('这一环后面没有环节，选中的人只记在了本环节的办理记录里', 'warning')
-        }
       }
 
       // 4. 终态写进 status：还有环节待办 → 进行中；否则按终止走向判通过 / 驳回
@@ -171,7 +150,6 @@ export function useNodeSubmit (options: {
       const updated = await updateApprovalOrder(order.id, {
         chain: {
           ...snapshot, chain: rebuilt.chain, decisions,
-          ...(extraMembers ? { extraMembers } : {}),
         },
         status,
       })
@@ -196,36 +174,13 @@ export function useNodeSubmit (options: {
 }
 
 /**
- * 「选择接收人员」选中的人 → 可写进单据的成员。
- * 做一次形状校验：这些是要写进 approval_chain.chain.extraMembers 的，
- * 缺 name、不是对象、同一个人重复出现，都挡在这里，脏数据不带进单据。
+ * 「选择接收团队」是否真的选了人。
+ * 兼容两种形状：单选时 `extra.members` 是成员对象，多选时是成员数组。
  */
-function toFilledMembers (raw: unknown): ApprovalChainItem[] {
-  if (!Array.isArray(raw)) {
-    return []
-  }
-  const out: ApprovalChainItem[] = []
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') {
-      continue
-    }
-    const m = item as Partial<ApprovalChainItem>
-    const name = typeof m.name === 'string' ? m.name.trim() : ''
-    if (!name) {
-      continue
-    }
-    if (out.some(x => (x.email && x.email === m.email) || (!x.email && x.name === name))) {
-      continue
-    }
-    out.push({
-      name,
-      ...(m.email ? { email: m.email } : {}),
-      ...(m.avatar ? { avatar: m.avatar } : {}),
-      // 接收人是要**办**这一环的人，不是抄送
-      type: 'manager',
-    })
-  }
-  return out
+function hasPickedMember (raw: unknown): boolean {
+  const arr = Array.isArray(raw) ? raw : raw ? [raw] : []
+  return arr.some(item => !!item && typeof item === 'object'
+    && String((item as { name?: unknown }).name ?? '').trim() !== '')
 }
 
 /** 流程终态 → 审批单状态（approval_chain.status） */
