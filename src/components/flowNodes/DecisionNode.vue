@@ -1,6 +1,7 @@
 <template>
   <div class="node decision-node" :style="outerStyle">
     <FlowHandles />
+
     <div class="decision-node__inner" :style="innerStyle">
       <span class="label">{{ data.label }}</span>
     </div>
@@ -8,41 +9,41 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import FlowHandles from './FlowHandles.vue'
+  import { computed } from 'vue'
+  import FlowHandles from './FlowHandles.vue'
 
-const props = defineProps<{
-  data: {
-    label: string
-    /** 白板原框尺寸（菱形的外接矩形） */
-    width?: number
-    height?: number
-    fill?: string
-    stroke?: string
-    textColor?: string
-  }
-  id: string
-  selected?: boolean
-}>()
+  const props = defineProps<{
+    data: {
+      label: string
+      /** 白板原框尺寸（菱形的外接矩形） */
+      width?: number
+      height?: number
+      fill?: string
+      stroke?: string
+      textColor?: string
+    }
+    id: string
+    selected?: boolean
+  }>()
 
-/**
- * 用 clip-path 画菱形，而不是 `transform: rotate(45deg)`：
- * 旋转正方形的**外接包围盒**是边长的 √2 倍，而白板的坐标是按真实菱形外框量的 ——
- * 两者对不上会让整张图的相对位置全错（越往右下越偏）。
- * clip-path 的盒子就等于白板那个外框，坐标可以直接用。
- */
-const outerStyle = computed(() => ({
-  width: `${props.data.width ?? 120}px`,
-  height: `${props.data.height ?? 70}px`,
-  // 描边没法直接画在 clip-path 上（会被一起裁掉）：外层铺描边色、内层铺填充色，
-  // 两层用同一个菱形裁剪，露出的一圈就是描边
-  background: props.data.stroke ?? '#facc15',
-}))
+  /**
+   * 用 clip-path 画菱形，而不是 `transform: rotate(45deg)`：
+   * 旋转正方形的**外接包围盒**是边长的 √2 倍，而白板的坐标是按真实菱形外框量的 ——
+   * 两者对不上会让整张图的相对位置全错（越往右下越偏）。
+   * clip-path 的盒子就等于白板那个外框，坐标可以直接用。
+   */
+  const outerStyle = computed(() => ({
+    width: `${props.data.width ?? 120}px`,
+    height: `${props.data.height ?? 70}px`,
+    // 描边没法直接画在 clip-path 上（会被一起裁掉）：外层铺描边色、内层铺填充色，
+    // 两层用同一个菱形裁剪，露出的一圈就是描边
+    background: props.data.stroke ?? '#facc15',
+  }))
 
-const innerStyle = computed(() => ({
-  background: props.data.fill ?? 'var(--flow-amber-soft)',
-  color: props.data.textColor ?? 'var(--flow-text)',
-}))
+  const innerStyle = computed(() => ({
+    background: props.data.fill ?? 'var(--flow-amber-soft)',
+    color: props.data.textColor ?? 'var(--flow-text)',
+  }))
 </script>
 
 <style lang="scss" scoped>

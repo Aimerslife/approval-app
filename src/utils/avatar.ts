@@ -12,9 +12,13 @@
  */
 const FEISHU_CDN_BASE = 'https://p3-feishu-sign.feishucdn.com/obj/'
 
-export function resolveAvatar(raw?: string | null): string {
-    if (!raw) return ''
-    if (/^https?:\/\//i.test(raw)) return raw
-    const path = raw.replace(/^\/+(?:obj\/)?/, '')
-    return `${FEISHU_CDN_BASE}${path}`
+export function resolveAvatar (raw?: string | null): string {
+  if (!raw) {
+    return ''
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return raw
+  }
+  const path = raw.replace(/^\/+(?:obj\/)?/, '')
+  return `${FEISHU_CDN_BASE}${path}`
 }

@@ -56,7 +56,7 @@
             variant="tonal"
           >
             <template #prepend>
-              <v-avatar :icon="link.icon" size="45" variant="tonal" class="ml-2 mr-4" />
+              <v-avatar class="ml-2 mr-4" :icon="link.icon" size="45" variant="tonal" />
             </template>
           </v-card>
         </v-col>

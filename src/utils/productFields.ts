@@ -24,112 +24,112 @@
  */
 
 export interface ProductField {
-    title: string
-    key: string
-    sortable?: boolean
-    /** 默认是否显示（BI 增 / 删字段时改这里） */
-    visualable: boolean
-    only:string
-    /** 内容宽度（不含单元格内边距）。表格用它做 minWidth，表格因此可横向滚动 */
-    width:number
-    /**
+  title: string
+  key: string
+  sortable?: boolean
+  /** 默认是否显示（BI 增 / 删字段时改这里） */
+  visualable: boolean
+  only: string
+  /** 内容宽度（不含单元格内边距）。表格用它做 minWidth，表格因此可横向滚动 */
+  width: number
+  /**
      * 横向滚动时固定在左侧。
      * 这是 **v-data-table 的原生能力**（headers[].fixed）——
      * Vuetify 会生成 .v-data-table-column--fixed 并为每列算好 left 偏移（fixedOffset），
      * 所以不用自己写 sticky 样式；多列固定也能自动累加偏移。
      */
-    fixed?: boolean
+  fixed?: boolean
 }
 
 export const PRODUCT_FIELDS: ProductField[] = [
-    // 1.图片链接。fixed: 横向滚动时固定在最左侧（原生能力，见 ProductField.fixed 注释）
-    { title: '产品图片', key: '图片链接', sortable: false, visualable: false,only:'all',width:50, fixed: true },
-    // 2.产品信息
-    { title: 'SKU', key: 'SKU', sortable: false, visualable: false,only:'all',width:100 },
-    { title: 'SPU', key: 'SPU', sortable: false, visualable: false,only:'all',width:84  },
-    { title: '主MODEL', key: '主MODEL', sortable: false, visualable: false,only:'all',width:72  },
-    { title: '产品名称', key: '产品名称', sortable: false, visualable: false,only:'all',width:200  },
-    { title: '季节性产品标签', key: '季节性产品标签', sortable: false, visualable: false,only:'amazon tk',width:60  },
-    // 3.开售时间
-    { title: '最早开售日期-SKU', key: '最早开售日期-SKU', sortable: true, visualable: true,only:'amazon tk',width:96  },
-    { title: '拓业部最早时间-SPU', key: '拓业部最早时间-SPU', sortable: true, visualable: true,only:'expand',width:108  },
-    // 4.组织信息类
-    { title: '自产/外购', key: '供应商', sortable: false, visualable: false,only:'all',width:60  },
-    { title: '组长', key: '组长', sortable: false, visualable: false,only:'all',width:60  },
-    { title: '组别', key: '组别', sortable: false, visualable: false,only:'all',width:60  },
-    { title: '部门', key: '部门', sortable: false, visualable: false,only:'all',width:60  },
-    // 5.平台
-    { title: '仓位', key: '仓位', sortable: false, visualable: false,only:'all',width:60  },
-    { title: '店铺', key: '店铺', sortable: false, visualable: false,only:'amazon,tk',width:60  },
-    { title: '平台', key: '平台', sortable: false, visualable: false,only:'all',width:60  },
-    // 6.呆滞
-    { title: '亚马逊呆滞条件', key: '亚马逊呆滞条件', sortable: false, visualable: false,only:'amazon,tk',width:220  },
-    { title: '拓业部呆滞条件', key: '拓业部呆滞条件', sortable: false, visualable: false,only:'expand',width:220  },
-    { title: '呆滞情况', key: '是否属于呆滞库存', sortable: false, visualable: false,only:'all',width:96  },
-    { title: '销售状态', key: '销售状态', sortable: false, visualable: false,only:'amazon,tk',width:60  },
-    // 7.品类
-    { title: '一级品类', key: '一级品类', sortable: true, visualable: true,only:'all',width:72  },
-    { title: '二级品类', key: '二级品类', sortable: true, visualable: true,only:'all',width:60  },
-    { title: '产品类型', key: '是否属于灯具', sortable: false, visualable: false,only:'all',width:72  },
-    // 8.库存数量
-    { title: '采购中', key: '采购中', sortable: false, visualable: false,only:'all',width:60  },
-    { title: 'FBA在仓', key: 'FBA在仓', sortable: false, visualable: false,only:'all',width:60  },
-    { title: 'FBA在途', key: 'FBA在途', sortable: false, visualable: false,only:'all',width:60  },
-    { title: '本地仓', key: '本地仓', sortable: false, visualable: false,only:'all',width:60  },
-    { title: '海外仓在仓', key: '海外仓在仓', sortable: false, visualable: false,only:'all',width:60  },
-    { title: '海外仓在途', key: '海外仓在途', sortable: false, visualable: false,only:'all',width:60  },
-    // 9.总库存
-    { title: '总库存数量', key: '总库存数量', sortable: true, visualable: true,only:'all',width:60  },
-    { title: '总库存金额', key: '总库存金额', sortable: true, visualable: true,only:'all',width:60  },
-    { title: '未入仓', key: '未入仓', sortable: false, visualable: false,only:'all',width:60  },
-    // 10.库龄数量
-    { title: '3个月内[数量]', key: '3个月内[0-90]', sortable: true, visualable: true,only:'all',width:102  },
-    { title: '3-6个月内[数量]', key: '3-6个月内[91-180]', sortable: true, visualable: true,only:'all',width:78  },
-    { title: '6-9个月内[数量]', key: '6-9个月内[181-270]', sortable: true, visualable: true,only:'all',width:108  },
-    { title: '9-12个月内[数量]', key: '9-12个月内[271-365]', sortable: true, visualable: true,only:'all',width:114  },
-    { title: '1年以上[数量]', key: '1年以上[365+]', sortable: true, visualable: true,only:'all',width:78  },
-    // 11.库龄金额类
-    { title: '3个月内（金额）', key: '3个月内[0-90]（金额）', sortable: true, visualable: true,only:'all',width:126  },
-    { title: '3-6个月内(金额)', key: '3-6个月内[91-180](金额)', sortable: true, visualable: true,only:'all',width:138  },
-    { title: '6-9个月内(金额)', key: '6-9个月内[181-270](金额)', sortable: true, visualable: true,only:'all',width:144  },
-    { title: '9-12个月内(金额）', key: '9-12个月内[271-365](金额）', sortable: true, visualable: true,only:'all',width:156  },
-    { title: '一年以上(金额)', key: '一年以上[365+](金额)', sortable: true, visualable: true,only:'all',width:120  },
-    // 12.SKU回款
-    { title: 'SKU1月前回款', key: 'SKU1月前回款', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    { title: 'SKU2月前回款', key: 'SKU2月前回款', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    { title: 'SKU3月前回款', key: 'SKU3月前回款', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    { title: 'SKU上年回款', key: 'SKU上年回款', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    // 13.SKU毛利润
-    { title: 'SKU1月前毛利润', key: 'SKU1月前毛利润', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    { title: 'SKU2月前毛利润', key: 'SKU2月前毛利润', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    { title: 'SKU3月前毛利润', key: 'SKU3月前毛利润', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    // 14.父ASIN回款
-    { title: '父ASIN1月前回款', key: '父ASIN1月前回款', sortable: true, visualable: true,only:'amazon,tk',width:108 },
-    { title: '父ASIN2月前回款', key: '父ASIN2月前回款', sortable: true, visualable: true,only:'amazon,tk',width:114 },
-    { title: '父ASIN3月前回款', key: '父ASIN3月前回款', sortable: true, visualable: true,only:'amazon,tk',width:108  },
-    { title: '父ASIN上一年回款', key: '父ASIN上一年回款', sortable: true, visualable: true,only:'amazon,tk',width:108 },
-    // 15.父ASIN毛利润
-    { title: '父ASIN1月前毛利润', key: '父ASIN1月前毛利润', sortable: true, visualable: true,only:'amazon,tk',width:114 },
-    { title: '父ASIN2月前毛利润', key: '父ASIN2月前毛利润', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    { title: '父ASIN3月前毛利润', key: '父ASIN3月前毛利润', sortable: true, visualable: true,only:'amazon,tk',width:114  },
-    // 16.SPU回款
-    { title: 'SPU1月前回款', key: 'SPU1月前回款', sortable: true, visualable: true,only:'expand',width:114  },
-    { title: 'SPU2月前回款', key: 'SPU2月前回款', sortable: true, visualable: true ,only:'expand',width:114 },
-    { title: 'SPU3月前回款', key: 'SPU3月前回款', sortable: true, visualable: true ,only:'expand',width:114 },
-    { title: 'SPU4月前回款', key: 'SPU4月前回款', sortable: true, visualable: true ,only:'expand',width:114 },
-    // 17.SPU毛利润
-    { title: 'SPU1月前毛利润', key: 'SPU1月前毛利润', sortable: true, visualable: true ,only:'expand',width:114 },
-    { title: 'SPU2月前毛利润', key: 'SPU2月前毛利润', sortable: true, visualable: true ,only:'expand',width:114 },
-    { title: 'SPU3月前毛利润', key: 'SPU3月前毛利润', sortable: true, visualable: true ,only:'expand',width:114 },
-    { title: 'SPU4月前毛利润', key: 'SPU4月前毛利润', sortable: true, visualable: true,only:'expand',width:114  },
-    // 18.销量
-    { title: 'SKU近一年月平均销量', key: 'SKU近一年月平均销量', sortable: true, visualable: true ,only:'all',width:114 },
-    { title: 'SPU近一年月平均销量', key: 'SPU近一年月平均销量', sortable: true, visualable: true,only:'expand',width:114  },
+  // 1.图片链接。fixed: 横向滚动时固定在最左侧（原生能力，见 ProductField.fixed 注释）
+  { title: '产品图片', key: '图片链接', sortable: false, visualable: false, only: 'all', width: 50, fixed: true },
+  // 2.产品信息
+  { title: 'SKU', key: 'SKU', sortable: false, visualable: false, only: 'all', width: 100 },
+  { title: 'SPU', key: 'SPU', sortable: false, visualable: false, only: 'all', width: 84 },
+  { title: '主MODEL', key: '主MODEL', sortable: false, visualable: false, only: 'all', width: 72 },
+  { title: '产品名称', key: '产品名称', sortable: false, visualable: false, only: 'all', width: 200 },
+  { title: '季节性产品标签', key: '季节性产品标签', sortable: false, visualable: false, only: 'amazon tk', width: 60 },
+  // 3.开售时间
+  { title: '最早开售日期-SKU', key: '最早开售日期-SKU', sortable: true, visualable: true, only: 'amazon tk', width: 96 },
+  { title: '拓业部最早时间-SPU', key: '拓业部最早时间-SPU', sortable: true, visualable: true, only: 'expand', width: 108 },
+  // 4.组织信息类
+  { title: '自产/外购', key: '供应商', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: '组长', key: '组长', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: '组别', key: '组别', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: '部门', key: '部门', sortable: false, visualable: false, only: 'all', width: 60 },
+  // 5.平台
+  { title: '仓位', key: '仓位', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: '店铺', key: '店铺', sortable: false, visualable: false, only: 'amazon,tk', width: 60 },
+  { title: '平台', key: '平台', sortable: false, visualable: false, only: 'all', width: 60 },
+  // 6.呆滞
+  { title: '亚马逊呆滞条件', key: '亚马逊呆滞条件', sortable: false, visualable: false, only: 'amazon,tk', width: 220 },
+  { title: '拓业部呆滞条件', key: '拓业部呆滞条件', sortable: false, visualable: false, only: 'expand', width: 220 },
+  { title: '呆滞情况', key: '是否属于呆滞库存', sortable: false, visualable: false, only: 'all', width: 96 },
+  { title: '销售状态', key: '销售状态', sortable: false, visualable: false, only: 'amazon,tk', width: 60 },
+  // 7.品类
+  { title: '一级品类', key: '一级品类', sortable: true, visualable: true, only: 'all', width: 72 },
+  { title: '二级品类', key: '二级品类', sortable: true, visualable: true, only: 'all', width: 60 },
+  { title: '产品类型', key: '是否属于灯具', sortable: false, visualable: false, only: 'all', width: 72 },
+  // 8.库存数量
+  { title: '采购中', key: '采购中', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: 'FBA在仓', key: 'FBA在仓', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: 'FBA在途', key: 'FBA在途', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: '本地仓', key: '本地仓', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: '海外仓在仓', key: '海外仓在仓', sortable: false, visualable: false, only: 'all', width: 60 },
+  { title: '海外仓在途', key: '海外仓在途', sortable: false, visualable: false, only: 'all', width: 60 },
+  // 9.总库存
+  { title: '总库存数量', key: '总库存数量', sortable: true, visualable: true, only: 'all', width: 60 },
+  { title: '总库存金额', key: '总库存金额', sortable: true, visualable: true, only: 'all', width: 60 },
+  { title: '未入仓', key: '未入仓', sortable: false, visualable: false, only: 'all', width: 60 },
+  // 10.库龄数量
+  { title: '3个月内[数量]', key: '3个月内[0-90]', sortable: true, visualable: true, only: 'all', width: 102 },
+  { title: '3-6个月内[数量]', key: '3-6个月内[91-180]', sortable: true, visualable: true, only: 'all', width: 78 },
+  { title: '6-9个月内[数量]', key: '6-9个月内[181-270]', sortable: true, visualable: true, only: 'all', width: 108 },
+  { title: '9-12个月内[数量]', key: '9-12个月内[271-365]', sortable: true, visualable: true, only: 'all', width: 114 },
+  { title: '1年以上[数量]', key: '1年以上[365+]', sortable: true, visualable: true, only: 'all', width: 78 },
+  // 11.库龄金额类
+  { title: '3个月内（金额）', key: '3个月内[0-90]（金额）', sortable: true, visualable: true, only: 'all', width: 126 },
+  { title: '3-6个月内(金额)', key: '3-6个月内[91-180](金额)', sortable: true, visualable: true, only: 'all', width: 138 },
+  { title: '6-9个月内(金额)', key: '6-9个月内[181-270](金额)', sortable: true, visualable: true, only: 'all', width: 144 },
+  { title: '9-12个月内(金额）', key: '9-12个月内[271-365](金额）', sortable: true, visualable: true, only: 'all', width: 156 },
+  { title: '一年以上(金额)', key: '一年以上[365+](金额)', sortable: true, visualable: true, only: 'all', width: 120 },
+  // 12.SKU回款
+  { title: 'SKU1月前回款', key: 'SKU1月前回款', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: 'SKU2月前回款', key: 'SKU2月前回款', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: 'SKU3月前回款', key: 'SKU3月前回款', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: 'SKU上年回款', key: 'SKU上年回款', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  // 13.SKU毛利润
+  { title: 'SKU1月前毛利润', key: 'SKU1月前毛利润', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: 'SKU2月前毛利润', key: 'SKU2月前毛利润', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: 'SKU3月前毛利润', key: 'SKU3月前毛利润', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  // 14.父ASIN回款
+  { title: '父ASIN1月前回款', key: '父ASIN1月前回款', sortable: true, visualable: true, only: 'amazon,tk', width: 108 },
+  { title: '父ASIN2月前回款', key: '父ASIN2月前回款', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: '父ASIN3月前回款', key: '父ASIN3月前回款', sortable: true, visualable: true, only: 'amazon,tk', width: 108 },
+  { title: '父ASIN上一年回款', key: '父ASIN上一年回款', sortable: true, visualable: true, only: 'amazon,tk', width: 108 },
+  // 15.父ASIN毛利润
+  { title: '父ASIN1月前毛利润', key: '父ASIN1月前毛利润', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: '父ASIN2月前毛利润', key: '父ASIN2月前毛利润', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  { title: '父ASIN3月前毛利润', key: '父ASIN3月前毛利润', sortable: true, visualable: true, only: 'amazon,tk', width: 114 },
+  // 16.SPU回款
+  { title: 'SPU1月前回款', key: 'SPU1月前回款', sortable: true, visualable: true, only: 'expand', width: 114 },
+  { title: 'SPU2月前回款', key: 'SPU2月前回款', sortable: true, visualable: true, only: 'expand', width: 114 },
+  { title: 'SPU3月前回款', key: 'SPU3月前回款', sortable: true, visualable: true, only: 'expand', width: 114 },
+  { title: 'SPU4月前回款', key: 'SPU4月前回款', sortable: true, visualable: true, only: 'expand', width: 114 },
+  // 17.SPU毛利润
+  { title: 'SPU1月前毛利润', key: 'SPU1月前毛利润', sortable: true, visualable: true, only: 'expand', width: 114 },
+  { title: 'SPU2月前毛利润', key: 'SPU2月前毛利润', sortable: true, visualable: true, only: 'expand', width: 114 },
+  { title: 'SPU3月前毛利润', key: 'SPU3月前毛利润', sortable: true, visualable: true, only: 'expand', width: 114 },
+  { title: 'SPU4月前毛利润', key: 'SPU4月前毛利润', sortable: true, visualable: true, only: 'expand', width: 114 },
+  // 18.销量
+  { title: 'SKU近一年月平均销量', key: 'SKU近一年月平均销量', sortable: true, visualable: true, only: 'all', width: 114 },
+  { title: 'SPU近一年月平均销量', key: 'SPU近一年月平均销量', sortable: true, visualable: true, only: 'expand', width: 114 },
 ]
 
 /** key → 默认可见性。偏好里没存过的字段回落到这里 */
 export const DEFAULT_VISUALABLE: Record<string, boolean> = Object.fromEntries(
-    PRODUCT_FIELDS.map(f => [f.key, f.visualable]),
+  PRODUCT_FIELDS.map(f => [f.key, f.visualable]),
 )
 
 /* ==================== 字段对齐：外部数据（BI / Excel）→ 页面列 key ==================== */
@@ -140,8 +140,8 @@ export const DEFAULT_VISUALABLE: Record<string, boolean> = Object.fromEntries(
  * 为什么需要：上传的 Excel 表头常常是从 BI 页面上复制出来的，带这类空格时
  * 肉眼完全看不出差别，但判等会失败，整列静默变空。
  */
-export function cleanFieldName(name: unknown): string {
-    return String(name ?? '').replace(/[\u3000\u00a0]/g, ' ').trim()
+export function cleanFieldName (name: unknown): string {
+  return String(name ?? '').replace(/[\u3000\u00A0]/g, ' ').trim()
 }
 
 /**
@@ -152,20 +152,20 @@ export function cleanFieldName(name: unknown): string {
  * 表头匹配（matchFieldKey）和 BI 拉取（api.ts 的 normalizeBiRows）**共用这一份**。
  */
 export const BI_FIELD_ALIAS: Record<string, string> = {
-    '库存SKU': 'SKU',
-    '供应商是否为络好饰': '供应商',
-    // 库龄数量：BI 用「[数量]」，页面用天数区间
-    '3个月内[数量]': '3个月内[0-90]',
-    '3-6个月内[数量]': '3-6个月内[91-180]',
-    '6-9个月内[数量]': '6-9个月内[181-270]',
-    '9-12个月内[数量]': '9-12个月内[271-365]',
-    '1年以上[数量]': '1年以上[365+]',
-    // 库龄金额：BI 不带天数区间，页面带上；且括号全/半角混用（照 BI 原样写）
-    '3个月内（金额）': '3个月内[0-90]（金额）',
-    '3-6个月内(金额)': '3-6个月内[91-180](金额)',
-    '6-9个月内(金额)': '6-9个月内[181-270](金额)',
-    '9-12个月内(金额）': '9-12个月内[271-365](金额）',
-    '一年以上(金额)': '一年以上[365+](金额)',
+  '库存SKU': 'SKU',
+  '供应商是否为络好饰': '供应商',
+  // 库龄数量：BI 用「[数量]」，页面用天数区间
+  '3个月内[数量]': '3个月内[0-90]',
+  '3-6个月内[数量]': '3-6个月内[91-180]',
+  '6-9个月内[数量]': '6-9个月内[181-270]',
+  '9-12个月内[数量]': '9-12个月内[271-365]',
+  '1年以上[数量]': '1年以上[365+]',
+  // 库龄金额：BI 不带天数区间，页面带上；且括号全/半角混用（照 BI 原样写）
+  '3个月内（金额）': '3个月内[0-90]（金额）',
+  '3-6个月内(金额)': '3-6个月内[91-180](金额)',
+  '6-9个月内(金额)': '6-9个月内[181-270](金额)',
+  '9-12个月内(金额）': '9-12个月内[271-365](金额）',
+  '一年以上(金额)': '一年以上[365+](金额)',
 }
 
 /**
@@ -173,8 +173,8 @@ export const BI_FIELD_ALIAS: Record<string, string> = {
  * 键是**原始字段名**（也就是 BI / Excel 叫法）。
  */
 export const BI_VALUE_MAP: Record<string, Record<string, string>> = {
-    '是否属于灯具': { '灯具': '是', '非灯具': '否' },
-    /**
+  是否属于灯具: { 灯具: '是', 非灯具: '否' },
+  /**
      * 呆滞：统一成 **0 = 呆滞 / 1 = 未呆滞**。
      *
      * ⚠️ 这个字段**参与唯一键**（见 biRowFields.ts 的 SYNC_KEY_FIELDS），
@@ -184,7 +184,7 @@ export const BI_VALUE_MAP: Record<string, Record<string, string>> = {
      *
      * 表格里的显示映射在 pages/setDatas.vue（0 → 呆滞 / 1 → 未呆滞）。
      */
-    '是否属于呆滞库存': { '呆滞': '0', '未呆滞': '1', '是': '0', '否': '1', '0': '0', '1': '1' },
+  是否属于呆滞库存: { 呆滞: '0', 未呆滞: '1', 是: '0', 否: '1', 0: '0', 1: '1' },
 }
 
 /** 全部列 key。用于校验「匹配出来的结果是不是一个真实存在的列」 */
@@ -204,9 +204,9 @@ const TITLE_TO_KEY = new Map(PRODUCT_FIELDS.map(f => [cleanFieldName(f.title), f
  * 字段名（BI 字段名 / Excel 表头）→ 页面表格列 key。
  * 别名优先，其次清洗后的原名。**不校验结果是否是已知列** —— 校验见 matchFieldKey。
  */
-export function resolveFieldKey(name: unknown): string {
-    const original = String(name ?? '')
-    return BI_FIELD_ALIAS[original] ?? BI_FIELD_ALIAS[cleanFieldName(original)] ?? cleanFieldName(original)
+export function resolveFieldKey (name: unknown): string {
+  const original = String(name ?? '')
+  return BI_FIELD_ALIAS[original] ?? BI_FIELD_ALIAS[cleanFieldName(original)] ?? cleanFieldName(original)
 }
 
 /**
@@ -218,15 +218,19 @@ export function resolveFieldKey(name: unknown): string {
  *   必要，因为有的字段 title 与 key 不同：Excel 表头写「产品类型」时，
  *   按原始名查 BI_VALUE_MAP 会落空，按 key（'是否属于灯具'）才查得到。
  */
-export function resolveFieldValue(originalName: unknown, raw: unknown, resolvedKey?: string): unknown {
-    const candidates = [cleanFieldName(originalName)]
-    if (resolvedKey) candidates.push(cleanFieldName(resolvedKey))
-    for (const name of candidates) {
-        const map = BI_VALUE_MAP[name]
-        if (!map) continue
-        return map[String(raw)] ?? map[cleanFieldName(raw)] ?? raw
+export function resolveFieldValue (originalName: unknown, raw: unknown, resolvedKey?: string): unknown {
+  const candidates = [cleanFieldName(originalName)]
+  if (resolvedKey) {
+    candidates.push(cleanFieldName(resolvedKey))
+  }
+  for (const name of candidates) {
+    const map = BI_VALUE_MAP[name]
+    if (!map) {
+      continue
     }
-    return raw
+    return map[String(raw)] ?? map[cleanFieldName(raw)] ?? raw
+  }
+  return raw
 }
 
 /**
@@ -237,12 +241,18 @@ export function resolveFieldValue(originalName: unknown, raw: unknown, resolvedK
  *   2) 列 title —— 见 TITLE_TO_KEY 的注释，相当多的字段两者不同；
  *   3) BI / 历史叫法，走 BI_FIELD_ALIAS（如 '库存SKU' → 'SKU'）。
  */
-export function matchFieldKey(header: unknown): string | null {
-    const text = cleanFieldName(header)
-    if (!text) return null
-    if (FIELD_KEY_SET.has(text)) return text
-    const byTitle = TITLE_TO_KEY.get(text)
-    if (byTitle) return byTitle
-    const aliased = resolveFieldKey(header)
-    return FIELD_KEY_SET.has(aliased) ? aliased : null
+export function matchFieldKey (header: unknown): string | null {
+  const text = cleanFieldName(header)
+  if (!text) {
+    return null
+  }
+  if (FIELD_KEY_SET.has(text)) {
+    return text
+  }
+  const byTitle = TITLE_TO_KEY.get(text)
+  if (byTitle) {
+    return byTitle
+  }
+  const aliased = resolveFieldKey(header)
+  return FIELD_KEY_SET.has(aliased) ? aliased : null
 }

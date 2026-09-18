@@ -1,53 +1,63 @@
 <template>
-    <div class="node-card condition-node" :class="{ selected: props.selected }">
-        <Handle type="target" :position="Position.Top" />
+  <div class="node-card condition-node" :class="{ selected: props.selected }">
+    <Handle :position="Position.Top" type="target" />
 
-        <div class="node-head">
-            <span class="head-icon">
-                <v-icon size="13" color="#d97706">mdi-source-branch</v-icon>
-            </span>
-            <span class="node-title-static">条件分支</span>
-            <button class="icon-btn del-btn" title="删除节点" @click.stop="emit('remove')">
-                <v-icon size="13">mdi-trash-can-outline</v-icon>
-            </button>
-        </div>
+    <div class="node-head">
+      <span class="head-icon">
+        <v-icon color="#d97706" size="13">mdi-source-branch</v-icon>
+      </span>
 
-        <div class="node-body">
-            <div v-if="branches.length" class="branch-list">
-                <button v-for="b in branches" :key="b.id" type="button" class="branch-item nodrag"
-                    :class="{ active: b.id === activeEdgeId }" title="点击配置此分支" @click.stop="emit('branch-click', b.id)">
-                    <span class="branch-dot"></span>
-                    <span class="branch-name">{{ b.label || '未命名分支' }}</span>
-                    <span v-if="b.toEnd" class="branch-end-tag" title="此分支直接连到结束节点：命中该分支时流程立即结束">→ 结束</span>
-                    <v-icon v-if="b.id === activeEdgeId" size="11" color="#d97706" class="branch-edit-ico">mdi-pencil</v-icon>
-                </button>
-            </div>
-            <div class="empty-hint">
-                {{ branches.length ? '点击分支名可配置名称与命中条件' : '从下方圆点拖出连线建立分支' }}
-            </div>
-        </div>
+      <span class="node-title-static">条件分支</span>
 
-        <Handle type="source" :position="Position.Bottom" />
+      <button class="icon-btn del-btn" title="删除节点" @click.stop="emit('remove')">
+        <v-icon size="13">mdi-trash-can-outline</v-icon>
+      </button>
     </div>
+
+    <div class="node-body">
+      <div v-if="branches.length > 0" class="branch-list">
+        <button
+          v-for="b in branches"
+          :key="b.id"
+          class="branch-item nodrag"
+          :class="{ active: b.id === activeEdgeId }"
+          title="点击配置此分支"
+          type="button"
+          @click.stop="emit('branch-click', b.id)"
+        >
+          <span class="branch-dot" />
+          <span class="branch-name">{{ b.label || '未命名分支' }}</span>
+          <span v-if="b.toEnd" class="branch-end-tag" title="此分支直接连到结束节点：命中该分支时流程立即结束">→ 结束</span>
+          <v-icon v-if="b.id === activeEdgeId" class="branch-edit-ico" color="#d97706" size="11">mdi-pencil</v-icon>
+        </button>
+      </div>
+
+      <div class="empty-hint">
+        {{ branches.length > 0 ? '点击分支名可配置名称与命中条件' : '从下方圆点拖出连线建立分支' }}
+      </div>
+    </div>
+
+    <Handle :position="Position.Bottom" type="source" />
+  </div>
 </template>
 
 <script lang="ts" setup>
-import { Handle, Position } from '@vue-flow/core'
+  import { Handle, Position } from '@vue-flow/core'
 
-const props = defineProps<{
+  const props = defineProps<{
     /** 该节点所有出边（分支），id 用于点击后联动选中配置面板 */
-    branches: { id: string; label: string; toEnd?: boolean }[]
+    branches: { id: string, label: string, toEnd?: boolean }[]
     /** 当前被选中（配置面板正在编辑）的连线 id */
     activeEdgeId?: string | null
     selected?: boolean
-}>()
+  }>()
 
-const emit = defineEmits<{
+  const emit = defineEmits<{
     /** 点击某个分支名，请求父级选中该连线 */
     'branch-click': [edgeId: string]
     /** 删除此节点 */
-    remove: []
-}>()
+    'remove': []
+  }>()
 </script>
 
 <style scoped>

@@ -12,7 +12,7 @@
  * 和 BI 拉取走的是同一份，不会两处各写一套。
  */
 import * as XLSX from 'xlsx'
-import { PRODUCT_FIELDS, cleanFieldName, matchFieldKey, resolveFieldValue } from './productFields'
+import { cleanFieldName, matchFieldKey, PRODUCT_FIELDS, resolveFieldValue } from './productFields'
 
 /** 表头最多往前找几行 —— 有些导出文件顶部有标题行 / 筛选说明行 */
 const HEADER_SCAN_ROWS = 10
@@ -28,7 +28,7 @@ export interface ParsedExcelSheet {
   /** 可直接喂给表格的行：id 已补齐、日期已转字符串、数字保持 number、空值统一成空串 */
   rows: Record<string, unknown>[]
   /** 识别到的列：Excel 列下标 → 页面列 key */
-  columns: Array<{ index: number; key: string }>
+  columns: Array<{ index: number, key: string }>
   /** 表头所在行（0 基）。回落第一行时是 0 */
   headerIndex: number
   /** 表头里命中已知字段的列数 */
@@ -46,9 +46,13 @@ export interface ParsedExcelSheet {
 }
 
 /** 该行命中了多少个已知字段 */
-function countHeaderHits(row: unknown[]): number {
+function countHeaderHits (row: unknown[]): number {
   let n = 0
-  for (const cell of row) if (matchFieldKey(cell)) n++
+  for (const cell of row) {
+    if (matchFieldKey(cell)) {
+      n++
+    }
+  }
   return n
 }
 
@@ -63,7 +67,7 @@ function countHeaderHits(row: unknown[]): number {
  * 保持和以前一致，不因为「没认出表头」就把整份数据判死，那种情况交给
  * describeExcelProblems 提示用户，而不是静默丢数据。
  */
-export function findHeaderRow(grid: unknown[][]): { index: number; hits: number } {
+export function findHeaderRow (grid: unknown[][]): { index: number, hits: number } {
   const limit = Math.min(grid.length, HEADER_SCAN_ROWS)
   let best = 0
   let bestHits = -1
@@ -75,7 +79,9 @@ export function findHeaderRow(grid: unknown[][]): { index: number; hits: number 
       best = i
     }
     // 整行都认得出来，不用再往下看了
-    if (hits > 0 && hits === row.length) break
+    if (hits > 0 && hits === row.length) {
+      break
+    }
   }
   return bestHits >= MIN_HEADER_HITS
     ? { index: best, hits: bestHits }
@@ -93,20 +99,22 @@ export function findHeaderRow(grid: unknown[][]): { index: number; hits: number 
  * Excel 用序列号存日期，往返之后本地 0 点的日期会读成前一天 23:59:59.999
  * （实测：写入 new Date(2026, 8, 16) 读回来是 2026-09-15 23:59:59）。
  */
-export function formatDateCell(input: Date): string {
+export function formatDateCell (input: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   // 先四舍五入到整秒：亚秒级的 .999 会被进位到次日 0 点，绝大部分漂移到这里就修好了
   const d = new Date(Math.round(input.getTime() / 1000) * 1000)
   const seconds = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()
   // 再兜一道：进位之后仍停在 23:59:59（原始毫秒恰好为 0 的那种）时按**次日 0 点**处理。
   // 这类单元格的语义就是「某一天」，不能因为 1 秒的漂移把它算到前一天。
-  if (seconds >= 86399) {
-    const next = new Date(d.getTime() + (86400 - seconds) * 1000)
+  if (seconds >= 86_399) {
+    const next = new Date(d.getTime() + (86_400 - seconds) * 1000)
     return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`
   }
   const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   // 正好 0 点 → 只有日期
-  if (seconds === 0) return date
+  if (seconds === 0) {
+    return date
+  }
   return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
@@ -119,9 +127,13 @@ export function formatDateCell(input: Date): string {
  * 3) **数字保持 number**：数值列判定（collectNumericKeys）和千分位格式化
  *    （formatDatas）都依赖它是 number，转成字符串会同时废掉排序和格式化。
  */
-export function normalizeCell(value: unknown): unknown {
-  if (value instanceof Date) return formatDateCell(value)
-  if (typeof value === 'string') return value.trim()
+export function normalizeCell (value: unknown): unknown {
+  if (value instanceof Date) {
+    return formatDateCell(value)
+  }
+  if (typeof value === 'string') {
+    return value.trim()
+  }
   return value ?? ''
 }
 
@@ -130,11 +142,13 @@ export function normalizeCell(value: unknown): unknown {
  *
  * @throws 文件里没有工作表时抛错（调用方负责提示）
  */
-export function parseExcelSheet(buffer: ArrayBuffer): ParsedExcelSheet {
+export function parseExcelSheet (buffer: ArrayBuffer): ParsedExcelSheet {
   // 显式 type: 'array' —— 直接把 ArrayBuffer 丢给 SheetJS 时类型嗅探并不可靠
   const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: true })
   const sheetName = workbook.SheetNames[0]
-  if (!sheetName) throw new Error('文件里没有工作表')
+  if (!sheetName) {
+    throw new Error('文件里没有工作表')
+  }
   const sheet = workbook.Sheets[sheetName]
 
   // header: 1     → 读成二维数组，表头行自己找（见 findHeaderRow）
@@ -149,27 +163,29 @@ export function parseExcelSheet(buffer: ArrayBuffer): ParsedExcelSheet {
   const { index: headerIndex, hits } = findHeaderRow(grid)
   const headerRow = grid[headerIndex] ?? []
 
-  const columns: Array<{ index: number; key: string }> = []
+  const columns: Array<{ index: number, key: string }> = []
   const usedKeys = new Set<string>()
   const unmatched: string[] = []
   const duplicated: string[] = []
 
-  headerRow.forEach((cell, index) => {
+  for (const [index, cell] of headerRow.entries()) {
     const text = cleanFieldName(cell)
-    if (!text) return
+    if (!text) {
+      continue
+    }
     const key = matchFieldKey(cell)
     if (!key) {
       unmatched.push(text)
-      return
+      continue
     }
     // 同一个 key 出现两次时只认第一列：否则后者会覆盖前者，静默丢数据
     if (usedKeys.has(key)) {
       duplicated.push(text)
-      return
+      continue
     }
     usedKeys.add(key)
     columns.push({ index, key })
-  })
+  }
 
   const rows: Record<string, unknown>[] = []
   let skippedEmptyRows = 0
@@ -184,10 +200,15 @@ export function parseExcelSheet(buffer: ArrayBuffer): ParsedExcelSheet {
       const value = normalizeCell(resolveFieldValue(headerText, line[col.index], col.key))
       item[col.key] = value
       // 注意用 !== '' 而不是真值判断：数字 0 是有效值，不能当空
-      if (value !== '') filled = true
+      if (value !== '') {
+        filled = true
+      }
     }
-    if (filled) rows.push(item)
-    else skippedEmptyRows++
+    if (filled) {
+      rows.push(item)
+    } else {
+      skippedEmptyRows++
+    }
   }
 
   return { rows, columns, headerIndex, headerHits: hits, unmatched, duplicated, skippedEmptyRows }
@@ -199,18 +220,18 @@ export function parseExcelSheet(buffer: ArrayBuffer): ParsedExcelSheet {
  * 这些以前全是**静默失败**：列名对不上就整列空白、一行数据都没解析出来也没有任何提示，
  * 用户只能盯着空表格猜。现在明确说出来。
  */
-export function describeExcelProblems(res: ParsedExcelSheet): string {
+export function describeExcelProblems (res: ParsedExcelSheet): string {
   const problems: string[] = []
   if (res.columns.length === 0) {
     problems.push(`表头没有任何一列匹配到字段（识别到 ${res.headerHits} 个已知列名）`)
   } else if (res.rows.length === 0) {
     problems.push('表头下没有数据行')
   }
-  if (res.unmatched.length) {
+  if (res.unmatched.length > 0) {
     const shown = res.unmatched.slice(0, 5).join('、')
     problems.push(`${res.unmatched.length} 列未匹配：${shown}${res.unmatched.length > 5 ? ' 等' : ''}`)
   }
-  if (res.duplicated.length) {
+  if (res.duplicated.length > 0) {
     problems.push(`重复列已忽略：${res.duplicated.slice(0, 3).join('、')}`)
   }
   return problems.join('；')

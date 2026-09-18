@@ -6,30 +6,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import FlowHandles from './FlowHandles.vue'
+  import { computed } from 'vue'
+  import FlowHandles from './FlowHandles.vue'
 
-const props = defineProps<{
-  data: {
-    label: string
-    width?: number
-    height?: number
-    /** 底色；不给则用默认绿（起止节点的惯用色） */
-    fill?: string
-    /** 底色对应的可读文字色（生成器按亮度算好） */
-    textColor?: string
-  }
-  id: string
-  selected?: boolean
-}>()
+  const props = defineProps<{
+    data: {
+      label: string
+      width?: number
+      height?: number
+      /** 底色；不给则用默认绿（起止节点的惯用色） */
+      fill?: string
+      /** 底色对应的可读文字色（生成器按亮度算好） */
+      textColor?: string
+    }
+    id: string
+    selected?: boolean
+  }>()
 
-const boxStyle = computed(() => ({
-  ...(props.data.width ? { width: `${props.data.width}px` } : {}),
-  ...(props.data.height ? { minHeight: `${props.data.height}px` } : {}),
-  background: props.data.fill ?? '#22c55e',
-  borderColor: props.data.fill ?? '#22c55e',
-  ...(props.data.textColor ? { color: props.data.textColor } : {}),
-}))
+  const boxStyle = computed(() => ({
+    ...(props.data.width ? { width: `${props.data.width}px` } : {}),
+    ...(props.data.height ? { minHeight: `${props.data.height}px` } : {}),
+    background: props.data.fill ?? '#22c55e',
+    borderColor: props.data.fill ?? '#22c55e',
+    ...(props.data.textColor ? { color: props.data.textColor } : {}),
+  }))
 </script>
 
 <style lang="scss" scoped>

@@ -28,106 +28,126 @@ export const AA_RATIO = 4.5
 // ============ 颜色空间转换 ============
 
 /** HEX → RGB（0-255） */
-export function hexToRgb(hex: string): [number, number, number] {
-    const raw = hex.replace('#', '').trim()
-    const full = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw
-    return [
-        parseInt(full.slice(0, 2), 16) || 0,
-        parseInt(full.slice(2, 4), 16) || 0,
-        parseInt(full.slice(4, 6), 16) || 0,
-    ]
+export function hexToRgb (hex: string): [number, number, number] {
+  const raw = hex.replace('#', '').trim()
+  const full = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw
+  return [
+    Number.parseInt(full.slice(0, 2), 16) || 0,
+    Number.parseInt(full.slice(2, 4), 16) || 0,
+    Number.parseInt(full.slice(4, 6), 16) || 0,
+  ]
 }
 
-function rgbToHex(r: number, g: number, b: number): string {
-    const to = (v: number) =>
-        Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')
-    return `#${to(r)}${to(g)}${to(b)}`.toUpperCase()
+function rgbToHex (r: number, g: number, b: number): string {
+  const to = (v: number) =>
+    Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')
+  return `#${to(r)}${to(g)}${to(b)}`.toUpperCase()
 }
 
 /** HEX → HSL（h: 0-360，s / l: 0-100） */
-export function hexToHsl(hex: string): { h: number; s: number; l: number } {
-    const [r255, g255, b255] = hexToRgb(hex)
-    const r = r255 / 255
-    const g = g255 / 255
-    const b = b255 / 255
-    const max = Math.max(r, g, b)
-    const min = Math.min(r, g, b)
-    const l = (max + min) / 2
-    const d = max - min
-    if (d === 0) return { h: 0, s: 0, l: l * 100 }
+export function hexToHsl (hex: string): { h: number, s: number, l: number } {
+  const [r255, g255, b255] = hexToRgb(hex)
+  const r = r255 / 255
+  const g = g255 / 255
+  const b = b255 / 255
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  const d = max - min
+  if (d === 0) {
+    return { h: 0, s: 0, l: l * 100 }
+  }
 
-    const s = d / (1 - Math.abs(2 * l - 1))
-    let h: number
-    if (max === r) h = ((g - b) / d) % 6
-    else if (max === g) h = (b - r) / d + 2
-    else h = (r - g) / d + 4
-    h *= 60
-    if (h < 0) h += 360
-    return { h, s: s * 100, l: l * 100 }
+  const s = d / (1 - Math.abs(2 * l - 1))
+  let h: number
+  if (max === r) {
+    h = ((g - b) / d) % 6
+  } else if (max === g) {
+    h = (b - r) / d + 2
+  } else {
+    h = (r - g) / d + 4
+  }
+  h *= 60
+  if (h < 0) {
+    h += 360
+  }
+  return { h, s: s * 100, l: l * 100 }
 }
 
 /** HSL → HEX（h: 0-360，s / l: 0-100） */
-export function hslToHex(h: number, s: number, l: number): string {
-    const hue = ((h % 360) + 360) % 360
-    const sat = Math.max(0, Math.min(100, s)) / 100
-    const lum = Math.max(0, Math.min(100, l)) / 100
+export function hslToHex (h: number, s: number, l: number): string {
+  const hue = ((h % 360) + 360) % 360
+  const sat = Math.max(0, Math.min(100, s)) / 100
+  const lum = Math.max(0, Math.min(100, l)) / 100
 
-    const c = (1 - Math.abs(2 * lum - 1)) * sat
-    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1))
-    const m = lum - c / 2
+  const c = (1 - Math.abs(2 * lum - 1)) * sat
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1))
+  const m = lum - c / 2
 
-    let r = 0
-    let g = 0
-    let b = 0
-    const i = Math.floor(hue / 60) % 6
-    if (i === 0) [r, g, b] = [c, x, 0]
-    else if (i === 1) [r, g, b] = [x, c, 0]
-    else if (i === 2) [r, g, b] = [0, c, x]
-    else if (i === 3) [r, g, b] = [0, x, c]
-    else if (i === 4) [r, g, b] = [x, 0, c]
-    else [r, g, b] = [c, 0, x]
+  let r = 0
+  let g = 0
+  let b = 0
+  const i = Math.floor(hue / 60) % 6
+  switch (i) {
+    case 0: { [r, g, b] = [c, x, 0]
+      break
+    }
+    case 1: { [r, g, b] = [x, c, 0]
+      break
+    }
+    case 2: { [r, g, b] = [0, c, x]
+      break
+    }
+    case 3: { [r, g, b] = [0, x, c]
+      break
+    }
+    case 4: { [r, g, b] = [x, 0, c]
+      break
+    }
+    default: { [r, g, b] = [c, 0, x] }
+  }
 
-    return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255)
+  return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255)
 }
 
 // ============ 对比度（WCAG 2.1） ============
 
 /** 相对亮度（0 ~ 1） */
-export function relativeLuminance(hex: string): number {
-    const [r, g, b] = hexToRgb(hex).map(v => {
-        const c = v / 255
-        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-    })
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+export function relativeLuminance (hex: string): number {
+  const [r, g, b] = hexToRgb(hex).map(v => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
 /** 两色对比度，取值 1 ~ 21 */
-export function contrastRatio(a: string, b: string): number {
-    const l1 = relativeLuminance(a)
-    const l2 = relativeLuminance(b)
-    const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]
-    return (hi + 0.05) / (lo + 0.05)
+export function contrastRatio (a: string, b: string): number {
+  const l1 = relativeLuminance(a)
+  const l2 = relativeLuminance(b)
+  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]
+  return (hi + 0.05) / (lo + 0.05)
 }
 
 /**
  * 按背景亮度选择可读前景色（深色 / 白色），取对比度更高的一方。
  * 适用于背景在运行时才算出来的场景。
  */
-export function readableTextColor(bg: string): string {
-    return contrastRatio(bg, LIGHT_TEXT) >= contrastRatio(bg, DARK_TEXT)
-        ? LIGHT_TEXT
-        : DARK_TEXT
+export function readableTextColor (bg: string): string {
+  return contrastRatio(bg, LIGHT_TEXT) >= contrastRatio(bg, DARK_TEXT)
+    ? LIGHT_TEXT
+    : DARK_TEXT
 }
 
 // ============ 动态色阶 ============
 
 export interface ColorStep {
-    /** 背景色（浅 → 深） */
-    bg: string
-    /** 该背景上可读的文字色 */
-    fg: string
-    /** 前景与背景的实际对比度 */
-    ratio: number
+  /** 背景色（浅 → 深） */
+  bg: string
+  /** 该背景上可读的文字色 */
+  fg: string
+  /** 前景与背景的实际对比度 */
+  ratio: number
 }
 
 /**
@@ -135,24 +155,32 @@ export interface ColorStep {
  * 中间亮度存在"配白、配深都不达标"的死角（如 #2A70EC 配白仅 4.4），
  * 此时朝能拉开对比的方向微调背景亮度，直到达到 AA。
  */
-function withReadableText(bg: string): ColorStep {
-    const { h, s, l } = hexToHsl(bg)
-    const initialFg = readableTextColor(bg)
-    let best: ColorStep = { bg, fg: initialFg, ratio: contrastRatio(bg, initialFg) }
-    if (best.ratio >= AA_RATIO) return best
-
-    // 选中白字说明背景偏深 → 继续加深；选中深字说明背景偏浅 → 继续提亮
-    const preferLight = best.fg === LIGHT_TEXT
-    for (let step = 1; step <= 30; step++) {
-        const nextL = preferLight ? l - step : l + step
-        if (nextL < L_DEEPEST - 8 || nextL > L_SHALLOWEST + 8) break
-        const nextBg = hslToHex(h, s, nextL)
-        const fg = readableTextColor(nextBg)
-        const ratio = contrastRatio(nextBg, fg)
-        if (ratio > best.ratio) best = { bg: nextBg, fg, ratio }
-        if (ratio >= AA_RATIO) break
-    }
+function withReadableText (bg: string): ColorStep {
+  const { h, s, l } = hexToHsl(bg)
+  const initialFg = readableTextColor(bg)
+  let best: ColorStep = { bg, fg: initialFg, ratio: contrastRatio(bg, initialFg) }
+  if (best.ratio >= AA_RATIO) {
     return best
+  }
+
+  // 选中白字说明背景偏深 → 继续加深；选中深字说明背景偏浅 → 继续提亮
+  const preferLight = best.fg === LIGHT_TEXT
+  for (let step = 1; step <= 30; step++) {
+    const nextL = preferLight ? l - step : l + step
+    if (nextL < L_DEEPEST - 8 || nextL > L_SHALLOWEST + 8) {
+      break
+    }
+    const nextBg = hslToHex(h, s, nextL)
+    const fg = readableTextColor(nextBg)
+    const ratio = contrastRatio(nextBg, fg)
+    if (ratio > best.ratio) {
+      best = { bg: nextBg, fg, ratio }
+    }
+    if (ratio >= AA_RATIO) {
+      break
+    }
+  }
+  return best
 }
 
 /**
@@ -161,26 +189,30 @@ function withReadableText(bg: string): ColorStep {
  * @param count 步骤数（审批链长度）。<=1 时返回单一品牌色。
  * @returns 每档含背景色、可读文字色与实际对比度
  */
-export function buildColorScale(count: number): ColorStep[] {
-    const n = Math.max(1, Math.floor(count) || 1)
+export function buildColorScale (count: number): ColorStep[] {
+  const n = Math.max(1, Math.floor(count) || 1)
 
-    // 只有一个节点时直接用品牌主色，避免取到最浅档（近乎白色、看不出圆点）
-    if (n === 1) return [withReadableText(BRAND_COLOR)]
+  // 只有一个节点时直接用品牌主色，避免取到最浅档（近乎白色、看不出圆点）
+  if (n === 1) {
+    return [withReadableText(BRAND_COLOR)]
+  }
 
-    const steps: ColorStep[] = []
-    for (let i = 0; i < n; i++) {
-        const t = i / (n - 1) // 0 → 1
-        const l = L_SHALLOWEST - (L_SHALLOWEST - L_DEEPEST) * t
-        steps.push(withReadableText(hslToHex(BRAND_H, BRAND_S, l)))
-    }
-    return steps
+  const steps: ColorStep[] = []
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1) // 0 → 1
+    const l = L_SHALLOWEST - (L_SHALLOWEST - L_DEEPEST) * t
+    steps.push(withReadableText(hslToHex(BRAND_H, BRAND_S, l)))
+  }
+  return steps
 }
 
 /**
  * 取色阶中第 index 档，越界时回退到最后一档。
  * 避免 index 超出长度拿到 undefined，导致 Vue 静默忽略样式项。
  */
-export function pickColorStep(scale: ColorStep[], index: number): ColorStep {
-    if (!scale.length) return withReadableText(BRAND_COLOR)
-    return scale[Math.min(Math.max(0, index), scale.length - 1)]
+export function pickColorStep (scale: ColorStep[], index: number): ColorStep {
+  if (scale.length === 0) {
+    return withReadableText(BRAND_COLOR)
+  }
+  return scale[Math.min(Math.max(0, index), scale.length - 1)]
 }

@@ -24,16 +24,22 @@ import fs from 'node:fs'
  * 服务端脚本由 tsx 直接跑，**不会**像 Vite 那样自动加载 .env —— 所以这里手动读一次，
  * 这样已经在 .env.local 里的 BI 凭据可以直接复用，不用再配一份。
  */
-function loadEnv(files = ['.env.local', '.env']): string[] {
+function loadEnv (files = ['.env.local', '.env']): string[] {
   const loaded: string[] = []
   for (const file of files) {
-    if (!fs.existsSync(file)) continue
+    if (!fs.existsSync(file)) {
+      continue
+    }
     for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^\s*([A-Za-z_][\w.]*)\s*=\s*(.*?)\s*$/)
-      if (!m || line.trim().startsWith('#')) continue
+      const m = line.match(/^\s*([A-Z_][\w.]*)\s*=\s*(.*?)\s*$/i)
+      if (!m || line.trim().startsWith('#')) {
+        continue
+      }
       const value = m[2].replace(/^["']|["']$/g, '')
       // 不覆盖已存在的环境变量，便于命令行临时指定覆盖 .env
-      if (process.env[m[1]] === undefined) process.env[m[1]] = value
+      if (process.env[m[1]] === undefined) {
+        process.env[m[1]] = value
+      }
     }
     loaded.push(file)
   }
@@ -54,9 +60,9 @@ console.log(`[run-bi-sync] 读到的 env 文件: ${loadedFiles.join(', ') || '�
  */
 const { syncBiRows } = await import('../server/biSync')
 
-const args = process.argv.slice(2)
-const write = args.includes('--write')
-const prune = args.includes('--prune')
+const args = new Set(process.argv.slice(2))
+const write = args.has('--write')
+const prune = args.has('--prune')
 
 const email = process.env.PB_ADMIN_EMAIL
 const hasSecret = !!process.env.PB_ADMIN_PASSWORD
@@ -79,21 +85,21 @@ try {
   console.log('===== 同步结果 =====')
   console.log(JSON.stringify(summary, null, 2))
 
-  if (summary.conflicts.length) {
+  if (summary.conflicts.length > 0) {
     console.log('')
     console.log(
-      `⚠️ 有 ${summary.conflicts.length} 组「同 key 不同内容」的行。本次按「先到者保留」处理` +
-        `（每组只写入第一条），所以唯一索引不会报冲突、写入是安全的。\n` +
-        `   若这个数字持续增长，说明 sync_key 还缺维度 —— 看上面「差异列」清单里的**维度列**` +
-        `（度量列如总库存数量/金额几乎每组都不同，计数最高但那是噪声）。`,
+      `⚠️ 有 ${summary.conflicts.length} 组「同 key 不同内容」的行。本次按「先到者保留」处理`
+      + `（每组只写入第一条），所以唯一索引不会报冲突、写入是安全的。\n`
+      + `   若这个数字持续增长，说明 sync_key 还缺维度 —— 看上面「差异列」清单里的**维度列**`
+      + `（度量列如总库存数量/金额几乎每组都不同，计数最高但那是噪声）。`,
     )
   }
-  if (summary.unmappedColumns.length) {
+  if (summary.unmappedColumns.length > 0) {
     console.log('')
     console.log('⚠️ 有未入库的列（数据仍在 data 里）: ' + summary.unmappedColumns.join(', '))
   }
-} catch (err: any) {
+} catch (error: any) {
   console.error('')
-  console.error('❌ 同步失败: ' + (err?.message ?? err))
+  console.error('❌ 同步失败: ' + (error?.message ?? error))
   process.exit(1)
 }

@@ -6,33 +6,33 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import FlowHandles from './FlowHandles.vue'
+  import { computed } from 'vue'
+  import FlowHandles from './FlowHandles.vue'
 
-const props = defineProps<{
-  data: {
-    label: string
-    width?: number
-    height?: number
-    fill?: string
-    stroke?: string
-    textColor?: string
-    /** 外形：parallelogram（默认，输入输出）/ stadium（白板的圆角药丸） */
-    shape?: 'parallelogram' | 'stadium'
-  }
-  id: string
-  selected?: boolean
-}>()
+  const props = defineProps<{
+    data: {
+      label: string
+      width?: number
+      height?: number
+      fill?: string
+      stroke?: string
+      textColor?: string
+      /** 外形：parallelogram（默认，输入输出）/ stadium（白板的圆角药丸） */
+      shape?: 'parallelogram' | 'stadium'
+    }
+    id: string
+    selected?: boolean
+  }>()
 
-const shape = computed(() => props.data.shape ?? 'parallelogram')
+  const shape = computed(() => props.data.shape ?? 'parallelogram')
 
-const boxStyle = computed(() => ({
-  ...(props.data.width ? { width: `${props.data.width}px` } : {}),
-  ...(props.data.height ? { minHeight: `${props.data.height}px` } : {}),
-  ...(props.data.fill ? { background: props.data.fill } : {}),
-  ...(props.data.stroke ? { borderColor: props.data.stroke } : {}),
-  ...(props.data.textColor ? { color: props.data.textColor } : {}),
-}))
+  const boxStyle = computed(() => ({
+    ...(props.data.width ? { width: `${props.data.width}px` } : {}),
+    ...(props.data.height ? { minHeight: `${props.data.height}px` } : {}),
+    ...(props.data.fill ? { background: props.data.fill } : {}),
+    ...(props.data.stroke ? { borderColor: props.data.stroke } : {}),
+    ...(props.data.textColor ? { color: props.data.textColor } : {}),
+  }))
 </script>
 
 <style lang="scss" scoped>

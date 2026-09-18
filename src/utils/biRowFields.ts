@@ -22,6 +22,8 @@
  */
 
 /** [中文字段名(BI/前端用的 key), PB 列名, 类型, 界面标题(供对照 productFields.ts)] */
+import { PRODUCT_FIELDS } from './productFields'
+
 type Row = [key: string, field: string, type: 'text' | 'number', title: string]
 
 const RAW: Row[] = [
@@ -107,8 +109,6 @@ const RAW: Row[] = [
   ['SPU近一年月平均销量', 'spu_sales_avg_12m', 'number', 'SPU近一年月平均销量'],
 ]
 
-import { PRODUCT_FIELDS } from './productFields'
-
 export interface BiRowField {
   /** 中文字段名（页面上 `row['xxx']` 用的就是它） */
   key: string
@@ -188,9 +188,11 @@ export const BI_ROW_META_FIELDS = [
 export const SYNC_KEY_FIELDS = ['SKU', '店铺', '仓位', '组别', '是否属于呆滞库存'] as const
 
 /** 计算 sync_key。第一段 SKU 必须有值，否则返回 ''（调用方应跳过该行） */
-export function makeSyncKey(row: Record<string, unknown>): string {
+export function makeSyncKey (row: Record<string, unknown>): string {
   const parts = SYNC_KEY_FIELDS.map(f => String(row[f] ?? '').trim())
-  if (!parts[0]) return ''
+  if (!parts[0]) {
+    return ''
+  }
   return parts.join('|')
 }
 
@@ -212,8 +214,8 @@ if (BI_ROW_FIELDS.length !== EXPECTED_TOTAL) {
 }
 if (textCount !== EXPECTED_TEXT || numberCount !== EXPECTED_NUMBER) {
   throw new Error(
-    `[biRowFields] 类型分布应为 text ${EXPECTED_TEXT} / number ${EXPECTED_NUMBER}，` +
-      `实际 text ${textCount} / number ${numberCount} —— 有列的类型写错了`,
+    `[biRowFields] 类型分布应为 text ${EXPECTED_TEXT} / number ${EXPECTED_NUMBER}，`
+    + `实际 text ${textCount} / number ${numberCount} —— 有列的类型写错了`,
   )
 }
 if (new Set(BI_ROW_FIELDS.map(f => f.key)).size !== EXPECTED_TOTAL) {
@@ -224,8 +226,8 @@ if (new Set(BI_ROW_FIELDS.map(f => f.field)).size !== EXPECTED_TOTAL) {
 }
 if (!BI_ROW_FIELDS.every(f => /^[a-z][a-z0-9_]*$/.test(f.field))) {
   throw new Error(
-    '[biRowFields] 有列名不符合 PB 的命名规则（小写字母开头，只含小写字母数字下划线）: ' +
-      BI_ROW_FIELDS.filter(f => !/^[a-z][a-z0-9_]*$/.test(f.field)).map(f => f.field).join(', '),
+    '[biRowFields] 有列名不符合 PB 的命名规则（小写字母开头，只含小写字母数字下划线）: '
+    + BI_ROW_FIELDS.filter(f => !/^[a-z][a-z0-9_]*$/.test(f.field)).map(f => f.field).join(', '),
   )
 }
 if (BI_ROW_FIELDS.some(f => BI_ROW_META_FIELDS.includes(f.field as never))) {
@@ -238,25 +240,25 @@ if (BI_ROW_FIELDS.some(f => BI_ROW_META_FIELDS.includes(f.field as never))) {
 const declaredKeys = PRODUCT_FIELDS.map(f => f.key)
 if (declaredKeys.length !== BI_ROW_FIELDS.length) {
   throw new Error(
-    `[biRowFields] 与 productFields.ts 字段数不一致：` +
-      `productFields ${declaredKeys.length} 个，本映射 ${BI_ROW_FIELDS.length} 个`,
+    `[biRowFields] 与 productFields.ts 字段数不一致：`
+    + `productFields ${declaredKeys.length} 个，本映射 ${BI_ROW_FIELDS.length} 个`,
   )
 }
 const badIndex = declaredKeys.findIndex((k, i) => k !== BI_ROW_FIELDS[i]?.key)
-if (badIndex >= 0) {
+if (badIndex !== -1) {
   throw new Error(
-    `[biRowFields] 与 productFields.ts 第 ${badIndex + 1} 个字段对不上：` +
-      `productFields 是「${declaredKeys[badIndex]}」，本映射是「${BI_ROW_FIELDS[badIndex]?.key}」`,
+    `[biRowFields] 与 productFields.ts 第 ${badIndex + 1} 个字段对不上：`
+    + `productFields 是「${declaredKeys[badIndex]}」，本映射是「${BI_ROW_FIELDS[badIndex]?.key}」`,
   )
 }
 const titleMismatch = BI_ROW_FIELDS.filter(
   f => PRODUCT_FIELDS.find(x => x.key === f.key)?.title !== f.title,
 )
-if (titleMismatch.length) {
+if (titleMismatch.length > 0) {
   // 标题只是文档信息，不一致不拦，提示一下即可
   console.warn(
-    '[biRowFields] 界面标题与 productFields.ts 不一致（不影响建表）: ' +
-      titleMismatch.map(f => `${f.key}（本表「${f.title}」）`).join(', '),
+    '[biRowFields] 界面标题与 productFields.ts 不一致（不影响建表）: '
+    + titleMismatch.map(f => `${f.key}（本表「${f.title}」）`).join(', '),
   )
 }
 
@@ -272,9 +274,11 @@ const PB_META = ['id', 'component_id', 'sync_key', 'data', 'fetched_at', 'create
  * 把 PB 的 bi_rows 记录（snake_case 列）还原成中文 key 的对象。
  * 只映射映射表里声明过的列 —— 元字段（id / sync_key / fetched_at …）会被丢掉。
  */
-export function pbRowToProduct(row: Record<string, unknown>): Record<string, unknown> {
+export function pbRowToProduct (row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
-  for (const f of BI_ROW_FIELDS) out[f.key] = row[f.field] ?? ''
+  for (const f of BI_ROW_FIELDS) {
+    out[f.key] = row[f.field] ?? ''
+  }
   return out
 }
 
@@ -289,8 +293,10 @@ export function pbRowToProduct(row: Record<string, unknown>): Record<string, unk
  * 判据 2 之所以要求「中文 key 一个都没有」，是为了避免误判：
  * 一旦对象里已经出现中文 key，说明它本来就是界面形状，再映射一次反而会把它清空。
  */
-export function toProductView(row: Record<string, unknown> | null | undefined): Record<string, unknown> {
-  if (!row || typeof row !== 'object') return {}
+export function toProductView (row: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!row || typeof row !== 'object') {
+    return {}
+  }
 
   const hasData = row.data && typeof row.data === 'object' && !Array.isArray(row.data)
   const view = hasData
@@ -322,20 +328,26 @@ export function toProductView(row: Record<string, unknown> | null | undefined): 
  *    另外它**不改名**：白板与已生成模板里写的都是「海外仓库存金额」。
  */
 export const DERIVED_KEYS = {
-    /** SKU3月前毛利润 / SKU3月前回款 × 100（百分数）——这个是算出来的 */
-    grossMargin: '毛利率(SKU3月前)',
-    /** 取值 = 「总库存金额」（业务方口径，见上） */
-    overseasAmount: '海外仓库存金额',
+  /** SKU3月前毛利润 / SKU3月前回款 × 100（百分数）——这个是算出来的 */
+  grossMargin: '毛利率(SKU3月前)',
+  /** 取值 = 「总库存金额」（业务方口径，见上） */
+  overseasAmount: '海外仓库存金额',
 } as const
 
 /** 宽松取数：数字、'1,234' 这类千分位串都认；取不到返回 null（不是 0） */
-function numOf(v: unknown): number | null {
-    if (typeof v === 'number') return Number.isFinite(v) ? v : null
-    if (typeof v !== 'string') return null
-    const s = v.replace(/,/g, '').trim()
-    if (!s) return null
-    const n = Number(s)
-    return Number.isFinite(n) ? n : null
+function numOf (v: unknown): number | null {
+  if (typeof v === 'number') {
+    return Number.isFinite(v) ? v : null
+  }
+  if (typeof v !== 'string') {
+    return null
+  }
+  const s = v.replace(/,/g, '').trim()
+  if (!s) {
+    return null
+  }
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
 }
 
 /**
@@ -352,24 +364,24 @@ function numOf(v: unknown): number | null {
  * 取不到值一律返回 null 而不是 0：`evalCondition` 把 null/undefined 视为「不命中」，
  * 于是「毛利率 > 0」在数据缺失时不会误判为成立 —— 未知不该被当成「大于 0」。
  */
-export function deriveFlowFields(row: Record<string, unknown>): Record<string, unknown> {
-    const profit = numOf(row['SKU3月前毛利润'])
-    const refund = numOf(row['SKU3月前回款'])
+export function deriveFlowFields (row: Record<string, unknown>): Record<string, unknown> {
+  const profit = numOf(row['SKU3月前毛利润'])
+  const refund = numOf(row['SKU3月前回款'])
 
-    const margin = profit === null || refund === null
-        ? null
-        : refund === 0
-            // 回款为 0：毛利也是 0 → 毛利率记 0；毛利非 0 → 分母没有意义，记 null（无法计算）
-            ? (profit === 0 ? 0 : null)
-            : Math.round((profit / refund) * 10000) / 100
+  const margin = profit === null || refund === null
+    ? null
+    : refund === 0
+    // 回款为 0：毛利也是 0 → 毛利率记 0；毛利非 0 → 分母没有意义，记 null（无法计算）
+      ? (profit === 0 ? 0 : null)
+      : Math.round((profit / refund) * 10_000) / 100
 
-    // ⚠️ 口径变更（业务方 2026-09）：白板条件里的「海外仓库存金额」「呆滞金额」
-    //    **就是总库存金额本身**，不需要再用单价折算 —— 所以这里直接取该列，
-    //    不再乘「海外仓在仓」。留着这个 key 是为了让已经配好的条件继续可用。
-    const amount = numOf(row['总库存金额'])
+  // ⚠️ 口径变更（业务方 2026-09）：白板条件里的「海外仓库存金额」「呆滞金额」
+  //    **就是总库存金额本身**，不需要再用单价折算 —— 所以这里直接取该列，
+  //    不再乘「海外仓在仓」。留着这个 key 是为了让已经配好的条件继续可用。
+  const amount = numOf(row['总库存金额'])
 
-    return {
-        [DERIVED_KEYS.grossMargin]: margin,
-        [DERIVED_KEYS.overseasAmount]: amount === null ? null : amount,
-    }
+  return {
+    [DERIVED_KEYS.grossMargin]: margin,
+    [DERIVED_KEYS.overseasAmount]: amount === null ? null : amount,
+  }
 }

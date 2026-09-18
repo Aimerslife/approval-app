@@ -15,7 +15,7 @@
  *    import 那个模块。**改一处必须同步改另一处**，否则前端显示的字段名和库里存的会对不上。
  */
 
-import { BI_ROW_FIELDS, BI_ROW_FIELD_BY_KEY, makeSyncKey, SYNC_KEY_FIELDS } from '../src/utils/biRowFields'
+import { BI_ROW_FIELD_BY_KEY, BI_ROW_FIELDS, makeSyncKey, SYNC_KEY_FIELDS } from '../src/utils/biRowFields'
 
 const BI_BASE = process.env.BI_BASE_URL || 'https://work.jiushuyun.com/decision'
 const BI_ACCESS_KEY_ID = process.env.BI_ACCESS_KEY_ID || process.env.VITE_ACCESSKEYID || ''
@@ -57,15 +57,15 @@ const SHARD_PARAM = process.env.BI_SHARD_PARAM || ''
  * 如果只看「请求成功」就采信，会把"没过滤的全量"当成"一个分片"存进去 ✗✗。
  * 所以每片都校验：返回的每一行，分片维度的值都必须等于该片的值。
  */
-async function tryShardedFetch(
+async function tryShardedFetch (
   componentId: string,
   token: string,
   seenColumns: Set<string>,
 ): Promise<Record<string, unknown>[] | null> {
-  const post = async (parameters?: { name: string; value: unknown }[]) => {
+  const post = async (parameters?: { name: string, value: unknown }[]) => {
     const res = await fetch(`${BI_BASE}/api/public/analysis/v1/component/data`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `${token}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `${token}` },
       body: JSON.stringify({
         componentId,
         pageRequest: { pageIndex: 1, pageSize: BI_PAGE_SIZE },
@@ -76,16 +76,18 @@ async function tryShardedFetch(
     if (body?.code !== 200) {
       throw new Error('分片拉取失败: ' + (body?.errorMsg || body?.message || `code=${body?.code}`))
     }
-    if (!body.data) throw new Error('分片拉取失败: 返回体缺少 data')
+    if (!body.data) {
+      throw new Error('分片拉取失败: 返回体缺少 data')
+    }
     const fields: { name: string }[] = body.data.fields ?? []
     const rows: unknown[][] = body.data.rows ?? []
     const normalized = rows.map(row => {
       const item: Record<string, unknown> = {}
-      fields.forEach((f, i) => {
+      for (const [i, f] of fields.entries()) {
         const key = BI_FIELD_ALIAS[f.name] ?? f.name
         seenColumns.add(key)
         item[key] = BI_VALUE_MAP[f.name]?.[String(row[i])] ?? row[i]
-      })
+      }
       return item
     })
     return { normalized, hasNext: !!body.data.page?.hasNext }
@@ -125,10 +127,10 @@ async function tryShardedFetch(
     all.push(...normalized)
   }
 
-  if (bad.length) {
+  if (bad.length > 0) {
     console.warn(
-      `[biSync] ⚠️ ${bad.length}/${values.length} 片不可用：\n  ` + bad.slice(0, 5).join('\n  ') +
-        '\n  → 本次退化为全量翻页（会有重复与漏行）。请核对 BI_SHARD_PARAM / BI_SHARD_DIMENSION。',
+      `[biSync] ⚠️ ${bad.length}/${values.length} 片不可用：\n  ` + bad.slice(0, 5).join('\n  ')
+      + '\n  → 本次退化为全量翻页（会有重复与漏行）。请核对 BI_SHARD_PARAM / BI_SHARD_DIMENSION。',
     )
     return null
   }
@@ -159,7 +161,7 @@ const BI_FIELD_ALIAS: Record<string, string> = {
 
 /** 见 src/api/api.ts 的同名表，必须保持一致 */
 const BI_VALUE_MAP: Record<string, Record<string, string>> = {
-  '是否属于灯具': { '灯具': '是', '非灯具': '否' },
+  是否属于灯具: { 灯具: '是', 非灯具: '否' },
 }
 
 /**
@@ -184,27 +186,31 @@ const ROW_FIELDS = BI_ROW_FIELDS
  * 用途是比较「这一行和库里那行内容是否相同」—— 直接 JSON.stringify 会因为
  * PB 返回的字段顺序与 BI 不同而误判成「变了」，导致每次同步都全量重写。
  */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
-  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']'
+function stableStringify (value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null'
+  }
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableStringify).join(',') + ']'
+  }
   const obj = value as Record<string, unknown>
   return (
-    '{' +
-    Object.keys(obj)
+    '{'
+    + Object.keys(obj)
       .sort()
       .map(k => JSON.stringify(k) + ':' + stableStringify(obj[k]))
-      .join(',') +
-    '}'
+      .join(',')
+      + '}'
   )
 }
 
 /** 限制并发的 map。3000+ 行逐个 await 会慢到几十秒，全并发又会打爆 PB */
-async function mapWithConcurrency<T, R>(
+async function mapWithConcurrency<T, R> (
   items: T[],
   limit: number,
   fn: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
-  const results = new Array<R>(items.length)
+  const results = Array.from({ length: items.length })
   let cursor = 0
   const worker = async () => {
     while (cursor < items.length) {
@@ -218,13 +224,13 @@ async function mapWithConcurrency<T, R>(
 
 // ========== BI 拉取 ==========
 
-async function fetchBiToken(): Promise<string> {
+async function fetchBiToken (): Promise<string> {
   if (!BI_ACCESS_KEY_ID || !BI_ACCESS_KEY_SECRET) {
     throw new Error('缺少 BI_ACCESS_KEY_ID / BI_ACCESS_KEY_SECRET 环境变量')
   }
-  const url =
-    `${BI_BASE}/api/v1/corp/oauth/token?accessKeyId=${encodeURIComponent(BI_ACCESS_KEY_ID)}` +
-    `&accessKeySecret=${encodeURIComponent(BI_ACCESS_KEY_SECRET)}`
+  const url
+    = `${BI_BASE}/api/v1/corp/oauth/token?accessKeyId=${encodeURIComponent(BI_ACCESS_KEY_ID)}`
+      + `&accessKeySecret=${encodeURIComponent(BI_ACCESS_KEY_SECRET)}`
   const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } })
   const body: any = await res.json()
   if (!body?.success || !body?.data) {
@@ -241,9 +247,9 @@ async function fetchBiToken(): Promise<string> {
  * 且传 sorts / sortBy 四种形态均被**静默忽略**。所以这里只负责「尽量拉全」，
  * 去重交给调用方（按 sync_key）。
  */
-async function fetchAllBiRows(
+async function fetchAllBiRows (
   componentId: string,
-): Promise<{ rows: Record<string, unknown>[]; columns: string[] }> {
+): Promise<{ rows: Record<string, unknown>[], columns: string[] }> {
   const token = await fetchBiToken()
   const all: Record<string, unknown>[] = []
   /** BI 实际返回的列名（归一化后）。用于比对映射表，发现「BI 新增了但还没入库」的列 */
@@ -253,9 +259,11 @@ async function fetchAllBiRows(
   if (SHARD_PARAM) {
     try {
       const sharded = await tryShardedFetch(componentId, token, seenColumns)
-      if (sharded) return { rows: sharded, columns: [...seenColumns] }
-    } catch (err: any) {
-      console.warn('[biSync] ⚠️ 分片拉取异常，退化为全量翻页: ' + (err?.message ?? err))
+      if (sharded) {
+        return { rows: sharded, columns: [...seenColumns] }
+      }
+    } catch (error: any) {
+      console.warn('[biSync] ⚠️ 分片拉取异常，退化为全量翻页: ' + (error?.message ?? error))
     }
   }
 
@@ -264,7 +272,7 @@ async function fetchAllBiRows(
   for (;;) {
     const res = await fetch(`${BI_BASE}/api/public/analysis/v1/component/data`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `${token}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `${token}` },
       body: JSON.stringify({ componentId, pageRequest: { pageIndex, pageSize: BI_PAGE_SIZE } }),
     })
     const body: any = await res.json()
@@ -272,21 +280,25 @@ async function fetchAllBiRows(
       throw new Error('拉取 BI 数据失败: ' + (body?.errorMsg || body?.message || `code=${body?.code}`))
     }
     const data = body.data
-    if (!data) throw new Error('拉取 BI 数据失败: 返回体缺少 data')
+    if (!data) {
+      throw new Error('拉取 BI 数据失败: 返回体缺少 data')
+    }
 
     const fields: { name: string }[] = data.fields ?? []
     const rows: unknown[][] = data.rows ?? []
     for (const row of rows) {
       const item: Record<string, unknown> = {}
-      fields.forEach((f, i) => {
+      for (const [i, f] of fields.entries()) {
         const key = BI_FIELD_ALIAS[f.name] ?? f.name
         seenColumns.add(key)
         item[key] = BI_VALUE_MAP[f.name]?.[String(row[i])] ?? row[i]
-      })
+      }
       all.push(item)
     }
 
-    if (!data.page?.hasNext || rows.length === 0) break
+    if (!data.page?.hasNext || rows.length === 0) {
+      break
+    }
     pageIndex++
   }
 
@@ -302,8 +314,10 @@ async function fetchAllBiRows(
  * 两个都试一遍，避免因为版本不同而"同步功能整个不可用"。
  */
 let cachedAdminToken = ''
-async function pbAdminToken(): Promise<string> {
-  if (cachedAdminToken) return cachedAdminToken
+async function pbAdminToken (): Promise<string> {
+  if (cachedAdminToken) {
+    return cachedAdminToken
+  }
   if (!PB_ADMIN_EMAIL || !PB_ADMIN_PASSWORD) {
     throw new Error('缺少 PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD 环境变量（bi_rows 只有管理员可写）')
   }
@@ -329,17 +343,17 @@ async function pbAdminToken(): Promise<string> {
 }
 
 /** 带管理员身份的 PB REST 请求 */
-async function pbAuthed(
+async function pbAuthed (
   method: string,
   path: string,
   body?: unknown,
-): Promise<{ status: number; data: any }> {
+): Promise<{ status: number, data: any }> {
   const token = await pbAdminToken()
   const res = await fetch(new URL(path, PB_URL).toString(), {
     method,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: token,
+      'Authorization': token,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
@@ -350,29 +364,35 @@ async function pbAuthed(
     data = null
   }
   // token 过期（PB 默认 14 天，但重启/清理也可能失效）时清掉，下次调用重新登录
-  if (res.status === 401 || res.status === 403) cachedAdminToken = ''
+  if (res.status === 401 || res.status === 403) {
+    cachedAdminToken = ''
+  }
   return { status: res.status, data }
 }
 
 /** 读出库里现有的所有行（只取比较需要的列，不拉 data 以外的冗余字段） */
-async function readExistingRows(
+async function readExistingRows (
   componentId: string,
-): Promise<Map<string, { id: string; hash: string }>> {
-  const map = new Map<string, { id: string; hash: string }>()
+): Promise<Map<string, { id: string, hash: string }>> {
+  const map = new Map<string, { id: string, hash: string }>()
   let page = 1
   for (;;) {
     const filter = encodeURIComponent(`component_id="${componentId}"`)
     const { status, data } = await pbAuthed(
       'GET',
-      `/api/collections/bi_rows/records?page=${page}&perPage=${PB_PAGE_SIZE}` +
-        `&filter=${filter}&fields=id,sync_key,data&skipTotal=1`,
+      `/api/collections/bi_rows/records?page=${page}&perPage=${PB_PAGE_SIZE}`
+      + `&filter=${filter}&fields=id,sync_key,data&skipTotal=1`,
     )
-    if (status !== 200) throw new Error(`读取 bi_rows 失败: HTTP ${status} ${JSON.stringify(data)?.slice(0, 200)}`)
+    if (status !== 200) {
+      throw new Error(`读取 bi_rows 失败: HTTP ${status} ${JSON.stringify(data)?.slice(0, 200)}`)
+    }
     const items: any[] = data?.items ?? []
     for (const it of items) {
       map.set(String(it.sync_key ?? ''), { id: it.id, hash: stableStringify(it.data ?? null) })
     }
-    if (items.length < PB_PAGE_SIZE) break
+    if (items.length < PB_PAGE_SIZE) {
+      break
+    }
     page++
   }
   return map
@@ -398,19 +418,19 @@ export interface SyncSummary {
    * 用来直接回答「为什么 8017 行只有 ~1943 个逻辑行」：
    * 同一个 key 在 BI 的分页结果里会重复出现很多次。
    */
-  topRepeatedKeys: { key: string; rows: number }[]
+  topRepeatedKeys: { key: string, rows: number }[]
   /** ⚠️ SKU 相同但内容不同的冲突（说明 SKU 不唯一，需要改 sync_key 口径） */
-  conflicts: { key: string; count: number }[]
+  conflicts: { key: string, count: number }[]
   /**
    * 冲突行之间「哪几列不一样」的统计（按出现次数降序）。
    * 这就是 sync_key 需要补的维度 —— 看这个，别猜。
    */
-  conflictDiffColumns: { column: string; rows: number }[]
+  conflictDiffColumns: { column: string, rows: number }[]
   /**
    * 冲突样例（最多 3 组），只含「值不同的列」及其各行取值。
    * 用来判断这批冲突能不能再补一个维度区分开；补不了就只能「后到覆盖先到」。
    */
-  conflictSamples: { key: string; count: number; diff: Record<string, unknown[]> }[]
+  conflictSamples: { key: string, count: number, diff: Record<string, unknown[]> }[]
   created: number
   updated: number
   /** 内容没变、跳过的数量（重复同步几乎零写入） */
@@ -453,7 +473,7 @@ export interface DedupeResult {
   /** 冲突行之间「哪几列不一样」的统计 */
   conflictDiffColumns: Map<string, number>
   /** 冲突样例（最多 3 组），只含值不同的列 */
-  conflictSamples: { key: string; count: number; diff: Record<string, unknown[]> }[]
+  conflictSamples: { key: string, count: number, diff: Record<string, unknown[]> }[]
 }
 
 /**
@@ -480,15 +500,17 @@ export interface DedupeResult {
 const HASH_IGNORED_KEYS = new Set(['id'])
 
 /** 复制一份不含指定键的对象（只用于比较 / 落库，不改原始行） */
-function omitKeys(row: Record<string, unknown>, keys: Set<string>): Record<string, unknown> {
+function omitKeys (row: Record<string, unknown>, keys: Set<string>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const k in row) {
-    if (!keys.has(k)) out[k] = row[k]
+    if (!keys.has(k)) {
+      out[k] = row[k]
+    }
   }
   return out
 }
 
-export function dedupeBySyncKey(rawRows: Record<string, unknown>[]): DedupeResult {
+export function dedupeBySyncKey (rawRows: Record<string, unknown>[]): DedupeResult {
   const byKey = new Map<string, Record<string, unknown>>()
   const hashByKey = new Map<string, string>()
   const firstRowByKey = new Map<string, Record<string, unknown>>()
@@ -501,7 +523,7 @@ export function dedupeBySyncKey(rawRows: Record<string, unknown>[]): DedupeResul
    */
   const conflictDiffColumns = new Map<string, number>()
   /** 冲突样例（最多 3 组）：只列「值不同的列」及各行的取值，用于判断能不能再补一个维度 */
-  const conflictSamples: { key: string; count: number; diff: Record<string, unknown[]> }[] = []
+  const conflictSamples: { key: string, count: number, diff: Record<string, unknown[]> }[] = []
   const occurrencesByKey = new Map<string, number>()
   let missingKey = 0
   let duplicates = 0
@@ -542,8 +564,11 @@ export function dedupeBySyncKey(rawRows: Record<string, unknown>[]): DedupeResul
             }
           }
           const sampled = conflictSamples.find(s => s.key === key)
-          if (sampled) sampled.count++
-          else if (conflictSamples.length < 3) conflictSamples.push({ key, count: 1, diff })
+          if (sampled) {
+            sampled.count++
+          } else if (conflictSamples.length < 3) {
+            conflictSamples.push({ key, count: 1, diff })
+          }
         }
       }
       continue
@@ -593,10 +618,10 @@ export interface UpsertResult {
  *                    Excel 上传尤其危险 —— 上传的往往只是全量的一个子集，
  *                    一 prune 就把没有覆盖到的行全删了。
  */
-export async function upsertBySyncKey(
+export async function upsertBySyncKey (
   byKey: Map<string, Record<string, unknown>>,
   componentId: string,
-  opts: { dryRun?: boolean; prune?: boolean } = {},
+  opts: { dryRun?: boolean, prune?: boolean } = {},
 ): Promise<UpsertResult> {
   const dryRun = opts.dryRun === true
 
@@ -607,23 +632,25 @@ export async function upsertBySyncKey(
   // （去重、查冲突、列未入库）**完全不需要 PB 权限**，
   // 没配管理员凭据时也应该能把它们报出来。
   // 写库时读不到则必须报错退出 —— 否则会把所有行都当成新行重复插入。
-  let existing: Map<string, { id: string; hash: string }>
+  let existing: Map<string, { id: string, hash: string }>
   let existingReadFailed = false
   try {
     existing = await readExistingRows(componentId)
-  } catch (err: any) {
-    if (!dryRun) throw err
+  } catch (error: any) {
+    if (!dryRun) {
+      throw error
+    }
     existingReadFailed = true
     console.warn(
-      '[biSync] 读不到库里现有数据（通常是没配 PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD）：' +
-        '本次只报去重与冲突，created / updated / unchanged / orphaned 一律按 0 计。' +
-        '原因: ' + (err?.message ?? err),
+      '[biSync] 读不到库里现有数据（通常是没配 PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD）：'
+      + '本次只报去重与冲突，created / updated / unchanged / orphaned 一律按 0 计。'
+      + '原因: ' + (error?.message ?? error),
     )
     existing = new Map()
   }
 
-  const toCreate: { key: string; row: Record<string, unknown> }[] = []
-  const toUpdate: { id: string; key: string; row: Record<string, unknown> }[] = []
+  const toCreate: { key: string, row: Record<string, unknown> }[] = []
+  const toUpdate: { id: string, key: string, row: Record<string, unknown> }[] = []
   let unchanged = 0
 
   const fetchedAt = new Date().toISOString()
@@ -645,7 +672,9 @@ export async function upsertBySyncKey(
   // 库里多出来的行（这批数据没覆盖到的）
   const orphanIds: string[] = []
   for (const [key, info] of existing) {
-    if (!byKey.has(key)) orphanIds.push(info.id)
+    if (!byKey.has(key)) {
+      orphanIds.push(info.id)
+    }
   }
 
   // dryRun 的语义是「预演」：报出**将要**发生的写入数量，而不是一律 0 ——
@@ -668,7 +697,7 @@ export async function upsertBySyncKey(
   let failures: string[] = []
 
   {
-    const createResults = await mapWithConcurrency(toCreate, PB_CONCURRENCY, async (item) => {
+    const createResults = await mapWithConcurrency(toCreate, PB_CONCURRENCY, async item => {
       const { status, data } = await pbAuthed('POST', '/api/collections/bi_rows/records', item.row)
       if (status >= 400) {
         const detail = JSON.stringify(data)?.slice(0, 200)
@@ -682,25 +711,31 @@ export async function upsertBySyncKey(
       return null
     })
 
-    const updateResults = await mapWithConcurrency(toUpdate, PB_CONCURRENCY, async (item) => {
+    const updateResults = await mapWithConcurrency(toUpdate, PB_CONCURRENCY, async item => {
       const { status, data } = await pbAuthed('PATCH', `/api/collections/bi_rows/records/${item.id}`, item.row)
-      if (status >= 400) return `更新失败（${item.key}）: HTTP ${status} ${JSON.stringify(data)?.slice(0, 200)}`
+      if (status >= 400) {
+        return `更新失败（${item.key}）: HTTP ${status} ${JSON.stringify(data)?.slice(0, 200)}`
+      }
       updated++
       return null
     })
 
     if (opts.prune) {
-      await mapWithConcurrency(orphanIds, PB_CONCURRENCY, async (id) => {
+      await mapWithConcurrency(orphanIds, PB_CONCURRENCY, async id => {
         const { status } = await pbAuthed('DELETE', `/api/collections/bi_rows/records/${id}`)
-        if (status < 400) pruned++
+        if (status < 400) {
+          pruned++
+        }
         return status
       })
     }
 
     failures = [...createResults, ...updateResults].filter(Boolean).slice(0, 20) as string[]
-    if (failures.length) {
+    if (failures.length > 0) {
       console.warn(`[biSync] 有 ${failures.length} 条写入失败：`)
-      for (const f of failures.slice(0, 10)) console.warn('  ' + f)
+      for (const f of failures.slice(0, 10)) {
+        console.warn('  ' + f)
+      }
     }
   }
 
@@ -717,9 +752,9 @@ export async function upsertBySyncKey(
  * @param opts.prune  是否删除「库里存在但 BI 已不再返回」的行。
  *                    默认 false —— 删数据是破坏性的，先看清楚 orphaned 有多少再决定。
  */
-export async function syncBiRows(
+export async function syncBiRows (
   componentId = BI_COMPONENT_ID,
-  opts: { dryRun?: boolean; prune?: boolean } = {},
+  opts: { dryRun?: boolean, prune?: boolean } = {},
 ): Promise<SyncSummary> {
   const start = Date.now()
   const dryRun = opts.dryRun === true
@@ -774,19 +809,19 @@ export async function syncBiRows(
   }
 
   console.log(
-    `[biSync] ${dryRun ? '(dryRun) ' : ''}拉到 ${fetched} 行 → 去重后 ${unique} 行；` +
-      `新增 ${upsert.created} / 更新 ${upsert.updated} / 未变 ${upsert.unchanged}` +
-      (opts.prune ? ` / 删除 ${upsert.pruned}` : ` / 库里多余 ${upsert.orphaned}`) +
-      `；耗时 ${(summary.elapsedMs / 1000).toFixed(1)}s`,
+    `[biSync] ${dryRun ? '(dryRun) ' : ''}拉到 ${fetched} 行 → 去重后 ${unique} 行；`
+    + `新增 ${upsert.created} / 更新 ${upsert.updated} / 未变 ${upsert.unchanged}`
+    + (opts.prune ? ` / 删除 ${upsert.pruned}` : ` / 库里多余 ${upsert.orphaned}`)
+    + `；耗时 ${(summary.elapsedMs / 1000).toFixed(1)}s`,
   )
-  if (conflictList.length) {
+  if (conflictList.length > 0) {
     console.warn(
-      `[biSync] ⚠️ 发现 ${conflictList.length} 个 SKU 存在「同 key 不同内容」的冲突，` +
-        `说明 SKU 不唯一，需要改用「SKU + 其它维度」作 sync_key。前几个: ` +
-        conflictList.slice(0, 5).map(c => `${c.key}(${c.count})`).join(', '),
+      `[biSync] ⚠️ 发现 ${conflictList.length} 个 SKU 存在「同 key 不同内容」的冲突，`
+      + `说明 SKU 不唯一，需要改用「SKU + 其它维度」作 sync_key。前几个: `
+      + conflictList.slice(0, 5).map(c => `${c.key}(${c.count})`).join(', '),
     )
   }
-  if (conflictDiffColumns.size) {
+  if (conflictDiffColumns.size > 0) {
     // ⚠️ 这里**必须完整列出，不能只打前几名**。
     //    上轮就是只打了 top10，而度量列（总库存数量/金额…）几乎每组都不同、
     //    计数必然霸占前排，把「店铺/平台/部门」这些真正关键的维度挤到了十名之外，
@@ -794,24 +829,24 @@ export async function syncBiRows(
     //    经验：看差异列时，度量列的高计数是噪声，维度列才是线索。
     const all = [...conflictDiffColumns.entries()].sort((a, b) => b[1] - a[1])
     console.warn(
-      `[biSync] 冲突行之间的差异列（共 ${all.length} 列，完整列出）: ` +
-        all.map(([col, n]) => `${col}(${n})`).join(', '),
+      `[biSync] 冲突行之间的差异列（共 ${all.length} 列，完整列出）: `
+      + all.map(([col, n]) => `${col}(${n})`).join(', '),
     )
   }
   // 把「去重」拆开说清楚：哪些是安全的完全重复，哪些是可能有损的冲突行
   {
     const top = [...occurrencesByKey.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
     console.log(
-      `[biSync] 掉行拆解：完全重复 ${exactRepeatRows} 行（安全）+ 冲突行 ${conflictRows} 行（先到者保留，可能有损）；` +
-        `平均每个 key 在 BI 里出现 ${(fetched / Math.max(unique, 1)).toFixed(1)} 次` +
-        (top.length ? `；出现最多的 key: ${top.map(([k, n]) => `${k}(${n}次)`).join(', ')}` : ''),
+      `[biSync] 掉行拆解：完全重复 ${exactRepeatRows} 行（安全）+ 冲突行 ${conflictRows} 行（先到者保留，可能有损）；`
+      + `平均每个 key 在 BI 里出现 ${(fetched / Math.max(unique, 1)).toFixed(1)} 次`
+      + (top.length > 0 ? `；出现最多的 key: ${top.map(([k, n]) => `${k}(${n}次)`).join(', ')}` : ''),
     )
   }
-  if (unmappedColumns.length) {
+  if (unmappedColumns.length > 0) {
     console.warn(
-      `[biSync] ⚠️ BI 返回了 ${unmappedColumns.length} 个未入库的列（数据仍在 data 里，但无法按它筛选）: ` +
-        unmappedColumns.join(', ') +
-        '  → 去 src/utils/biRowFields.ts 补上，然后重跑 npx tsx scripts/gen-bi-rows-migration.ts',
+      `[biSync] ⚠️ BI 返回了 ${unmappedColumns.length} 个未入库的列（数据仍在 data 里，但无法按它筛选）: `
+      + unmappedColumns.join(', ')
+      + '  → 去 src/utils/biRowFields.ts 补上，然后重跑 npx tsx scripts/gen-bi-rows-migration.ts',
     )
   }
 
@@ -851,7 +886,7 @@ export async function syncBiRows(
 // 上面这段说明保留在这里，是为了让读本文件的人知道键是怎么定出来的。
 
 /** 把一行 BI 数据拼成 bi_rows 的记录结构（导出仅为便于单测） */
-export function buildRecord(
+export function buildRecord (
   componentId: string,
   key: string,
   row: Record<string, unknown>,
@@ -906,10 +941,10 @@ export interface UploadSummary extends SyncSummary {
  * ⚠️ 默认**不 prune**：上传的往往只是全量的一个子集，一 prune 会把没覆盖到的行全删掉。
  *    多余行数仍然会在 orphaned 里报出来，由调用方自己判断要不要清。
  */
-export async function uploadRows(
+export async function uploadRows (
   rawRows: Record<string, unknown>[],
   componentId = BI_COMPONENT_ID,
-  opts: { dryRun?: boolean; prune?: boolean } = {},
+  opts: { dryRun?: boolean, prune?: boolean } = {},
 ): Promise<UploadSummary> {
   const start = Date.now()
   const dryRun = opts.dryRun === true
@@ -954,22 +989,22 @@ export async function uploadRows(
   }
 
   console.log(
-    `[biUpload] ${dryRun ? '(dryRun) ' : ''}上传 ${fetched} 行 → 去重后 ${dedupe.unique} 行；` +
-      `新增 ${upsert.created} / 更新 ${upsert.updated} / 未变 ${upsert.unchanged}；` +
-      `跳过（唯一键为空）${dedupe.missingKey} 行；耗时 ${(summary.elapsedMs / 1000).toFixed(1)}s`,
+    `[biUpload] ${dryRun ? '(dryRun) ' : ''}上传 ${fetched} 行 → 去重后 ${dedupe.unique} 行；`
+    + `新增 ${upsert.created} / 更新 ${upsert.updated} / 未变 ${upsert.unchanged}；`
+    + `跳过（唯一键为空）${dedupe.missingKey} 行；耗时 ${(summary.elapsedMs / 1000).toFixed(1)}s`,
   )
-  if (dedupe.conflicts.size) {
+  if (dedupe.conflicts.size > 0) {
     console.warn(
-      `[biUpload] ⚠️ 有 ${dedupe.conflicts.size} 个唯一键出现「同 key 不同内容」，` +
-        `已按「先到者保留」写入（后到的被丢弃，共 ${dedupe.conflictRows} 行）: ` +
-        conflictList.slice(0, 5).map(c => `${c.key}(${c.count})`).join(', '),
+      `[biUpload] ⚠️ 有 ${dedupe.conflicts.size} 个唯一键出现「同 key 不同内容」，`
+      + `已按「先到者保留」写入（后到的被丢弃，共 ${dedupe.conflictRows} 行）: `
+      + conflictList.slice(0, 5).map(c => `${c.key}(${c.count})`).join(', '),
     )
   }
-  if (unmappedColumns.length) {
+  if (unmappedColumns.length > 0) {
     console.warn(
-      `[biUpload] ⚠️ 有 ${unmappedColumns.length} 个列没有对应的库字段（数据仍在 data 里，但无法按它筛选）: ` +
-        unmappedColumns.join(', ') +
-        '  → 去 src/utils/biRowFields.ts 补上，然后重跑 npx tsx scripts/gen-bi-rows-migration.ts',
+      `[biUpload] ⚠️ 有 ${unmappedColumns.length} 个列没有对应的库字段（数据仍在 data 里，但无法按它筛选）: `
+      + unmappedColumns.join(', ')
+      + '  → 去 src/utils/biRowFields.ts 补上，然后重跑 npx tsx scripts/gen-bi-rows-migration.ts',
     )
   }
 
@@ -977,7 +1012,7 @@ export async function uploadRows(
 }
 
 /** 供 /api/bi/sync 直接调用的便捷入口 */
-export async function runBiSync(query: URLSearchParams) {
+export async function runBiSync (query: URLSearchParams) {
   const dryRun = query.get('dryRun') === '1' || query.get('dryRun') === 'true'
   const prune = query.get('prune') === '1' || query.get('prune') === 'true'
   const componentId = query.get('componentId') || BI_COMPONENT_ID

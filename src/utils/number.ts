@@ -22,19 +22,23 @@
 const NUMBER_FORMATTER = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 })
 
 /** 单个数值的展示文本；非有限数原样返回，避免出现 "NaN" */
-export function formatNumber(value: number): string {
+export function formatNumber (value: number): string {
   return Number.isFinite(value) ? NUMBER_FORMATTER.format(value) : String(value)
 }
 
 const FORMATTED_CACHE = new WeakMap<Record<string, unknown>, Record<string, unknown>>()
 
-export function formatDatas(row: Record<string, unknown>): Record<string, unknown> {
+export function formatDatas (row: Record<string, unknown>): Record<string, unknown> {
   const cached = FORMATTED_CACHE.get(row)
-  if (cached) return cached
+  if (cached) {
+    return cached
+  }
   const next: Record<string, unknown> = { ...row }
   for (const key of Object.keys(next)) {
     const v = next[key]
-    if (typeof v === 'number') next[key] = formatNumber(v)
+    if (typeof v === 'number') {
+      next[key] = formatNumber(v)
+    }
   }
   FORMATTED_CACHE.set(row, next)
   return next
@@ -44,8 +48,10 @@ export function formatDatas(row: Record<string, unknown>): Record<string, unknow
  * 把「可能已被 formatDatas 格式化过」的值解析回数字，供排序使用。
  * 先去掉千分位再转；解析不出来时返回 0（保持顺序稳定，不抛错）。
  */
-export function parseFormattedNumber(value: unknown): number {
-  if (typeof value === 'number') return value
+export function parseFormattedNumber (value: unknown): number {
+  if (typeof value === 'number') {
+    return value
+  }
   const n = Number(String(value ?? '').replace(/,/g, ''))
   return Number.isFinite(n) ? n : 0
 }

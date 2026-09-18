@@ -1,7 +1,7 @@
-import * as lark from '@larksuiteoapi/node-sdk'
-import Database from 'better-sqlite3'
 import http from 'node:http'
 import https from 'node:https'
+import * as lark from '@larksuiteoapi/node-sdk'
+import Database from 'better-sqlite3'
 import { runBiSync, uploadRows } from './biSync'
 import { runReminders } from './reminders'
 
@@ -87,12 +87,12 @@ interface UserBrief {
 }
 
 // ========== 工具函数 ==========
-function json(res: http.ServerResponse, statusCode: number, data: unknown) {
+function json (res: http.ServerResponse, statusCode: number, data: unknown) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json;charset=utf-8' })
   res.end(JSON.stringify(data))
 }
 
-function readBody(req: http.IncomingMessage): Promise<any> {
+function readBody (req: http.IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     req.on('data', (chunk: Buffer) => chunks.push(chunk))
@@ -107,36 +107,40 @@ function readBody(req: http.IncomingMessage): Promise<any> {
   })
 }
 
-function intParam(url: URL, name: string, def: number): number {
+function intParam (url: URL, name: string, def: number): number {
   const v = url.searchParams.get(name)
-  return v != null ? (parseInt(v) || def) : def
+  return v == null ? def : (Number.parseInt(v) || def)
 }
 
-function pickEnumParam<T extends string>(url: URL, name: string, valid: readonly T[]): { [K in string]: T } | Record<string, never> {
+function pickEnumParam<T extends string> (url: URL, name: string, valid: readonly T[]): { [K in string]: T } | Record<string, never> {
   const v = url.searchParams.get(name)
   return v && valid.includes(v as T) ? { [name]: v as T } : {}
 }
 
 /** 收集异步迭代器的全部 items（自动处理分页） */
-async function collectAllItems<T>(
-  iteratorFactory: () => Promise<{ [Symbol.asyncIterator](): AsyncGenerator<{ items?: T[] } | null> }>,
+async function collectAllItems<T> (
+  iteratorFactory: () => Promise<{ [Symbol.asyncIterator]: () => AsyncGenerator<{ items?: T[] } | null> }>,
 ): Promise<T[]> {
   const all: T[] = []
   const iterable = await iteratorFactory()
   for await (const chunk of iterable) {
-    if (chunk && chunk.items) all.push(...chunk.items)
+    if (chunk && chunk.items) {
+      all.push(...chunk.items)
+    }
   }
   return all
 }
 
 /** 将平铺的部门列表构建为树结构 */
-function buildDeptTree(flatDepts: FlatDeptItem[]): { tree: OrgTreeNode[]; totalMembers: number } {
+function buildDeptTree (flatDepts: FlatDeptItem[]): { tree: OrgTreeNode[], totalMembers: number } {
   const map = new Map<string, OrgTreeNode>()
   let totalMembers = 0
 
   for (const d of flatDepts) {
     const id = d.open_department_id || d.department_id || ''
-    if (!id || map.has(id)) continue
+    if (!id || map.has(id)) {
+      continue
+    }
     map.set(id, {
       id,
       name: d.name,
@@ -151,14 +155,18 @@ function buildDeptTree(flatDepts: FlatDeptItem[]): { tree: OrgTreeNode[]; totalM
   for (const d of flatDepts) {
     const parentId = d.parent_department_id
     const parent = parentId ? map.get(parentId) : undefined
-    if (parent) parent.has_child = true
+    if (parent) {
+      parent.has_child = true
+    }
   }
 
   // 挂载子节点
   for (const d of flatDepts) {
     const id = d.open_department_id || d.department_id || ''
     const node = map.get(id)
-    if (!node) continue
+    if (!node) {
+      continue
+    }
     const parentId = d.parent_department_id
     const parent = parentId ? map.get(parentId) : undefined
     if (parent && parent.id !== id) {
@@ -176,12 +184,12 @@ function buildDeptTree(flatDepts: FlatDeptItem[]): { tree: OrgTreeNode[]; totalM
 }
 
 /** 从单个用户接口提取最高清头像 URL */
-function pickBestAvatar(avatar?: { avatar_72?: string; avatar_240?: string; avatar_640?: string; avatar_origin?: string } | null): string | undefined {
+function pickBestAvatar (avatar?: { avatar_72?: string, avatar_240?: string, avatar_640?: string, avatar_origin?: string } | null): string | undefined {
   return avatar?.avatar_origin || avatar?.avatar_640 || avatar?.avatar_240 || avatar?.avatar_72 || undefined
 }
 
 /** 分批获取部门用户（控制并发数） */
-async function fetchUsersForDept(deptId: string, leaderUserId?: string): Promise<UserBrief[]> {
+async function fetchUsersForDept (deptId: string, leaderUserId?: string): Promise<UserBrief[]> {
   const users: UserBrief[] = []
   try {
     const iterable = await client.contact.user.findByDepartmentWithIterator({
@@ -192,7 +200,9 @@ async function fetchUsersForDept(deptId: string, leaderUserId?: string): Promise
       },
     })
     for await (const chunk of iterable) {
-      if (!chunk || !chunk.items) continue
+      if (!chunk || !chunk.items) {
+        continue
+      }
       for (const u of chunk.items) {
         const openId = u.open_id || ''
         const avatarUrl = pickBestAvatar(u.avatar)
@@ -208,23 +218,25 @@ async function fetchUsersForDept(deptId: string, leaderUserId?: string): Promise
         })
       }
     }
-  } catch (err) {
-    console.warn(`[OrgTree] 获取部门 ${deptId} 用户失败:`, err)
+  } catch (error) {
+    console.warn(`[OrgTree] 获取部门 ${deptId} 用户失败:`, error)
   }
   return users
 }
 
 /** 并发获取单个用户详情，补充缺失的头像数据 */
-async function enrichUserAvatars(users: UserBrief[]): Promise<void> {
+async function enrichUserAvatars (users: UserBrief[]): Promise<void> {
   const missing = users.filter(u => !u.avatar)
-  if (missing.length === 0) return
+  if (missing.length === 0) {
+    return
+  }
 
   console.log(`[OrgTree] 共 ${missing.length} 个用户缺少头像，开始用 getUser 补充...`)
   const CONCURRENCY = 5
   let done = 0
   for (let i = 0; i < missing.length; i += CONCURRENCY) {
     const batch = missing.slice(i, i + CONCURRENCY)
-    await Promise.all(batch.map(async (user) => {
+    await Promise.all(batch.map(async user => {
       try {
         const result = await client.contact.user.get({
           path: { user_id: user.open_id },
@@ -235,7 +247,7 @@ async function enrichUserAvatars(users: UserBrief[]): Promise<void> {
         if (avatarUrl) {
           user.avatar = avatarUrl
         }
-      } catch (err) {
+      } catch {
         // 静默失败，该用户继续无头像
       }
     }))
@@ -251,7 +263,7 @@ async function enrichUserAvatars(users: UserBrief[]): Promise<void> {
 // ========== 组织架构树获取（核心逻辑，被 refresh 端点复用） ==========
 
 /** 从飞书拉取完整组织架构树（含用户+头像），返回与旧 GET /api/feishu/org-tree 相同格式 */
-async function fetchOrgTreeFromFeishu(): Promise<OrgTreeResult> {
+async function fetchOrgTreeFromFeishu (): Promise<OrgTreeResult> {
   // 1. 拉平所有部门
   console.log('[OrgTree] 开始拉取全公司部门...')
   const flatDepts = await collectAllItems<FlatDeptItem>(() =>
@@ -269,7 +281,9 @@ async function fetchOrgTreeFromFeishu(): Promise<OrgTreeResult> {
   const leaderMap = new Map<string, string>()
   for (const d of flatDepts) {
     const id = d.open_department_id || d.department_id || ''
-    if (id && d.leader_user_id) leaderMap.set(id, d.leader_user_id)
+    if (id && d.leader_user_id) {
+      leaderMap.set(id, d.leader_user_id)
+    }
   }
 
   const allDeptIds = flatDepts.map(d => d.open_department_id || d.department_id || '').filter(Boolean)
@@ -280,7 +294,9 @@ async function fetchOrgTreeFromFeishu(): Promise<OrgTreeResult> {
   for (let i = 0; i < allDeptIds.length; i += CONCURRENCY) {
     const batch = allDeptIds.slice(i, i + CONCURRENCY)
     const results = await Promise.all(batch.map(id => fetchUsersForDept(id, leaderMap.get(id))))
-    batch.forEach((id, idx) => userMap.set(id, results[idx]))
+    for (const [idx, id] of batch.entries()) {
+      userMap.set(id, results[idx])
+    }
     console.log(`[OrgTree] 用户拉取进度: ${Math.min(i + CONCURRENCY, allDeptIds.length)}/${allDeptIds.length}`)
   }
 
@@ -288,13 +304,15 @@ async function fetchOrgTreeFromFeishu(): Promise<OrgTreeResult> {
   const allUsers = new Map<string, UserBrief>()
   for (const users of userMap.values()) {
     for (const u of users) {
-      if (!allUsers.has(u.open_id)) allUsers.set(u.open_id, u)
+      if (!allUsers.has(u.open_id)) {
+        allUsers.set(u.open_id, u)
+      }
     }
   }
   await enrichUserAvatars([...allUsers.values()])
 
   // 注入用户到树节点
-  function injectUsers(nodes: OrgTreeNode[]) {
+  function injectUsers (nodes: OrgTreeNode[]) {
     for (const node of nodes) {
       ;(node as any).users = userMap.get(node.id) || []
       injectUsers(node.children)
@@ -312,7 +330,7 @@ async function fetchOrgTreeFromFeishu(): Promise<OrgTreeResult> {
 // ========== PocketBase 缓存读写 ==========
 
 /** PB REST API 简单请求 */
-function pbRequest(method: string, path: string, body?: unknown): Promise<{ status: number; data: any }> {
+function pbRequest (method: string, path: string, body?: unknown): Promise<{ status: number, data: any }> {
   return new Promise((resolve, reject) => {
     const url = new URL(path, PB_URL)
     const isHttps = url.protocol === 'https:'
@@ -327,18 +345,22 @@ function pbRequest(method: string, path: string, body?: unknown): Promise<{ stat
           ...(bodyStr ? { 'Content-Length': String(Buffer.byteLength(bodyStr)) } : {}),
         },
       },
-      (resp) => {
+      resp => {
         let raw = ''
         resp.on('data', (chunk: Buffer) => (raw += chunk.toString()))
         resp.on('end', () => {
           let data: any = raw
-          try { data = JSON.parse(raw) } catch { /* 非 JSON 保留字符串 */ }
+          try {
+            data = JSON.parse(raw)
+          } catch { /* 非 JSON 保留字符串 */ }
           resolve({ status: resp.statusCode ?? 200, data })
         })
       },
     )
     req.on('error', reject)
-    if (bodyStr) req.write(bodyStr)
+    if (bodyStr) {
+      req.write(bodyStr)
+    }
     req.end()
   })
 }
@@ -348,7 +370,7 @@ function pbRequest(method: string, path: string, body?: unknown): Promise<{ stat
  * 用文本而不是卡片：提醒里没有可点的按钮，卡片能表达的东西这里一个都不需要，
  * 少一层 schema 出错的余地。
  */
-async function sendFeishuText(
+async function sendFeishuText (
   receiveId: string,
   receiveIdType: 'email' | 'open_id',
   text: string,
@@ -361,12 +383,16 @@ async function sendFeishuText(
 }
 
 /** 组织管理员（组织架构缓存里 is_tenant_manager）—— 超时升级的推送对象 */
-async function orgAdmins(): Promise<Array<{ name?: string; email?: string }>> {
+async function orgAdmins (): Promise<Array<{ name?: string, email?: string }>> {
   const cached = await readOrgTreeCache()
-  const out: Array<{ name?: string; email?: string }> = []
+  const out: Array<{ name?: string, email?: string }> = []
   const walk = (nodes: any[]) => {
     for (const n of nodes ?? []) {
-      for (const u of n.users ?? []) if (u.is_tenant_manager) out.push({ name: u.name, email: u.email })
+      for (const u of n.users ?? []) {
+        if (u.is_tenant_manager) {
+          out.push({ name: u.name, email: u.email })
+        }
+      }
       walk(n.children ?? [])
     }
   }
@@ -375,7 +401,7 @@ async function orgAdmins(): Promise<Array<{ name?: string; email?: string }>> {
 }
 
 /** 跑一遍超时提醒（路由与定时任务共用） */
-function runReminderBatch(dryRun: boolean, now?: Date) {
+function runReminderBatch (dryRun: boolean, now?: Date) {
   return runReminders(
     { pbUrl: PB_URL, sendText: sendFeishuText, admins: orgAdmins, log: console.log },
     { dryRun, ...(now ? { now } : {}) },
@@ -383,38 +409,42 @@ function runReminderBatch(dryRun: boolean, now?: Date) {
 }
 
 /** 从 PocketBase 读取缓存（org_tree_cache 集合中取第一条记录） */
-async function readOrgTreeCache(): Promise<OrgTreeResult | null> {
+async function readOrgTreeCache (): Promise<OrgTreeResult | null> {
   try {
     const { status, data } = await pbRequest('GET', '/api/collections/org_tree_cache/records?perPage=1&sort=-updated')
-    if (status !== 200 || !data?.items?.length) return null
+    if (status !== 200 || !data?.items?.length) {
+      return null
+    }
     const record = data.items[0]
-    if (!record.tree_data) return null
+    if (!record.tree_data) {
+      return null
+    }
     return JSON.parse(JSON.stringify(record.tree_data)) as OrgTreeResult
-  } catch (err: any) {
-    console.warn('[PB] 读取缓存失败:', err.message)
+  } catch (error: any) {
+    console.warn('[PB] 读取缓存失败:', error.message)
     return null
   }
 }
 
 /** 将组织架构树写入 PocketBase（新增一条记录） */
-async function writeOrgTreeCache(result: OrgTreeResult): Promise<void> {
+async function writeOrgTreeCache (result: OrgTreeResult): Promise<void> {
   try {
     const { status, data } = await pbRequest('POST', '/api/collections/org_tree_cache/records', {
       tree_data: result,
     })
     if (status < 200 || status >= 300) {
-      console.warn(`[PB] 写入缓存返回 HTTP ${status}:`, JSON.stringify(data).substring(0, 300))
+      console.warn(`[PB] 写入缓存返回 HTTP ${status}:`, JSON.stringify(data).slice(0, 300))
       return
     }
     console.log('[PB] 组织架构树已写入缓存')
-  } catch (err: any) {
-    console.warn('[PB] 写入缓存失败:', err.message)
+  } catch (error: any) {
+    console.warn('[PB] 写入缓存失败:', error.message)
   }
 }
 
 // ========== 事件处理 ==========
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleMessage(data: any) {
+
+async function handleMessage (data: any) {
   const { message } = data
   const msgId = message.message_id
   const content = JSON.parse(message.content)
@@ -425,9 +455,9 @@ async function handleMessage(data: any) {
 wsClient.start({
   eventDispatcher: new lark.EventDispatcher({}).register({
     'im.message.receive_v1': handleMessage,
-    'card.action.trigger':async(data: any)=>{
+    'card.action.trigger': async (data: any) => {
       console.log('收到卡片事件', data)
-    }
+    },
   }),
 })
 
@@ -456,7 +486,7 @@ http.createServer(async (req, res) => {
     // GET /api/feishu/departments?department_ids=od-xxx&department_ids=od-yyy
     if (pathname === '/api/feishu/departments' && req.method === 'GET') {
       const ids = url.searchParams.getAll('department_ids')
-      if (!ids.length) {
+      if (ids.length === 0) {
         json(res, 400, { code: -1, msg: '缺少 department_ids 参数' })
         return
       }
@@ -590,8 +620,8 @@ http.createServer(async (req, res) => {
           deptName = dept?.name || deptId
           // 部门负责人（user_id_type=open_id，与拉取成员时保持一致）
           leaderUserId = dept?.leader_user_id || undefined
-        } catch (err) {
-          console.warn('[DepartmentUsers] 获取部门信息失败，使用 id 兜底:', err)
+        } catch (error) {
+          console.warn('[DepartmentUsers] 获取部门信息失败，使用 id 兜底:', error)
         }
 
         // 3. 拉取该部门成员：以部门真实负责人作为 leader 标记，并过滤掉当前登录用户自己
@@ -602,9 +632,9 @@ http.createServer(async (req, res) => {
           code: 0,
           data: { department_id: deptId, department_name: deptName, users },
         })
-      } catch (err: any) {
-        console.error('[DepartmentUsers] 获取失败:', err?.message ?? err)
-        json(res, 500, { code: -1, msg: err?.message || '获取部门成员失败' })
+      } catch (error: any) {
+        console.error('[DepartmentUsers] 获取失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || '获取部门成员失败' })
       }
       return
     }
@@ -644,11 +674,15 @@ http.createServer(async (req, res) => {
             params: { department_id_type: 'open_department_id', user_id_type: 'open_id' },
           })
           const dept = deptRes.data?.department
-          if (!dept) break
+          if (!dept) {
+            break
+          }
           names.push(dept.name || deptId)
           const parent = dept.parent_department_id
           // parent 为空或 '0' 即到顶（与 buildDeptTree 判定根节点的口径一致）
-          if (!parent || parent === '0') break
+          if (!parent || parent === '0') {
+            break
+          }
           deptId = parent
         }
 
@@ -660,15 +694,15 @@ http.createServer(async (req, res) => {
           data: {
             department_id: deptIds[0],
             // 最后一级 = 用户自己的部门
-            department_name: names[names.length - 1] ?? '',
+            department_name: names.at(-1) ?? '',
             department_path: names.join(' / '),
             // 第一级 = 顶层部门，作为企业名（飞书无公开的「查企业名」接口）
             company_name: names[0] ?? '',
           },
         })
-      } catch (err: any) {
-        console.error('[UserOrg] 获取失败:', err?.message ?? err)
-        json(res, 500, { code: -1, msg: err?.message || '获取企业与部门信息失败' })
+      } catch (error: any) {
+        console.error('[UserOrg] 获取失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || '获取企业与部门信息失败' })
       }
       return
     }
@@ -684,11 +718,11 @@ http.createServer(async (req, res) => {
       }
       try {
         const parsed = new URL(avatarUrl)
-        console.log(`[Avatar] 代理请求: ${avatarUrl.substring(0, 100)}...`)
+        console.log(`[Avatar] 代理请求: ${avatarUrl.slice(0, 100)}...`)
         const fetcher = parsed.protocol === 'https:' ? https : http
-        const proxyReq = fetcher.request(avatarUrl, { method: 'GET' }, (proxyRes) => {
+        const proxyReq = fetcher.request(avatarUrl, { method: 'GET' }, proxyRes => {
           if (proxyRes.statusCode && proxyRes.statusCode >= 400) {
-            console.warn(`[Avatar] 上游返回 ${proxyRes.statusCode}: ${avatarUrl.substring(0, 80)}`)
+            console.warn(`[Avatar] 上游返回 ${proxyRes.statusCode}: ${avatarUrl.slice(0, 80)}`)
             res.writeHead(proxyRes.statusCode)
             res.end()
             return
@@ -700,8 +734,8 @@ http.createServer(async (req, res) => {
           })
           proxyRes.pipe(res)
         })
-        proxyReq.on('error', (err) => {
-          console.warn(`[Avatar] 代理失败: ${err.message}, url=${avatarUrl.substring(0, 80)}`)
+        proxyReq.on('error', err => {
+          console.warn(`[Avatar] 代理失败: ${err.message}, url=${avatarUrl.slice(0, 80)}`)
           res.writeHead(502)
           res.end()
         })
@@ -734,9 +768,9 @@ http.createServer(async (req, res) => {
         })
         console.log('[SendCard] 消息发送成功')
         json(res, 200, { code: 0, data: result })
-      } catch (err: any) {
-        console.error('[SendCard] 发送失败:', err?.message ?? err)
-        json(res, 500, { code: -1, msg: err?.message || '发送失败' })
+      } catch (error: any) {
+        console.error('[SendCard] 发送失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || '发送失败' })
       }
       return
     }
@@ -761,11 +795,13 @@ http.createServer(async (req, res) => {
       }
       try {
         const report = await runReminderBatch(dryRun, now)
-        if (!dryRun) console.log(`[Reminders] 已发 ${report.sent} 条（扫描 ${report.scanned}，应提醒 ${report.due}）`)
+        if (!dryRun) {
+          console.log(`[Reminders] 已发 ${report.sent} 条（扫描 ${report.scanned}，应提醒 ${report.due}）`)
+        }
         json(res, 200, { code: 0, dryRun, now: now?.toISOString(), ...report })
-      } catch (err: any) {
-        console.error('[Reminders] 跑批失败:', err?.message ?? err)
-        json(res, 500, { code: -1, msg: err?.message || '跑批失败' })
+      } catch (error: any) {
+        console.error('[Reminders] 跑批失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || '跑批失败' })
       }
       return
     }
@@ -791,7 +827,7 @@ http.createServer(async (req, res) => {
           .split(',')
           .map(c => c.trim())
           .filter(c => /^[a-z_][a-z0-9_]*$/.test(c))
-        if (!columns.length) {
+        if (columns.length === 0) {
           json(res, 400, { code: -1, msg: 'columns 为空或不合法' })
           return
         }
@@ -802,9 +838,9 @@ http.createServer(async (req, res) => {
           for (const col of columns) {
             const rows = db
               .prepare(
-                `SELECT DISTINCT \`${col}\` AS v FROM bi_rows` +
-                  ` WHERE component_id = ? AND \`${col}\` IS NOT NULL AND \`${col}\` != ''` +
-                  ` ORDER BY v`,
+                `SELECT DISTINCT \`${col}\` AS v FROM bi_rows`
+                + ` WHERE component_id = ? AND \`${col}\` IS NOT NULL AND \`${col}\` != ''`
+                + ` ORDER BY v`,
               )
               .all(componentId) as { v: unknown }[]
             facets[col] = rows.map(r => String(r.v))
@@ -813,9 +849,9 @@ http.createServer(async (req, res) => {
         } finally {
           db.close()
         }
-      } catch (err: any) {
-        console.error('[biFacets] 失败:', err?.message ?? err)
-        json(res, 500, { code: -1, msg: err?.message || String(err) })
+      } catch (error: any) {
+        console.error('[biFacets] 失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || String(error) })
       }
       return
     }
@@ -833,7 +869,7 @@ http.createServer(async (req, res) => {
       try {
         const body = await readBody(req)
         const rows = Array.isArray(body?.rows) ? body.rows : []
-        if (!rows.length) {
+        if (rows.length === 0) {
           json(res, 400, { code: -1, msg: '缺少 rows（应为对象数组）' })
           return
         }
@@ -843,9 +879,9 @@ http.createServer(async (req, res) => {
           prune: url.searchParams.get('prune') === '1',
         })
         json(res, 200, { code: 0, data: summary })
-      } catch (err: any) {
-        console.error('[biUpload] 上传失败:', err?.message ?? err)
-        json(res, 500, { code: -1, msg: err?.message || String(err) })
+      } catch (error: any) {
+        console.error('[biUpload] 上传失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || String(error) })
       }
       return
     }
@@ -859,9 +895,9 @@ http.createServer(async (req, res) => {
       try {
         const summary = await runBiSync(url.searchParams)
         json(res, 200, { code: 0, data: summary })
-      } catch (err: any) {
-        console.error('[biSync] 同步失败:', err?.message ?? err)
-        json(res, 500, { code: -1, msg: err?.message || String(err) })
+      } catch (error: any) {
+        console.error('[biSync] 同步失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || String(error) })
       }
       return
     }
@@ -869,9 +905,9 @@ http.createServer(async (req, res) => {
     // ─── 健康检查 ──────────────────────────────
     res.writeHead(200, { 'Content-Type': 'text/plain;charset=utf-8' })
     res.end('feishu ws running')
-  } catch (err: any) {
-    console.error(`[API Error] ${req.method} ${pathname}`, err?.message ?? err)
-    json(res, 500, { code: -1, msg: err?.message || String(err) })
+  } catch (error: any) {
+    console.error(`[API Error] ${req.method} ${pathname}`, error?.message ?? error)
+    json(res, 500, { code: -1, msg: error?.message || String(error) })
   }
 }).listen(PORT, () => {
   console.log(`服务端口: ${BASE_URL}`)
@@ -904,9 +940,9 @@ if (remindMin > 0) {
       const report = await runReminderBatch(!sending)
       console.log(`[Reminders] 跑批：扫描 ${report.scanned}，应提醒 ${report.due}，已发 ${report.sent}`
         + `${report.skippedToday ? `，今日已发过 ${report.skippedToday}` : ''}`
-        + `${report.errors.length ? `，错误 ${report.errors.length}` : ''}`)
-    } catch (err: any) {
-      console.warn('[Reminders] 跑批失败:', err?.message ?? err)
+        + `${report.errors.length > 0 ? `，错误 ${report.errors.length}` : ''}`)
+    } catch (error: any) {
+      console.warn('[Reminders] 跑批失败:', error?.message ?? error)
     }
   }
   setInterval(tick, remindMin * 60_000)

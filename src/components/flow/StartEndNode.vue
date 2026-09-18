@@ -1,23 +1,25 @@
 <template>
-    <div class="start-end-node" :class="props.kind">
-        <Handle v-if="props.kind === 'start'" type="source" :position="Position.Bottom" />
-        <Handle v-else type="target" :position="Position.Top" />
-        <div class="d-flex align-center ga-1">
-            <span class="dot"></span>
-            <span class="text-[12px] font-weight-medium">{{
-                props.kind === 'start' ? '开始' : '结束'
-            }}</span>
-        </div>
+  <div class="start-end-node" :class="props.kind">
+    <Handle v-if="props.kind === 'start'" :position="Position.Bottom" type="source" />
+    <Handle v-else :position="Position.Top" type="target" />
+
+    <div class="d-flex align-center ga-1">
+      <span class="dot" />
+
+      <span class="text-[12px] font-weight-medium">{{
+        props.kind === 'start' ? '开始' : '结束'
+      }}</span>
     </div>
+  </div>
 </template>
 
 <script lang="ts" setup>
-import { Handle, Position } from '@vue-flow/core'
+  import { Handle, Position } from '@vue-flow/core'
 
-const props = defineProps<{
+  const props = defineProps<{
     /** start / end */
     kind: 'start' | 'end'
-}>()
+  }>()
 </script>
 
 <style scoped>

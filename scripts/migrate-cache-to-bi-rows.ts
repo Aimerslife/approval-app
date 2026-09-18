@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 /**
  * migrate-cache-to-bi-rows.ts
  *
@@ -29,19 +30,18 @@
  *   --replace          先删掉该 component 已有的行再写（默认遇到非空就拒绝）
  */
 import Database from 'better-sqlite3'
-import fs from 'node:fs'
-import { BI_ROW_FIELDS, SYNC_KEY_FIELDS } from '../src/utils/biRowFields'
-import { BI_VALUE_MAP, resolveFieldValue } from '../src/utils/productFields'
 import { buildRecord, dedupeBySyncKey } from '../server/biSync'
+import { BI_ROW_FIELDS, SYNC_KEY_FIELDS } from '../src/utils/biRowFields'
 import { describeExcelProblems, parseExcelSheet } from '../src/utils/excelTable'
+import { BI_VALUE_MAP, resolveFieldValue } from '../src/utils/productFields'
 
 const DB_PATH = process.env.PB_DB || 'pocketbase/pb_data/data.db'
 const WRITE = process.argv.includes('--write')
 
 /** 取 `--key value` 形式的参数值 */
-function argValue(name: string): string {
+function argValue (name: string): string {
   const i = process.argv.indexOf(name)
-  return i >= 0 ? (process.argv[i + 1] ?? '') : ''
+  return i === -1 ? '' : (process.argv[i + 1] ?? '')
 }
 
 /** 改从 Excel 文件导入（默认读旧的 bi_data_cache） */
@@ -86,11 +86,13 @@ if (EXCEL_ARG) {
   console.log(`  解析出 ${rawRows.length} 行（表头在第 ${parsed.headerIndex + 1} 行，识别出 ${parsed.columns.length} 列）`)
   // 解析器自己的表头提示照样要显示 —— 否则「列名看着对、整列却是空」无从解释
   const problems = describeExcelProblems(parsed)
-  if (problems) console.log(`  ⚠️ ${problems}`)
+  if (problems) {
+    console.log(`  ⚠️ ${problems}`)
+  }
 } else {
   const cache = db
     .prepare('SELECT id, component_id, row_count, fetched_at, rows FROM bi_data_cache ORDER BY fetched_at DESC LIMIT 1')
-    .get() as { id: string; component_id: string; row_count: number; fetched_at: string; rows: unknown } | undefined
+    .get() as { id: string, component_id: string, row_count: number, fetched_at: string, rows: unknown } | undefined
 
   if (!cache) {
     console.error('bi_data_cache 里没有记录。想从 Excel 导入请用 --excel <文件路径>。')
@@ -111,7 +113,9 @@ if (EXCEL_ARG) {
 let fixed = 0
 for (const row of rawRows) {
   for (const field of Object.keys(BI_VALUE_MAP)) {
-    if (!(field in row)) continue
+    if (!(field in row)) {
+      continue
+    }
     const before = row[field]
     const after = resolveFieldValue(field, before, field)
     if (after !== before) {
@@ -120,7 +124,7 @@ for (const row of rawRows) {
     }
   }
 }
-const distribution = (field: string) => {
+function distribution (field: string) {
   const m = new Map<string, number>()
   for (const r of rawRows) {
     const k = String(r[field] ?? '(空)')
@@ -136,10 +140,10 @@ console.log('')
 console.log(`唯一键 = ${SYNC_KEY_FIELDS.join(' | ')}`)
 const dedupe = dedupeBySyncKey(rawRows)
 console.log(
-  `  fetched=${rawRows.length}  unique=${dedupe.unique}  missingKey=${dedupe.missingKey}（无 SKU 被跳过）` +
-    `  duplicates=${dedupe.duplicates}（完全重复 ${dedupe.exactRepeatRows} / 同键冲突 ${dedupe.conflictRows}）`,
+  `  fetched=${rawRows.length}  unique=${dedupe.unique}  missingKey=${dedupe.missingKey}（无 SKU 被跳过）`
+  + `  duplicates=${dedupe.duplicates}（完全重复 ${dedupe.exactRepeatRows} / 同键冲突 ${dedupe.conflictRows}）`,
 )
-if (dedupe.conflicts.size) {
+if (dedupe.conflicts.size > 0) {
   const topDiff = [...dedupe.conflictDiffColumns.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
   console.log(`  ⚠️ ${dedupe.conflicts.size} 个键出现「同键不同内容」，按先到者保留`
     + `（后到的被丢弃，共 ${dedupe.conflictRows} 行）。差异列: ${JSON.stringify(topDiff)}`)
@@ -153,7 +157,7 @@ const records = [...dedupe.byKey.entries()].map(([key, row]) => buildRecord(comp
 
 const unmapped = [...new Set(rawRows.flatMap(r => Object.keys(r)))]
   .filter(k => k !== 'id' && !BI_ROW_FIELDS.some(f => f.key === k))
-if (unmapped.length) {
+if (unmapped.length > 0) {
   console.log(`  ⚠️ ${unmapped.length} 个列没有对应库字段（数据仍在 data 快照里，只是不能按它筛选）: ${unmapped.join(', ')}`)
 }
 
@@ -225,8 +229,8 @@ try {
       inserted++
     }
   })()
-} catch (e) {
-  console.error(`⛔ 写入失败，已整体回滚（库里没留下任何东西）：${e instanceof Error ? e.message : e}`)
+} catch (error) {
+  console.error(`⛔ 写入失败，已整体回滚（库里没留下任何东西）：${error instanceof Error ? error.message : error}`)
   db.close()
   process.exit(1)
 }
@@ -236,7 +240,7 @@ console.log(`✅ 已写入 ${inserted} 行`)
 const back = db.prepare('SELECT COUNT(*) AS n FROM bi_rows WHERE component_id = ?').get(componentId) as { n: number }
 console.log(`回读：component=${componentId} 现在共 ${back.n} 行`)
 console.log('  is_dead 分布: ' + JSON.stringify(db.prepare('SELECT is_dead, COUNT(*) AS n FROM bi_rows WHERE component_id = ? GROUP BY is_dead').all(componentId)))
-console.log('  group_name 非空行数: ' + JSON.stringify(db.prepare("SELECT COUNT(*) AS n FROM bi_rows WHERE component_id = ? AND group_name != ''").get(componentId)))
+console.log('  group_name 非空行数: ' + JSON.stringify(db.prepare('SELECT COUNT(*) AS n FROM bi_rows WHERE component_id = ? AND group_name != \'\'').get(componentId)))
 const samples = db.prepare('SELECT sync_key, sku, group_name, is_dead, qty_total FROM bi_rows WHERE component_id = ? LIMIT 3').all(componentId)
 console.log('  样例: ' + JSON.stringify(samples))
 db.close()

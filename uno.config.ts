@@ -1,4 +1,4 @@
-import { defineConfig, transformerDirectives, presetUno } from 'unocss'
+import { defineConfig, presetUno, transformerDirectives } from 'unocss'
 import { presetVuetify } from 'unocss-preset-vuetify'
 
 export default defineConfig({

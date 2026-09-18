@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import pb from '@/pocketbase'
 import { getDashbordDatas } from '@/api/api'
+import pb from '@/pocketbase'
 
 /**
  * BI 表格数据的缓存。
@@ -52,7 +52,7 @@ interface CacheRecord {
 }
 
 /** 拼 PocketBase filter 字面量：去掉引号/反斜杠，避免过滤条件被注入 */
-function pbQuote(s: string): string {
+function pbQuote (s: string): string {
   return `"${s.replace(/["\\]/g, '')}"`
 }
 
@@ -69,7 +69,7 @@ export const useBiDataStore = defineStore('biData', () => {
   /** 内存里这份数据属于哪个组件，避免换组件时误用 */
   let loadedComponentId = ''
 
-  function isFresh(at: string): boolean {
+  function isFresh (at: string): boolean {
     return !!at && Date.now() - new Date(at).getTime() < CACHE_TTL_MS
   }
 
@@ -82,7 +82,7 @@ export const useBiDataStore = defineStore('biData', () => {
   )
 
   /** 读该组件在 PB 里的缓存记录。不校验版本/时效，便于复用它做 update */
-  async function readCache(componentId: string): Promise<CacheRecord | null> {
+  async function readCache (componentId: string): Promise<CacheRecord | null> {
     try {
       return await pb.collection(COLLECTION).getFirstListItem<CacheRecord>(
         `component_id=${pbQuote(componentId)}`,
@@ -95,7 +95,7 @@ export const useBiDataStore = defineStore('biData', () => {
   }
 
   /** 写回 PB。同组件只留一条（先查再 update），记录数不随刷新次数增长 */
-  async function writeCache(
+  async function writeCache (
     componentId: string,
     data: Record<string, unknown>[],
     at: string,
@@ -103,8 +103,8 @@ export const useBiDataStore = defineStore('biData', () => {
     const bytes = JSON.stringify(data).length
     if (bytes > MAX_CACHE_BYTES) {
       console.warn(
-        `[biData] 数据 ${(bytes / 1048576).toFixed(1)}MB 超过缓存护栏 ` +
-        `${(MAX_CACHE_BYTES / 1048576).toFixed(0)}MB，本次不写缓存`,
+        `[biData] 数据 ${(bytes / 1_048_576).toFixed(1)}MB 超过缓存护栏 `
+        + `${(MAX_CACHE_BYTES / 1_048_576).toFixed(0)}MB，本次不写缓存`,
       )
       return
     }
@@ -117,18 +117,17 @@ export const useBiDataStore = defineStore('biData', () => {
     }
     try {
       const existing = await readCache(componentId)
-      if (existing) await pb.collection(COLLECTION).update(existing.id, payload)
-      else await pb.collection(COLLECTION).create(payload)
+      await (existing ? pb.collection(COLLECTION).update(existing.id, payload) : pb.collection(COLLECTION).create(payload))
       console.log(
-        `[biData] 已写入 PB 缓存：${data.length} 行 / ${(bytes / 1048576).toFixed(1)}MB`,
+        `[biData] 已写入 PB 缓存：${data.length} 行 / ${(bytes / 1_048_576).toFixed(1)}MB`,
       )
-    } catch (err) {
+    } catch (error) {
       // 缓存写失败不能影响主流程 —— 数据已经拿到了，只是下次还得回源
-      console.warn('[biData] 写入 PB 缓存失败（不影响本次使用）:', err)
+      console.warn('[biData] 写入 PB 缓存失败（不影响本次使用）:', error)
     }
   }
 
-  function apply(data: Record<string, unknown>[], at: string, componentId: string) {
+  function apply (data: Record<string, unknown>[], at: string, componentId: string) {
     rows.value = data
     fetchedAt.value = at
     loadedComponentId = componentId
@@ -138,21 +137,23 @@ export const useBiDataStore = defineStore('biData', () => {
    * 取数据。
    * @param force 跳过内存与 PB 缓存，强制回源（页面上的「刷新数据」用它）
    */
-  async function load(componentId: string, { force = false } = {}): Promise<void> {
+  async function load (componentId: string, { force = false } = {}): Promise<void> {
     // 1) 内存命中：同组件 + 有数据 + 未过期
-    const memoryHit =
-      loadedComponentId === componentId && rows.value.length > 0 && isFresh(fetchedAt.value)
-    if (!force && memoryHit) return
+    const memoryHit
+      = loadedComponentId === componentId && rows.value.length > 0 && isFresh(fetchedAt.value)
+    if (!force && memoryHit) {
+      return
+    }
 
     notice.value = ''
 
     // 2) PB 缓存。即便已过期也先留着 —— 回源失败时可以拿它兜底
     const cached = await readCache(componentId)
-    const cacheUsable =
-      !!cached &&
-      cached.data_version === DATA_VERSION &&
-      Array.isArray(cached.rows) &&
-      isFresh(cached.fetched_at)
+    const cacheUsable
+      = !!cached
+        && cached.data_version === DATA_VERSION
+        && Array.isArray(cached.rows)
+        && isFresh(cached.fetched_at)
 
     if (!force && cacheUsable && cached) {
       apply(cached.rows, cached.fetched_at, componentId)
@@ -167,10 +168,10 @@ export const useBiDataStore = defineStore('biData', () => {
       const at = new Date().toISOString()
       apply(fresh, at, componentId)
       await writeCache(componentId, fresh, at)
-    } catch (err) {
-      console.error('[biData] 从 BI 拉取失败:', err)
+    } catch (error) {
+      console.error('[biData] 从 BI 拉取失败:', error)
       // 宁可展示过期数据，也别给白屏
-      if (cached && Array.isArray(cached.rows) && cached.rows.length) {
+      if (cached && Array.isArray(cached.rows) && cached.rows.length > 0) {
         apply(cached.rows, cached.fetched_at, componentId)
         notice.value = `BI 拉取失败，当前展示的是 ${cached.fetched_at.slice(0, 16).replace('T', ' ')} 的缓存数据`
       } else {

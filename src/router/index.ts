@@ -59,39 +59,39 @@ const router = createRouter({
       component: () => import('@/pages/editRule.vue'),
     },
     {
-      path:'/approvalModel',
+      path: '/approvalModel',
       component: () => import('@/pages/approvalModel.vue'),
     },
     {
-      path:'/mine',
+      path: '/mine',
       component: () => import('@/pages/mine.vue'),
     },
     {
-      path:'/approvalDetail',
+      path: '/approvalDetail',
       component: () => import('@/pages/approvalDetail.vue'),
     },
     {
-      path:'/approvalPage',
+      path: '/approvalPage',
       component: () => import('@/pages/approvalPage.vue'),
     },
     {
-      path:'/roleSetting',
+      path: '/roleSetting',
       component: () => import('@/pages/roleSetting.vue'),
     },
     {
-      path:'/editStream',
+      path: '/editStream',
       component: () => import('@/pages/editStream.vue'),
     },
     {
-      path:'/userSetting',
+      path: '/userSetting',
       component: () => import('@/pages/userSetting.vue'),
     },
     {
-      path:'/workStream',
+      path: '/workStream',
       component: () => import('@/pages/workStream.vue'),
-    }
+    },
   ],
-  scrollBehavior() {
+  scrollBehavior () {
     return { top: 0 }
   },
 })

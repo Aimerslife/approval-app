@@ -23,12 +23,12 @@ const COLLECTION_ID = 'pbc_1789660001'
 const COLLECTION_NAME = 'bi_rows'
 
 /** PB 的字段 id 必须是 [a-z0-9]+，且集合内唯一 */
-function fieldId(index: number, type: string): string {
+function fieldId (index: number, type: string): string {
   const prefix = type === 'number' ? 'num' : 'txt'
   return `${prefix}178966${String(index).padStart(4, '0')}`
 }
 
-function textField(id: string, name: string, help: string): string {
+function textField (id: string, name: string, help: string): string {
   return `      {
         "autogeneratePattern": "",
         "help": ${JSON.stringify(help)},
@@ -46,7 +46,7 @@ function textField(id: string, name: string, help: string): string {
       }`
 }
 
-function numberField(id: string, name: string, help: string): string {
+function numberField (id: string, name: string, help: string): string {
   return `      {
         "help": ${JSON.stringify(help)},
         "hidden": false,
@@ -62,10 +62,7 @@ function numberField(id: string, name: string, help: string): string {
       }`
 }
 
-const fields: string[] = []
-
-// 1) id 主键
-fields.push(`      {
+const fields: string[] = [`      {
         "autogeneratePattern": "[a-z0-9]{15}",
         "help": "",
         "hidden": false,
@@ -79,8 +76,9 @@ fields.push(`      {
         "required": true,
         "system": true,
         "type": "text"
-      }`)
+      }`]
 
+// 1) id 主键
 // 2) 同步用的元字段。
 // ⚠️ id 前缀刻意用 `meta` 而不是 `txt`：业务列的 id 是 txt178966<4位序号>，
 //    序号从 0000 起 —— 如果元字段也用 txt1789660001，就会和序号 1 的业务列撞 id，
@@ -102,14 +100,14 @@ fields.push(
 )
 
 // 3) 65 个业务列，按映射表顺序
-BI_ROW_FIELDS.forEach((f, i) => {
+for (const [i, f] of BI_ROW_FIELDS.entries()) {
   const help = `${f.title}（BI 中文字段名：${f.key}）`
   fields.push(
     f.type === 'number'
       ? numberField(fieldId(i, 'number'), f.field, help)
       : textField(fieldId(i, 'text'), f.field, help),
   )
-})
+}
 
 // 4) 整行快照 + 拉取时间
 fields.push(`      {
@@ -137,8 +135,7 @@ fields.push(`      {
         "presentable": false,
         "system": false,
         "type": "autodate"
-      }`)
-fields.push(`      {
+      }`, `      {
         "hidden": false,
         "id": "autodate3332085495",
         "name": "updated",
@@ -195,7 +192,7 @@ ${fields.join(',\n')}
     ],
     "id": ${JSON.stringify(COLLECTION_ID)},
     "indexes": [
-${INDEXES.map(s => '      ' + JSON.stringify(s)).join(',\n')}
+${INDEXES.map(s => ' '.repeat(6) + JSON.stringify(s)).join(',\n')}
     ],
     "listRule": "@request.auth.id != ''",
     "name": ${JSON.stringify(COLLECTION_NAME)},
@@ -217,7 +214,7 @@ ${INDEXES.map(s => '      ' + JSON.stringify(s)).join(',\n')}
 // 而 PB 只会在启动时报错、信息也不直观。这里先自查再落盘。
 const allIds = [...migration.matchAll(/"id":\s*"([^"]+)"/g)].map(m => m[1])
 const dupIds = [...new Set(allIds.filter((id, i) => allIds.indexOf(id) !== i))]
-if (dupIds.length) {
+if (dupIds.length > 0) {
   throw new Error(`[gen] 字段 id 重复: ${dupIds.join(', ')} —— 检查 fieldId() 与固定 id 的前缀`)
 }
 if (new Set(allIds).size !== allIds.length) {
@@ -231,21 +228,21 @@ const longHelp = [...migration.matchAll(/"help":\s*"((?:[^"\\]|\\.)*)"/g)]
   .map(m => m[1].replace(/\\n/g, '\n'))
   .map(h => ({ h, bytes: Buffer.byteLength(h, 'utf8') }))
   .filter(x => x.bytes > 300)
-if (longHelp.length) {
+if (longHelp.length > 0) {
   throw new Error(
-    `[gen] 有 ${longHelp.length} 个 help 超过 300 字节（PB 上限，中文按 3 字节算）: ` +
-      longHelp.map(x => `「${x.h.slice(0, 16)}…」${x.bytes} 字节`).join('; '),
+    `[gen] 有 ${longHelp.length} 个 help 超过 300 字节（PB 上限，中文按 3 字节算）: `
+    + longHelp.map(x => `「${x.h.slice(0, 16)}…」${x.bytes} 字节`).join('; '),
   )
 }
 // 索引里引用的列必须真的被声明过（写错列名 PB 也会在启动时报错）
-const declaredNames = [...migration.matchAll(/"name":\s*"([^"]+)"/g)].map(m => m[1])
+const declaredNames = new Set([...migration.matchAll(/"name":\s*"([^"]+)"/g)].map(m => m[1]))
 for (const sql of INDEXES) {
   const cols = (sql.match(/\(\s*([^)]+)\)\s*$/) ?? [, ''])[1]
     .split(',')
     .map(s => s.replace(/[`\s]/g, ''))
     .filter(Boolean)
-  const missing = cols.filter(c => !declaredNames.includes(c))
-  if (missing.length) {
+  const missing = cols.filter(c => !declaredNames.has(c))
+  if (missing.length > 0) {
     throw new Error(`[gen] 索引引用了不存在的列: ${missing.join(', ')}`)
   }
 }

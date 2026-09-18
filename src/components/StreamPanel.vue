@@ -1,17 +1,17 @@
 <template>
   <div class="stream-panel">
     <VueFlow
-      v-model:nodes="nodes"
       v-model:edges="edges"
-      :node-types="nodeTypes"
-      :min-zoom="0.08"
+      v-model:nodes="nodes"
+      class="vue-flow-wrapper"
+      fit-view-on-init
       :max-zoom="1.5"
+      :min-zoom="0.08"
+      :node-types="nodeTypes"
       :pan-on-drag="true"
       :zoom-on-scroll="true"
-      fit-view-on-init
-      class="vue-flow-wrapper"
     >
-      <Background :pattern-color="isDark ? '#334155' : '#e5e7eb'" :gap="20" />
+      <Background :gap="20" :pattern-color="isDark ? '#334155' : '#e5e7eb'" />
       <Controls />
       <MiniMap pannable zoomable />
     </VueFlow>
@@ -19,59 +19,57 @@
 </template>
 
 <script setup lang="ts">
-import {
-  VueFlow,
-  MarkerType,
-  type Node,
-  type Edge,
-  type NodeTypesObject,
-} from '@vue-flow/core'
-import { useTheme } from 'vuetify'
-import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
-import '@vue-flow/core/dist/style.css'
-import '@vue-flow/core/dist/theme-default.css'
+  import { Background } from '@vue-flow/background'
+  import { Controls } from '@vue-flow/controls'
+  import {
+    type Edge,
+    MarkerType,
+    type Node,
+    type NodeTypesObject,
+    VueFlow,
+  } from '@vue-flow/core'
+  import { MiniMap } from '@vue-flow/minimap'
+  import { useTheme } from 'vuetify'
+  // 流程数据由飞书白板快照转换而来 —— 改内容请改数据文件，别在这里手写节点：
+  // 它带着原图的坐标 / 尺寸 / 配色 / 连接点方位，手改很快会和原图对不上。
+  import { inventoryEdges, inventoryNodes } from '@/data/inventoryFlow'
+  import DecisionNode from './flowNodes/DecisionNode.vue'
+  import IoNode from './flowNodes/IoNode.vue'
+  import ProcessNode from './flowNodes/ProcessNode.vue'
+  import StartEndNode from './flowNodes/StartEndNode.vue'
+  import ZoneNode from './flowNodes/ZoneNode.vue'
+  import '@vue-flow/core/dist/style.css'
+  import '@vue-flow/core/dist/theme-default.css'
 
-import ProcessNode from './flowNodes/ProcessNode.vue'
-import DecisionNode from './flowNodes/DecisionNode.vue'
-import StartEndNode from './flowNodes/StartEndNode.vue'
-import IoNode from './flowNodes/IoNode.vue'
-import ZoneNode from './flowNodes/ZoneNode.vue'
+  const nodeTypes = {
+    process: ProcessNode,
+    decision: DecisionNode,
+    start: StartEndNode,
+    end: StartEndNode,
+    io: IoNode,
+    zone: ZoneNode,
+  } as NodeTypesObject
 
-// 流程数据由飞书白板快照转换而来 —— 改内容请改数据文件，别在这里手写节点：
-// 它带着原图的坐标 / 尺寸 / 配色 / 连接点方位，手改很快会和原图对不上。
-import { inventoryEdges, inventoryNodes } from '@/data/inventoryFlow'
+  // 拷贝一份：VueFlow 会往节点/连线上写运行时字段（选中态、尺寸等），
+  // 直接引用模块级常量会把它们污染到下次挂载
+  const nodes = ref<Node[]>([...inventoryNodes])
+  const edges = ref<Edge[]>([...inventoryEdges])
 
-const nodeTypes = {
-  process: ProcessNode,
-  decision: DecisionNode,
-  start: StartEndNode,
-  end: StartEndNode,
-  io: IoNode,
-  zone: ZoneNode,
-} as NodeTypesObject
-
-// 拷贝一份：VueFlow 会往节点/连线上写运行时字段（选中态、尺寸等），
-// 直接引用模块级常量会把它们污染到下次挂载
-const nodes = ref<Node[]>([...inventoryNodes])
-const edges = ref<Edge[]>([...inventoryEdges])
-
-/** 连线与箭头是内联样式（CSS 变量盖不住），跟随主题改色 */
-const theme = useTheme()
-const isDark = computed(() => theme.global.name.value === 'dark')
-watch(
-  isDark,
-  dark => {
-    const color = dark ? '#c9d1d9' : '#475569'
-    edges.value = edges.value.map(e => ({
-      ...e,
-      style: { ...e.style, stroke: color },
-      markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
-    }))
-  },
-  { immediate: true },
-)
+  /** 连线与箭头是内联样式（CSS 变量盖不住），跟随主题改色 */
+  const theme = useTheme()
+  const isDark = computed(() => theme.global.name.value === 'dark')
+  watch(
+    isDark,
+    dark => {
+      const color = dark ? '#c9d1d9' : '#475569'
+      edges.value = edges.value.map(e => ({
+        ...e,
+        style: { ...e.style, stroke: color },
+        markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
+      }))
+    },
+    { immediate: true },
+  )
 </script>
 
 <style lang="scss" scoped>
