@@ -313,24 +313,31 @@
       </v-sheet>
 
       <!--
-        办理时填的选项明细（数量 / 金额 / 原因 / 接收团队…）。
-        之前 extraItems 只定义了没渲染 —— 办理人选完接收团队，时间线上什么都看不到。
+        「选择接收团队」选中的人：按成员卡片的方式显示**人本身的信息**（头像 + 姓名 + 邮箱）。
+        只显示一个名字字符串看不出是谁；渲染口径与下方「抄送」一致。
+      -->
+      <div v-if="pickedReceiver" class="mt-2 d-flex align-center gap-2">
+        <v-chip class="mr-1" color="primary" label size="x-small" variant="flat">
+          <span class="text-[9px]">接收团队</span>
+        </v-chip>
+
+        <v-avatar class="mr-1" size="22">
+          <v-img v-if="pickedReceiver.avatar" cover :src="proxyAvatar(pickedReceiver.avatar)" />
+          <v-icon v-else size="13">mdi-account</v-icon>
+        </v-avatar>
+
+        <span class="text-[10px] text-medium-emphasis">{{ pickedReceiver.name }}</span>
+        <span v-if="pickedReceiver.email" class="text-[10px] text-high-emphasis">{{ pickedReceiver.email }}</span>
+      </div>
+
+      <!--
+        其余办理明细（数量 / 金额 / 原因…）。
+        之前 extraItems 只定义了没渲染 —— 现在渲染出来；接收团队已单独成块，这里不重复。
       -->
       <div v-if="extraItems.length > 0" class="mt-1 d-flex flex-wrap align-center ga-2">
-        <template v-for="it in extraItems" :key="it.key">
-          <v-chip
-            v-if="it.key === 'members'"
-            class="mt-1"
-            color="primary"
-            label
-            size="small"
-            variant="tonal"
-          >
-            接收团队：{{ it.value }}
-          </v-chip>
-
-          <span v-else class="text-[11px] text-medium-emphasis">{{ it.label }}：{{ it.value }}</span>
-        </template>
+        <span v-for="it in extraItems" :key="it.key" class="text-[11px] text-medium-emphasis">
+          {{ it.label }}：{{ it.value }}
+        </span>
       </div>
 
       <div v-if="manager.files?.length" class="mt-1 d-flex align-center flex-wrap text-[11px]">
@@ -387,7 +394,8 @@
 </template>
 
 <script lang="ts" setup>
-  import type { UserBrief } from '@/api/api'
+  // proxyAvatar：飞书头像要经服务端代理才能在浏览器里正常显示（接收团队那块要用头像）
+  import { proxyAvatar, type UserBrief } from '@/api/api'
   import type { ApprovalChainItem, NodeSubmitPayload } from '@/types/approval'
   import dayjs from 'dayjs'
   import { APPROVAL_RESULTS, PICK_MEMBERS_RESULT } from '@/types/approval'
@@ -493,12 +501,25 @@
   /** extra 中仅供内部联动/路由的标识字段（对用户无意义），不展示 */
   const EXTRA_HIDDEN_KEYS = /_target$/
 
+  /**
+   * 「选择接收团队」选中的人（原始成员对象）。
+   * 单独取出来是为了能显示**人本身的信息**（头像 / 邮箱），而不是只剩一个名字字符串；
+   * 兼容两种形状：单选是成员对象、多选是成员数组（取第一个）。
+   */
+  const pickedReceiver = computed<ApprovalChainItem | undefined>(() => {
+    const raw = manager.value?.extra?.members
+    const one = Array.isArray(raw) ? raw[0] : raw
+    return one && typeof one === 'object' ? (one as ApprovalChainItem) : undefined
+  })
+
   /** 办理信息中的选项明细（extra），过滤空值与内部标识字段后生成 { label, value } 列表 */
   const extraItems = computed(() => {
     const extra = manager.value?.extra
     if (!extra) return []
     return Object.entries(extra)
-      .filter(([key]) => !EXTRA_HIDDEN_KEYS.test(key))
+        // members（接收团队）已在上方单独成块渲染，这里不重复
+        .filter(([key]) => key !== 'members')
+        .filter(([key]) => !EXTRA_HIDDEN_KEYS.test(key))
       .filter(([, v]) => v !== undefined && v !== null && v !== '')
       .map(([key, v]) => ({
         key,
@@ -720,7 +741,7 @@
         extra.members = pickedMembers.value
         const names = pickedMembers.value.name
         // 结论文案带上名字：时间线上一眼能看出这一环指定了谁
-        return { result, result_label: names ? `选择接收人员：${names}` : '选择接收人员', extra }
+        return { result, result_label: names ? `选择接收团队：${names}` : '选择接收团队', extra }
       }
       case 'pending': {
         return { result, result_label: '待定', extra }
