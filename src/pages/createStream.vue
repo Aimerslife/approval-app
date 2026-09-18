@@ -1081,8 +1081,17 @@ function resetAll() {
 
 // ===== 图 → ApprovalFlow 转换（保存时） =====
 // 返回类型直接取转换器的（含 errorNodeId / errorEdgeId），避免在这里抄一份类型后漏字段
+/**
+ * 画布 → flow。
+ *
+ * `allowEmptyMembers: true` —— **允许没有审批人的环节**，两种正当用法：
+ *  ① 模板先搭结构、人之后再配；
+ *  ② 该环节故意留空：由**上一环**的办理人用「选择接收人员」当场指定
+ *     （白板上的「指定接收团队」就是这种环节，见 PICK_MEMBERS_RESULT）。
+ * 卡片上会显示「待指定」，所以不会存成一条"看不出缺人"的流程。
+ */
 function graphToFlow(): ReturnType<typeof graphToFlowFrom> {
-    return graphToFlowFrom(nodes.value, edges.value)
+    return graphToFlowFrom(nodes.value, edges.value, { allowEmptyMembers: true })
 }
 
 

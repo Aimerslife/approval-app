@@ -219,6 +219,18 @@ export function isConditionGroup(expr: ConditionExpr): expr is ConditionGroup {
     return Array.isArray((expr as ConditionGroup)?.items)
 }
 
+/**
+ * 「选择接收人员」结论码。
+ *
+ * 语义：这一环的办理人**当场指定人**，选中的人填充到**下一环节**、成为它的审批人。
+ * 所以模板里那个接收环节**可以留空**（`allowEmptyMembers`，编辑器已放开）——
+ * 「谁办下一环」由业务在办理时根据实际情况决定，写死在模板里反而做不到。
+ * 白板上的「指定接收团队」就是这种环节。
+ *
+ * 两侧共用这个常量：办理弹窗收集人选、useNodeSubmit 负责填充。
+ */
+export const PICK_MEMBERS_RESULT = 'pick_members'
+
 /** 审批结论选项：value 与运行时办理结论（result 码）保持一致，供「审批结果分支」配置与校验 */
 export const APPROVAL_RESULTS: ReadonlyArray<{ value: string; label: string }> = [
     { value: 'pass', label: '通过' },
@@ -232,6 +244,10 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string; label: string }> =
     { value: 'lack_demand', label: '市场需求不足' },
     { value: 'other_reason', label: '其他原因' },
     { value: 'pending', label: '待定' },
+    // 「选择接收人员」：办理人当场指定人，选中的人**填充到下一环节**（成为它的审批人）。
+    // 配套的是「允许没有审批人的环节」—— 模板里把接收环节留空，由上一环指定。
+    // 白板上的「指定接收团队」就是这个环节。
+    { value: PICK_MEMBERS_RESULT, label: '选择接收人员' },
     // —— 原因分类：来自「库存管理流程规范」白板的「筛选一级原因/二级原因」环节——
     // 那一环的出线在图上没写标签，分类写在**目标节点标题**上，所以这些类是审批人的结论选项。
     // 纯新增，不影响已有模板（结论选项是按 flow 里绑的条件算出来的）。

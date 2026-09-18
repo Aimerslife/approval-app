@@ -13,11 +13,6 @@
                 </v-avatar>
                 <span class="text-body-small" :class="{ 'text-medium-emphasis text-decoration-line-through': transferredTo }">
                     {{ manageDatas[0]?.name }}</span>
-                <!--
-                    转办的两端都要说明白：
-                    被接替的人（原审批人）标「已转办 → X」并划掉，
-                    接替的人（delegated_from 那位）单独标一条 —— 否则同一环节看着像会签，实际只有他在办。
-                -->
                 <v-chip v-if="transferredTo" size="x-small" color="secondary" variant="tonal" label>
                     已转办 → {{ transferredTo }}
                 </v-chip>
@@ -105,6 +100,31 @@
                                             </div>
                                         </template>
                                     </div>
+                                    <!-- 「选择接收人员」：当场指定人 → 提交时填充到**下一环节**（见 useNodeSubmit） -->
+                                    <div v-if="needPickMembers" class="mt-2">
+                                        <div class="d-flex align-center ga-2 flex-wrap">
+                                            <v-btn size="small" variant="tonal" color="primary"
+                                                :prepend-icon="picking ? 'mdi-chevron-up' : 'mdi-account-plus-outline'"
+                                                @click="picking = !picking">
+                                                {{ pickedMembers.length ? `已选 ${pickedMembers.length} 人` : '选择接收人员' }}
+                                            </v-btn>
+                                            <span class="text-[11px] text-medium-emphasis">
+                                                选中的人会成为下一环节的审批人
+                                            </span>
+                                        </div>
+                                        <div v-if="pickedMembers.length" class="d-flex flex-wrap ga-1 mt-2">
+                                            <v-chip v-for="(m, i) in pickedMembers" :key="i" size="small" closable
+                                                @click:close="unpickMember(i)">
+                                                {{ m.name }}
+                                            </v-chip>
+                                        </div>
+                                        <v-expand-transition>
+                                            <div v-show="picking">
+                                                <v-divider class="my-2"></v-divider>
+                                                <DepartmentNode @select="pickMember" />
+                                            </div>
+                                        </v-expand-transition>
+                                    </div>
                                 </div>
                                 <!-- 备注 / 审批意见 -->
                                 <div>
@@ -133,31 +153,6 @@
                                     <v-icon size="15" icon="mdi-close"></v-icon>
                                 </v-btn>
                             </div>
-                            <template v-if="!dialogs">
-                                <v-card-actions class="px-4 pt-0 d-flex align-center justify-space-between">
-                                    <div class="d-flex align-center ga-2">
-                                        <v-btn size="small" variant="tonal" color="primary">转交团队</v-btn>
-                                        <div v-if="user" class="d-flex align-center ga-1">
-                                            <v-icon size="18" icon="mdi-transfer-right" color="info"></v-icon>
-                                            <div
-                                                class="d-flex align-center ga-1 border pa-1 border-dashed border-[#7BC0F7] rounded-lg">
-                                                <v-avatar size="20">
-                                                    <v-img v-if="user?.avatar" :src="user.avatar" cover />
-                                                    <v-icon v-else size="14">mdi-account</v-icon>
-                                                </v-avatar>
-                                                <span class="text-[11px] text-medium-emphasis">{{ user?.name }}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <v-btn :icon="show ? 'mdi-chevron-up' : 'mdi-chevron-down'" @click="show = !show"></v-btn>
-                                </v-card-actions>
-                                <v-expand-transition>
-                                    <div v-show="show">
-                                        <v-divider></v-divider>
-                                        <DepartmentNode v-show="true" ref="deptNodeRef" @select="selectUser" />
-                                    </div>
-                                </v-expand-transition>
-                            </template>
                             <v-divider></v-divider>
                             <v-card-actions class="px-4 py-3">
                                 <v-spacer></v-spacer>
@@ -220,7 +215,7 @@ import DepartmentNode from './DepartmentNode.vue'
 import dayjs from 'dayjs'
 import { formatDate, getPinyinInitials, formatTimeDiff } from '@/utils/utils'
 import { buildColorScale, pickColorStep } from '@/utils/color'
-import { APPROVAL_RESULTS } from '@/types/approval'
+import { APPROVAL_RESULTS, PICK_MEMBERS_RESULT } from '@/types/approval'
 import type { ApprovalChainItem, NodeSubmitPayload } from '@/types/approval'
 
 const overlay = ref(false)
@@ -317,6 +312,7 @@ const EXTRA_LABELS: Record<string, string> = {
     reason_belong: '分类',
     second_reason: '二级原因',
     remark: '补充说明',
+    members: '接收人员',
 }
 /** extra 中仅供内部联动/路由的标识字段（对用户无意义），不展示 */
 const EXTRA_HIDDEN_KEYS = /_target$/
@@ -331,8 +327,17 @@ const extraItems = computed(() => {
         .map(([key, v]) => ({
             key,
             label: EXTRA_LABELS[key] ?? key,
-            value: typeof v === 'boolean' ? (v ? '已确认' : '未确认') : String(v),
+            // 「接收人员」这类值是对象数组：拼名字展示，别渲染成 [object Object]
+            value: Array.isArray(v)
+                ? v
+                    .map(x => (x && typeof x === 'object' ? String((x as { name?: unknown }).name ?? '') : String(x)))
+                    .filter(Boolean)
+                    .join('、')
+                : typeof v === 'boolean'
+                    ? (v ? '已确认' : '未确认')
+                    : String(v),
         }))
+        .filter(item => item.value !== '')
 })
 
 const dialog = ref(false)
@@ -344,7 +349,26 @@ const selectedValue = ref('')
 
 const reason = ref({ text: '市场需求分析不足/运营策略不当', target: 'operation-analysis', belong: '运营' })
 const secondReason = ref({ text: '运营/销售', target: 'sale' })
-const show = ref(false)
+/** 「选择接收人员」选中的人：提交时由 useNodeSubmit 填充到**下一环节** */
+const pickedMembers = ref<ApprovalChainItem[]>([])
+/** 选人面板是否展开 */
+const picking = ref(false)
+
+/** 选一位接收人（可多点几位，去重后累积） */
+function pickMember(u: UserBrief) {
+    const key = u.email || u.name
+    if (pickedMembers.value.some(m => (m.email || m.name) === key)) return
+    pickedMembers.value = [...pickedMembers.value, {
+        name: u.name,
+        ...(u.email ? { email: u.email } : {}),
+        ...(u.avatar ? { avatar: u.avatar } : {}),
+        type: 'manager',
+    }]
+}
+
+function unpickMember(i: number) {
+    pickedMembers.value = pickedMembers.value.filter((_, idx) => idx !== i)
+}
 /**
  * 本环节可选的审批结论：取自模板中该环节后面分支组绑定的 result 条件（allowedResults），
  * 取代原先「按环节下标 tab 决定表单类型」的硬编码做法 —— 表单跟着模板配置走。
@@ -390,6 +414,8 @@ const needReceiveQty = computed(
 const needRecycle = computed(() => selectedResult.value === 'recycle')
 const needScrapConfirm = computed(() => selectedResult.value === 'scrap')
 const needReason = computed(() => selectedResult.value === 'other_reason')
+/** 「选择接收人员」：需要当场选人（见 PICK_MEMBERS_RESULT） */
+const needPickMembers = computed(() => selectedResult.value === PICK_MEMBERS_RESULT)
 
 const nodeTargets = computed(() => props.data.filter(item => item.type != "manager"))
 
@@ -402,10 +428,6 @@ const nodeTargets = computed(() => props.data.filter(item => item.type != "manag
 const transferIn = computed(() => props.data.find(m => m.delegated_from))
 const transferredTo = computed(() => manageDatas.value[0]?.transferred_to)
 
-const user = ref<UserBrief | null>(null)
-function selectUser(u: UserBrief) {
-    user.value = u
-}
 const imgUrl = ref('')
 function showPic(url: string) {
     overlay.value = true
@@ -514,6 +536,12 @@ function collectResult(): { result: string; result_label: string; extra: Record<
             }
             if (reason.value.belong === '外部环境') extra.remark = reasonRemark.value
             return { result, result_label: reason.value.text, extra }
+        }
+        case PICK_MEMBERS_RESULT: { // 选择接收人员：人选在这里收集，由 useNodeSubmit 填充到下一环节
+            extra.members = pickedMembers.value.map(m => ({ name: m.name, email: m.email, avatar: m.avatar }))
+            const names = pickedMembers.value.map(m => m.name).join('、')
+            // 结论文案带上名字：时间线上一眼能看出这一环指定了谁
+            return { result, result_label: names ? `选择接收人员：${names}` : '选择接收人员', extra }
         }
         case 'pending':
             return { result, result_label: '待定', extra }

@@ -2,10 +2,12 @@ import { ref, type Ref } from 'vue'
 import {
     APPROVAL_STATUS,
     buildBranchTerminalMap,
+    PICK_MEMBERS_RESULT,
     rebuildChain,
 } from '@/types/approval'
 import type {
     ApprovalAttachment,
+    ApprovalChainItem,
     ApprovalOrder,
     NodeDecision,
     NodeSubmitPayload,
@@ -125,12 +127,52 @@ export function useNodeSubmit(options: {
             // 3. 用最新流水重算 chain（结论落到各环节的审批人上，供 ApprovalNode 展示）
             const rebuilt = rebuildChain(flow, decisions, terminalMap, context)
 
+            /*
+             * 3.5 「选择接收人员」：把办理人选的人**填充到下一环节**。
+             *
+             * 为什么写 extraMembers 而不是改 flow：flow 是**模板**，改它会波及这张模板
+             * 之后新建的所有单据；extraMembers 是「本单在运行期追加的成员」——
+             * 抄送 / 转办用的就是它，展示时由 mergeExtraMembers 合并回 chain，不新增数据结构。
+             *
+             * 没选人：**拦下来**（与"审批意见必填"同一档）—— 结论已经定了、人也该定，
+             * 放过去的话下一环还是空的、单子照样卡住，却看不出是谁漏的。
+             */
+            const picked = payload.result === PICK_MEMBERS_RESULT ? toFilledMembers(payload.extra?.members) : []
+            if (payload.result === PICK_MEMBERS_RESULT && !picked.length) {
+                options.onMessage?.('请选择接收人员', 'warning')
+                payload.done(false)
+                return null
+            }
+            const nextIndex = payload.index + 1
+            const nextStepId = rebuilt.stepIds[nextIndex]
+            let extraMembers: Record<string, ApprovalChainItem[]> | undefined
+            if (picked.length) {
+                if (!nextStepId) {
+                    // 后面没有环节可填（结论绑在了最后一环）：不拦提交，但要说明白，
+                    // 否则用户以为人已经指派好了
+                    options.onMessage?.('这一环后面没有环节，选中的人只记在了本环节的办理记录里', 'warning')
+                } else {
+                    // 已在这一环的人不重复加（会签名单里出现两个同名的人，看起来像两个人）
+                    const exist = rebuilt.chain[nextIndex] ?? []
+                    const fresh = picked.filter(m =>
+                        !exist.some(x => (x.email && x.email === m.email) || (!x.email && x.name === m.name)),
+                    )
+                    if (fresh.length) {
+                        const old = snapshot?.extraMembers?.[nextStepId] ?? []
+                        extraMembers = { ...(snapshot?.extraMembers ?? {}), [nextStepId]: [...old, ...fresh] }
+                    }
+                }
+            }
+
             // 4. 终态写进 status：还有环节待办 → 进行中；否则按终止走向判通过 / 驳回
             const status = STATUS_BY_OUTCOME[rebuilt.outcome]
 
             // 5. 写库（两个字段是一次请求，不会出现「chain 已推进但 status 没跟上」的中间态）
             const updated = await updateApprovalOrder(order.id, {
-                chain: { ...snapshot, chain: rebuilt.chain, decisions },
+                chain: {
+                    ...snapshot, chain: rebuilt.chain, decisions,
+                    ...(extraMembers ? { extraMembers } : {}),
+                },
                 status,
             })
 
@@ -151,6 +193,31 @@ export function useNodeSubmit(options: {
     }
 
     return { submitNode, submitting }
+}
+
+/**
+ * 「选择接收人员」选中的人 → 可写进单据的成员。
+ * 做一次形状校验：这些是要写进 approval_chain.chain.extraMembers 的，
+ * 缺 name、不是对象、同一个人重复出现，都挡在这里，脏数据不带进单据。
+ */
+function toFilledMembers(raw: unknown): ApprovalChainItem[] {
+    if (!Array.isArray(raw)) return []
+    const out: ApprovalChainItem[] = []
+    for (const item of raw) {
+        if (!item || typeof item !== 'object') continue
+        const m = item as Partial<ApprovalChainItem>
+        const name = typeof m.name === 'string' ? m.name.trim() : ''
+        if (!name) continue
+        if (out.some(x => (x.email && x.email === m.email) || (!x.email && x.name === name))) continue
+        out.push({
+            name,
+            ...(m.email ? { email: m.email } : {}),
+            ...(m.avatar ? { avatar: m.avatar } : {}),
+            // 接收人是要**办**这一环的人，不是抄送
+            type: 'manager',
+        })
+    }
+    return out
 }
 
 /** 流程终态 → 审批单状态（approval_chain.status） */

@@ -31,10 +31,6 @@
                         {{ m.role ? 'mdi-account-star-outline' : 'mdi-account' }}
                     </v-icon>
                 </v-avatar>
-                <!--
-                    动态审批人：模板里**不写人名**，建单时按组织架构解析成真人。
-                    部门取自数据行字段（「推送至相关部门负责人」就是这么配的）。
-                -->
                 <template v-if="m.role">
                     <span class="member-name">部门负责人</span>
                     <span class="role-tag role-approve">动态</span>
@@ -55,7 +51,10 @@
                 </button>
             </div>
 
-            <div v-if="!props.data.members.length" class="empty-hint">暂无成员</div>
+            <div v-if="!props.data.members.length" class="empty-hint"
+                title="这一环可以留空：由上一环节的办理人用「选择接收人员」当场指定">
+                待指定（可由上一环节「选择接收人员」填充）
+            </div>
 
             <div class="d-flex ga-1">
                 <button class="add-btn" @click.stop="emit('addMember')">
@@ -96,11 +95,6 @@ const emit = defineEmits<{
     'branch-click': [edgeId: string]
 }>()
 
-/**
- * 取成员的 role（模板里的动态审批人）。
- * 带返回类型是为了模板里不做类型收窄（vue-tsc 对联合类型不友好）；
- * 模板只在 `v-if="m.role"` 分支里用它，所以兜底这个常量不会被写进数据。
- */
 const EMPTY_ROLE: ApprovalRole = { kind: 'dept_leader', deptFrom: '' }
 function roleOf(m: ApprovalChainItem): ApprovalRole {
     return m.role ?? EMPTY_ROLE

@@ -129,7 +129,11 @@ export function flowHasRoles(flow: ApprovalFlow): boolean {
             if (found) return
             if (s.type === 'branch') {
                 for (const b of s.branches ?? []) walkSteps(b.steps)
-            } else if (s.nodes?.some(m => m.role)) found = true
+            }
+            // ⚠️ 步骤上存成员的字段是 `members`（ApprovalFlowStep），**不是** `nodes`
+            //    （`nodes` 是顶层流程节点 ApprovalFlowApprovalNode 的字段）。
+            //    写错过一次：嵌套分支里的动态负责人因此完全没被解析，而且测试也跟着写错、假通过。
+            else if (s.members?.some(m => m.role)) found = true
         }
     }
     for (const node of flow) {
@@ -195,7 +199,12 @@ export function resolveFlowRoles(
                 }))
                 return { ...s, branches }
             }
-            return { ...s, ...(s.nodes ? { nodes: membersOf(s.nodes) } : {}) }
+            // 同 flowHasRoles：步骤成员在 `members`；旧式线性子步骤 steps 也要递归
+            return {
+                ...s,
+                ...(s.members ? { members: membersOf(s.members) } : {}),
+                ...(s.steps ? { steps: stepsOf(s.steps) } : {}),
+            }
         })
     }
 
