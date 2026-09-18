@@ -1,0 +1,1136 @@
+{
+  "chain": [
+    [
+      {
+        "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cj_ed353893-8c4e-49d1-8452-9c8e7162e1eg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+        "department": "财务BP组",
+        "department_path": "总经理 / 财务部 / 财务BP组",
+        "email": "sherryzhang@gzyanxun.com",
+        "is_leader": true,
+        "is_tenant_manager": false,
+        "name": "张舒凡",
+        "type": "manager"
+      },
+      {
+        "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cl_a9253ae4-e322-48e5-acd5-f8dceefdad6g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+        "department": "财务BP组",
+        "department_path": "总经理 / 财务部 / 财务BP组",
+        "email": "nernachen@gzyanxun.com",
+        "is_leader": false,
+        "is_tenant_manager": false,
+        "name": "陈曼娜",
+        "type": "cc"
+      }
+    ],
+    [
+      {
+        "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00ot_f95e22e4-edd6-4523-b8e6-d0ea8e4f591g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+        "department": "B2B",
+        "department_path": "总经理 / B2B",
+        "email": "angela@gzyanxun.com",
+        "is_leader": true,
+        "is_tenant_manager": false,
+        "name": "邓琳",
+        "type": "manager"
+      }
+    ],
+    [
+      {
+        "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_0012v_5b6d9266-1669-4ad2-aaea-c3d607f7093g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+        "department": "项目组",
+        "department_path": "产品总监 / 产品部 / 项目组",
+        "email": "vincentlin@gzyanxun.com",
+        "is_leader": true,
+        "is_tenant_manager": false,
+        "name": "林树佳",
+        "type": "manager"
+      }
+    ],
+    [
+      {
+        "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00le_ac86275a-7735-4aa4-af3e-de4a8ac7aecg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+        "department": "PMC部门",
+        "department_path": "总经理 / 物控部 / PMC部门",
+        "email": "chenyin@gzyanxun.com",
+        "is_leader": true,
+        "is_tenant_manager": false,
+        "name": "陈颖",
+        "type": "manager"
+      }
+    ]
+  ],
+  "flow": [
+    {
+      "id": "3619c5a1-66b0-4c05-84be-73247c6069c9",
+      "nodes": [
+        {
+          "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cj_ed353893-8c4e-49d1-8452-9c8e7162e1eg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+          "department": "财务BP组",
+          "department_path": "总经理 / 财务部 / 财务BP组",
+          "email": "sherryzhang@gzyanxun.com",
+          "is_leader": true,
+          "is_tenant_manager": false,
+          "name": "张舒凡",
+          "type": "manager"
+        },
+        {
+          "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cl_a9253ae4-e322-48e5-acd5-f8dceefdad6g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+          "department": "财务BP组",
+          "department_path": "总经理 / 财务部 / 财务BP组",
+          "email": "nernachen@gzyanxun.com",
+          "is_leader": false,
+          "is_tenant_manager": false,
+          "name": "陈曼娜",
+          "type": "cc"
+        }
+      ],
+      "type": "approval"
+    },
+    {
+      "branches": [
+        {
+          "condition": {
+            "field": "result",
+            "op": "eq",
+            "value": "reject"
+          },
+          "conditions": [
+            {
+              "field": "result",
+              "op": "eq",
+              "value": "reject"
+            }
+          ],
+          "id": "81ffc4bc-607c-4776-bb20-d3d8c6da2525",
+          "isEnd": true,
+          "logic": "and",
+          "name": "驳回",
+          "steps": []
+        },
+        {
+          "condition": null,
+          "id": "a32357d2-3c5b-43e0-9586-b1e7e2ce8f98",
+          "isEnd": true,
+          "logic": "and",
+          "name": "通过",
+          "steps": [
+            {
+              "id": "4bf06dca-e5b7-4f8f-ba00-892009cb392c",
+              "members": [
+                {
+                  "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00ot_f95e22e4-edd6-4523-b8e6-d0ea8e4f591g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+                  "department": "B2B",
+                  "department_path": "总经理 / B2B",
+                  "email": "angela@gzyanxun.com",
+                  "is_leader": true,
+                  "is_tenant_manager": false,
+                  "name": "邓琳",
+                  "type": "manager"
+                }
+              ],
+              "name": "B2B审批"
+            },
+            {
+              "branches": [
+                {
+                  "condition": {
+                    "field": "result",
+                    "op": "eq",
+                    "value": "pending"
+                  },
+                  "conditions": [
+                    {
+                      "field": "result",
+                      "op": "eq",
+                      "value": "pending"
+                    }
+                  ],
+                  "id": "eb181d9f-0307-4052-8645-b954f946bdfd",
+                  "isEnd": true,
+                  "logic": "and",
+                  "name": "待定",
+                  "steps": []
+                },
+                {
+                  "condition": null,
+                  "id": "4863e426-23cd-4d4b-a90f-b81f3d2fd856",
+                  "isEnd": true,
+                  "logic": "and",
+                  "name": "通过",
+                  "steps": [
+                    {
+                      "branches": [
+                        {
+                          "condition": {
+                            "field": "reason",
+                            "op": "eq",
+                            "value": "compliant"
+                          },
+                          "conditions": [
+                            {
+                              "field": "reason",
+                              "op": "eq",
+                              "value": "compliant"
+                            }
+                          ],
+                          "id": "477aafce-9f69-4238-a76e-087303ea8abc",
+                          "isEnd": false,
+                          "logic": "and",
+                          "name": "产品侵权",
+                          "steps": [
+                            {
+                              "id": "682391d8-d010-4960-8a4f-13283e78d2da",
+                              "members": [
+                                {
+                                  "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00c8_ec31b29c-6c7e-4829-b28f-ff86342c80bg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+                                  "department": "产品管理中心",
+                                  "department_path": "产品总监 / 产品部 / 产品管理中心",
+                                  "email": "daisylv@gzyanxun.com",
+                                  "is_leader": true,
+                                  "is_tenant_manager": false,
+                                  "name": "吕蝶霞",
+                                  "type": "manager"
+                                }
+                              ],
+                              "name": "侵权"
+                            },
+                            {
+                              "branches": [
+                                {
+                                  "condition": {
+                                    "field": "result",
+                                    "op": "eq",
+                                    "value": "discard"
+                                  },
+                                  "conditions": [
+                                    {
+                                      "field": "result",
+                                      "op": "eq",
+                                      "value": "discard"
+                                    }
+                                  ],
+                                  "id": "1f797b64-c502-4efc-b656-fd95217cb590",
+                                  "isEnd": true,
+                                  "logic": "and",
+                                  "name": "建议弃置",
+                                  "steps": []
+                                },
+                                {
+                                  "condition": null,
+                                  "id": "87a14c71-2475-4968-bef8-a1f4215a3a17",
+                                  "isEnd": false,
+                                  "logic": "and",
+                                  "name": "返工",
+                                  "steps": []
+                                },
+                                {
+                                  "condition": {
+                                    "field": "result",
+                                    "op": "eq",
+                                    "value": "reject"
+                                  },
+                                  "conditions": [
+                                    {
+                                      "field": "result",
+                                      "op": "eq",
+                                      "value": "reject"
+                                    }
+                                  ],
+                                  "id": "c402433d-6f80-4ebc-b7c6-a9447b5f3efe",
+                                  "isEnd": false,
+                                  "logic": "and",
+                                  "loopBackTo": {
+                                    "stepId": "4bf06dca-e5b7-4f8f-ba00-892009cb392c"
+                                  },
+                                  "name": "驳回回退上一级",
+                                  "steps": []
+                                }
+                              ],
+                              "id": "682391d8-d010-4960-8a4f-13283e78d2da:nested",
+                              "type": "branch"
+                            }
+                          ]
+                        },
+                        {
+                          "condition": null,
+                          "id": "9be7f234-b91b-4f62-91bb-5eeffdc2dc3d",
+                          "isEnd": false,
+                          "logic": "and",
+                          "name": "自产质量问题",
+                          "steps": [
+                            {
+                              "id": "d870743f-f290-44c1-9546-095bac03ba80",
+                              "members": [
+                                {
+                                  "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_0012v_5b6d9266-1669-4ad2-aaea-c3d607f7093g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+                                  "department": "项目组",
+                                  "department_path": "产品总监 / 产品部 / 项目组",
+                                  "email": "vincentlin@gzyanxun.com",
+                                  "is_leader": true,
+                                  "is_tenant_manager": false,
+                                  "name": "林树佳",
+                                  "type": "manager"
+                                }
+                              ],
+                              "name": "外购"
+                            },
+                            {
+                              "branches": [
+                                {
+                                  "condition": null,
+                                  "id": "53018f66-4ebb-4b68-9a9d-3606e47d2f88",
+                                  "isEnd": false,
+                                  "logic": "and",
+                                  "name": "返工",
+                                  "steps": []
+                                },
+                                {
+                                  "condition": {
+                                    "field": "result",
+                                    "op": "eq",
+                                    "value": "discard"
+                                  },
+                                  "conditions": [
+                                    {
+                                      "field": "result",
+                                      "op": "eq",
+                                      "value": "discard"
+                                    }
+                                  ],
+                                  "id": "7980a306-85a1-4f90-9344-447922f9c14c",
+                                  "isEnd": true,
+                                  "logic": "and",
+                                  "name": "建议弃置",
+                                  "steps": []
+                                },
+                                {
+                                  "condition": {
+                                    "field": "result",
+                                    "op": "eq",
+                                    "value": "reject"
+                                  },
+                                  "conditions": [
+                                    {
+                                      "field": "result",
+                                      "op": "eq",
+                                      "value": "reject"
+                                    }
+                                  ],
+                                  "id": "3742d6cb-c7b4-483d-a4a4-50791f74a675",
+                                  "isEnd": false,
+                                  "logic": "and",
+                                  "loopBackTo": {
+                                    "stepId": "4bf06dca-e5b7-4f8f-ba00-892009cb392c"
+                                  },
+                                  "name": "驳回回退上一级",
+                                  "steps": []
+                                }
+                              ],
+                              "id": "d870743f-f290-44c1-9546-095bac03ba80:nested",
+                              "type": "branch"
+                            }
+                          ]
+                        },
+                        {
+                          "condition": null,
+                          "id": "f26bb6ef-140e-447b-8075-015796829596",
+                          "isEnd": false,
+                          "logic": "and",
+                          "name": "外购质量问题",
+                          "steps": [
+                            {
+                              "id": "0b5b7de5-8cc7-498b-84fa-091798a4ef27",
+                              "members": [
+                                {
+                                  "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cu_569de4c5-b895-44c8-9036-d8ea7c7045ag~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+                                  "department": "技术研发中心",
+                                  "department_path": "产品总监 / 产品部 / 技术研发中心",
+                                  "email": "dasionhuang@gzyanxun.com",
+                                  "is_leader": false,
+                                  "is_tenant_manager": false,
+                                  "name": "黄海雄",
+                                  "type": "manager"
+                                }
+                              ],
+                              "name": "自产"
+                            },
+                            {
+                              "branches": [
+                                {
+                                  "condition": null,
+                                  "id": "21e6f45d-7668-48a3-bc17-0d2f767d75fa",
+                                  "isEnd": false,
+                                  "logic": "and",
+                                  "name": "返工",
+                                  "steps": []
+                                },
+                                {
+                                  "condition": {
+                                    "field": "result",
+                                    "op": "eq",
+                                    "value": "discard"
+                                  },
+                                  "conditions": [
+                                    {
+                                      "field": "result",
+                                      "op": "eq",
+                                      "value": "discard"
+                                    }
+                                  ],
+                                  "id": "978c9a44-cc23-4206-91cd-d53a085e9c65",
+                                  "isEnd": true,
+                                  "logic": "and",
+                                  "name": "建议弃置",
+                                  "steps": []
+                                },
+                                {
+                                  "condition": {
+                                    "field": "result",
+                                    "op": "eq",
+                                    "value": "reject"
+                                  },
+                                  "conditions": [
+                                    {
+                                      "field": "result",
+                                      "op": "eq",
+                                      "value": "reject"
+                                    }
+                                  ],
+                                  "id": "8bbdc39a-11ab-443d-8959-5999e2de2668",
+                                  "isEnd": false,
+                                  "logic": "and",
+                                  "loopBackTo": {
+                                    "stepId": "4bf06dca-e5b7-4f8f-ba00-892009cb392c"
+                                  },
+                                  "name": "驳回回退上一级",
+                                  "steps": []
+                                }
+                              ],
+                              "id": "0b5b7de5-8cc7-498b-84fa-091798a4ef27:nested",
+                              "type": "branch"
+                            }
+                          ]
+                        },
+                        {
+                          "condition": null,
+                          "id": "9f9a4dac-f46c-420d-a0c0-a5a2b269a5cf",
+                          "isEnd": true,
+                          "logic": "and",
+                          "name": "其他",
+                          "steps": [
+                            {
+                              "branches": [
+                                {
+                                  "condition": null,
+                                  "id": "45c6b381-5bdc-45c1-99c3-0c0bc38bb0fe",
+                                  "isEnd": true,
+                                  "logic": "and",
+                                  "name": "全部接收",
+                                  "steps": [
+                                    {
+                                      "id": "a379e8de-70d6-4eff-8f6f-1caa02f913ba",
+                                      "members": [
+                                        {
+                                          "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_0013b_93000287-00ce-41fd-98f5-4cf9c1a65c8g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+                                          "department": "财务BP组",
+                                          "department_path": "总经理 / 财务部 / 财务BP组",
+                                          "email": "chenpf@gzyanxun.com",
+                                          "is_leader": false,
+                                          "is_tenant_manager": false,
+                                          "name": "陈培锋",
+                                          "type": "manager"
+                                        }
+                                      ],
+                                      "name": "暂定"
+                                    },
+                                    {
+                                      "branches": [
+                                        {
+                                          "condition": {
+                                            "field": "result",
+                                            "op": "eq",
+                                            "value": "reject"
+                                          },
+                                          "conditions": [
+                                            {
+                                              "field": "result",
+                                              "op": "eq",
+                                              "value": "reject"
+                                            }
+                                          ],
+                                          "id": "6fd40e01-008e-4004-8241-7e8345e7196c",
+                                          "isEnd": false,
+                                          "logic": "and",
+                                          "loopBackTo": {
+                                            "stepId": "4bf06dca-e5b7-4f8f-ba00-892009cb392c"
+                                          },
+                                          "name": "驳回回退上一级",
+                                          "steps": []
+                                        },
+                                        {
+                                          "condition": null,
+                                          "conditions": [],
+                                          "id": "bcca7c59-c93e-43bd-a694-b4d08b837041",
+                                          "isEnd": false,
+                                          "name": "主线",
+                                          "steps": []
+                                        }
+                                      ],
+                                      "id": "a379e8de-70d6-4eff-8f6f-1caa02f913ba:reject-back",
+                                      "type": "branch"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "condition": {
+                                    "field": "amount",
+                                    "op": "lt",
+                                    "value": "5000"
+                                  },
+                                  "conditions": [
+                                    {
+                                      "field": "amount",
+                                      "op": "lt",
+                                      "value": "5000"
+                                    },
+                                    {
+                                      "field": "batchAmount",
+                                      "op": "lt",
+                                      "value": "0"
+                                    }
+                                  ],
+                                  "id": "49b64c31-7779-4982-884d-75e878f60a05",
+                                  "isEnd": true,
+                                  "logic": "and",
+                                  "name": "部分接收-弃置",
+                                  "steps": []
+                                }
+                              ],
+                              "id": "961ee28d-b2f1-4304-8a3d-0d0f77a76d0c:nested",
+                              "type": "branch"
+                            }
+                          ]
+                        }
+                      ],
+                      "id": "37f625ca-2390-4cd6-8fbf-d399b7e0760c:nested",
+                      "type": "branch"
+                    },
+                    {
+                      "id": "ecfa928b-7fda-400c-8651-a3305d3268af",
+                      "members": [
+                        {
+                          "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00le_ac86275a-7735-4aa4-af3e-de4a8ac7aecg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+                          "department": "PMC部门",
+                          "department_path": "总经理 / 物控部 / PMC部门",
+                          "email": "chenyin@gzyanxun.com",
+                          "is_leader": true,
+                          "is_tenant_manager": false,
+                          "name": "陈颖",
+                          "type": "manager"
+                        }
+                      ],
+                      "name": "PMC审批"
+                    },
+                    {
+                      "branches": [
+                        {
+                          "condition": null,
+                          "id": "5aa1140b-b6ec-4bfe-af6a-3be971a922ca",
+                          "isEnd": true,
+                          "logic": "and",
+                          "name": "通过",
+                          "steps": []
+                        },
+                        {
+                          "condition": {
+                            "field": "result",
+                            "op": "eq",
+                            "value": "discard"
+                          },
+                          "conditions": [
+                            {
+                              "field": "result",
+                              "op": "eq",
+                              "value": "discard"
+                            }
+                          ],
+                          "id": "83bcfd5b-1216-4260-adf7-0603416ea7c3",
+                          "isEnd": true,
+                          "logic": "and",
+                          "name": "建议弃置",
+                          "steps": []
+                        },
+                        {
+                          "condition": {
+                            "field": "result",
+                            "op": "eq",
+                            "value": "reject"
+                          },
+                          "conditions": [
+                            {
+                              "field": "result",
+                              "op": "eq",
+                              "value": "reject"
+                            }
+                          ],
+                          "id": "beafd199-5f18-4720-8b7b-a641de8bd1d5",
+                          "isEnd": false,
+                          "logic": "and",
+                          "loopBackTo": {
+                            "stepId": "4bf06dca-e5b7-4f8f-ba00-892009cb392c"
+                          },
+                          "name": "驳回回退上一级",
+                          "steps": []
+                        }
+                      ],
+                      "id": "ecfa928b-7fda-400c-8651-a3305d3268af:nested",
+                      "type": "branch"
+                    }
+                  ]
+                },
+                {
+                  "condition": {
+                    "field": "result",
+                    "op": "eq",
+                    "value": "reject"
+                  },
+                  "conditions": [
+                    {
+                      "field": "result",
+                      "op": "eq",
+                      "value": "reject"
+                    }
+                  ],
+                  "id": "a91e2caa-86ec-4b3d-87bc-48d99a7e42d3",
+                  "isEnd": false,
+                  "logic": "and",
+                  "loopBackTo": {
+                    "stepId": "3619c5a1-66b0-4c05-84be-73247c6069c9"
+                  },
+                  "name": "驳回回退上一级",
+                  "steps": []
+                }
+              ],
+              "id": "4bf06dca-e5b7-4f8f-ba00-892009cb392c:nested",
+              "type": "branch"
+            }
+          ]
+        }
+      ],
+      "id": "3619c5a1-66b0-4c05-84be-73247c6069c9:result",
+      "type": "branch"
+    }
+  ],
+  "graph": {
+    "edges": [
+      {
+        "data": {},
+        "id": "142f1635-433a-4f4e-9c85-616a82d00f31",
+        "label": "",
+        "source": "start",
+        "target": "3619c5a1-66b0-4c05-84be-73247c6069c9",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": {
+            "field": "result",
+            "op": "eq",
+            "value": "reject"
+          },
+          "conditions": [
+            {
+              "field": "result",
+              "op": "eq",
+              "value": "reject"
+            }
+          ],
+          "cp": {
+            "x": 783.8569553337169,
+            "y": 678.2994496152425
+          }
+        },
+        "id": "81ffc4bc-607c-4776-bb20-d3d8c6da2525",
+        "label": "驳回",
+        "pathOptions": {
+          "borderRadius": 29
+        },
+        "source": "3619c5a1-66b0-4c05-84be-73247c6069c9",
+        "target": "end",
+        "type": "adjustable"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": [
+            {
+              "field": "result",
+              "op": "eq",
+              "value": "pending"
+            }
+          ]
+        },
+        "id": "eb181d9f-0307-4052-8645-b954f946bdfd",
+        "label": "待定",
+        "source": "4bf06dca-e5b7-4f8f-ba00-892009cb392c",
+        "target": "end",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": []
+        },
+        "id": "a32357d2-3c5b-43e0-9586-b1e7e2ce8f98",
+        "label": "通过",
+        "source": "3619c5a1-66b0-4c05-84be-73247c6069c9",
+        "target": "4bf06dca-e5b7-4f8f-ba00-892009cb392c",
+        "type": "smoothstep"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": []
+        },
+        "id": "4863e426-23cd-4d4b-a90f-b81f3d2fd856",
+        "label": "通过",
+        "pathOptions": {
+          "borderRadius": 30
+        },
+        "source": "4bf06dca-e5b7-4f8f-ba00-892009cb392c",
+        "target": "37f625ca-2390-4cd6-8fbf-d399b7e0760c",
+        "type": "smoothstep"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": [
+            {
+              "field": "reason",
+              "op": "eq",
+              "value": "compliant"
+            }
+          ]
+        },
+        "id": "477aafce-9f69-4238-a76e-087303ea8abc",
+        "label": "产品侵权",
+        "source": "37f625ca-2390-4cd6-8fbf-d399b7e0760c",
+        "target": "682391d8-d010-4960-8a4f-13283e78d2da",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": []
+        },
+        "id": "9be7f234-b91b-4f62-91bb-5eeffdc2dc3d",
+        "label": "自产质量问题",
+        "source": "37f625ca-2390-4cd6-8fbf-d399b7e0760c",
+        "target": "d870743f-f290-44c1-9546-095bac03ba80",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": []
+        },
+        "id": "f26bb6ef-140e-447b-8075-015796829596",
+        "label": "外购质量问题",
+        "source": "37f625ca-2390-4cd6-8fbf-d399b7e0760c",
+        "target": "0b5b7de5-8cc7-498b-84fa-091798a4ef27",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": [
+            {
+              "field": "result",
+              "op": "eq",
+              "value": "discard"
+            }
+          ]
+        },
+        "id": "1f797b64-c502-4efc-b656-fd95217cb590",
+        "label": "建议弃置",
+        "source": "682391d8-d010-4960-8a4f-13283e78d2da",
+        "target": "end",
+        "type": "default"
+      },
+      {
+        "data": {
+          "conditions": []
+        },
+        "id": "21e6f45d-7668-48a3-bc17-0d2f767d75fa",
+        "label": "返工",
+        "source": "0b5b7de5-8cc7-498b-84fa-091798a4ef27",
+        "target": "ecfa928b-7fda-400c-8651-a3305d3268af",
+        "type": "default"
+      },
+      {
+        "data": {
+          "conditions": []
+        },
+        "id": "53018f66-4ebb-4b68-9a9d-3606e47d2f88",
+        "label": "返工",
+        "source": "d870743f-f290-44c1-9546-095bac03ba80",
+        "target": "ecfa928b-7fda-400c-8651-a3305d3268af",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": {
+            "field": "result",
+            "op": "eq",
+            "value": "reject"
+          },
+          "conditions": [
+            {
+              "field": "result",
+              "op": "eq",
+              "value": "discard"
+            }
+          ]
+        },
+        "id": "978c9a44-cc23-4206-91cd-d53a085e9c65",
+        "label": "建议弃置",
+        "source": "0b5b7de5-8cc7-498b-84fa-091798a4ef27",
+        "target": "end",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": {
+            "field": "result",
+            "op": "eq",
+            "value": "reject"
+          },
+          "conditions": [
+            {
+              "field": "result",
+              "op": "eq",
+              "value": "discard"
+            }
+          ]
+        },
+        "id": "7980a306-85a1-4f90-9344-447922f9c14c",
+        "label": "建议弃置",
+        "source": "d870743f-f290-44c1-9546-095bac03ba80",
+        "target": "end",
+        "type": "default"
+      },
+      {
+        "data": {
+          "conditions": []
+        },
+        "id": "5aa1140b-b6ec-4bfe-af6a-3be971a922ca",
+        "label": "通过",
+        "source": "ecfa928b-7fda-400c-8651-a3305d3268af",
+        "target": "end",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": {
+            "field": "result",
+            "op": "eq",
+            "value": "reject"
+          },
+          "conditions": [
+            {
+              "field": "result",
+              "op": "eq",
+              "value": "discard"
+            }
+          ],
+          "cp": {
+            "x": 3.947649623114833,
+            "y": 1607.7175262493013
+          }
+        },
+        "id": "83bcfd5b-1216-4260-adf7-0603416ea7c3",
+        "label": "建议弃置",
+        "source": "ecfa928b-7fda-400c-8651-a3305d3268af",
+        "target": "end",
+        "type": "adjustable"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": []
+        },
+        "id": "87a14c71-2475-4968-bef8-a1f4215a3a17",
+        "label": "返工",
+        "source": "682391d8-d010-4960-8a4f-13283e78d2da",
+        "target": "ecfa928b-7fda-400c-8651-a3305d3268af",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": []
+        },
+        "id": "9f9a4dac-f46c-420d-a0c0-a5a2b269a5cf",
+        "label": "其他",
+        "source": "37f625ca-2390-4cd6-8fbf-d399b7e0760c",
+        "target": "961ee28d-b2f1-4304-8a3d-0d0f77a76d0c",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": []
+        },
+        "id": "45c6b381-5bdc-45c1-99c3-0c0bc38bb0fe",
+        "label": "全部接收",
+        "source": "961ee28d-b2f1-4304-8a3d-0d0f77a76d0c",
+        "target": "a379e8de-70d6-4eff-8f6f-1caa02f913ba",
+        "type": "default"
+      },
+      {
+        "id": "9ba9e354-2294-4ffd-bcc9-cd721b7bc16f",
+        "label": "",
+        "source": "a379e8de-70d6-4eff-8f6f-1caa02f913ba",
+        "target": "end",
+        "type": "default"
+      },
+      {
+        "data": {
+          "condition": null,
+          "conditions": [
+            {
+              "field": "amount",
+              "op": "lt",
+              "value": "5000"
+            },
+            {
+              "field": "batchAmount",
+              "op": "lt",
+              "value": "0"
+            }
+          ],
+          "logic": "and"
+        },
+        "id": "49b64c31-7779-4982-884d-75e878f60a05",
+        "label": "部分接收-弃置",
+        "source": "961ee28d-b2f1-4304-8a3d-0d0f77a76d0c",
+        "target": "end",
+        "type": "default"
+      }
+    ],
+    "nodes": [
+      {
+        "data": {},
+        "id": "start",
+        "position": {
+          "x": 405.56063286183144,
+          "y": -28.589338066746013
+        },
+        "type": "start"
+      },
+      {
+        "data": {},
+        "id": "end",
+        "position": {
+          "x": 837.8663061458102,
+          "y": 1627.7691634667249
+        },
+        "type": "end"
+      },
+      {
+        "data": {
+          "members": [
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cj_ed353893-8c4e-49d1-8452-9c8e7162e1eg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "财务BP组",
+              "department_path": "总经理 / 财务部 / 财务BP组",
+              "email": "sherryzhang@gzyanxun.com",
+              "is_leader": true,
+              "is_tenant_manager": false,
+              "name": "张舒凡",
+              "type": "manager"
+            },
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cl_a9253ae4-e322-48e5-acd5-f8dceefdad6g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "财务BP组",
+              "department_path": "总经理 / 财务部 / 财务BP组",
+              "email": "nernachen@gzyanxun.com",
+              "is_leader": false,
+              "is_tenant_manager": false,
+              "name": "陈曼娜",
+              "type": "cc"
+            }
+          ],
+          "title": "财务初审"
+        },
+        "id": "3619c5a1-66b0-4c05-84be-73247c6069c9",
+        "position": {
+          "x": 358.3728342886343,
+          "y": 89.70694486886728
+        },
+        "type": "approval"
+      },
+      {
+        "data": {
+          "members": [
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00ot_f95e22e4-edd6-4523-b8e6-d0ea8e4f591g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "B2B",
+              "department_path": "总经理 / B2B",
+              "email": "angela@gzyanxun.com",
+              "is_leader": true,
+              "is_tenant_manager": false,
+              "name": "邓琳",
+              "type": "manager"
+            }
+          ],
+          "title": "B2B审批"
+        },
+        "id": "4bf06dca-e5b7-4f8f-ba00-892009cb392c",
+        "position": {
+          "x": -17.37685015382627,
+          "y": 90.27249891918039
+        },
+        "type": "approval"
+      },
+      {
+        "data": {},
+        "id": "37f625ca-2390-4cd6-8fbf-d399b7e0760c",
+        "position": {
+          "x": -813.4271515213643,
+          "y": 70.80469076100579
+        },
+        "type": "condition"
+      },
+      {
+        "data": {
+          "members": [
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00c8_ec31b29c-6c7e-4829-b28f-ff86342c80bg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "产品管理中心",
+              "department_path": "产品总监 / 产品部 / 产品管理中心",
+              "email": "daisylv@gzyanxun.com",
+              "is_leader": true,
+              "is_tenant_manager": false,
+              "name": "吕蝶霞",
+              "type": "manager"
+            }
+          ],
+          "title": "侵权"
+        },
+        "id": "682391d8-d010-4960-8a4f-13283e78d2da",
+        "position": {
+          "x": -1128.820309145141,
+          "y": 432.9978406449093
+        },
+        "type": "approval"
+      },
+      {
+        "data": {
+          "members": [
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cu_569de4c5-b895-44c8-9036-d8ea7c7045ag~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "技术研发中心",
+              "department_path": "产品总监 / 产品部 / 技术研发中心",
+              "email": "dasionhuang@gzyanxun.com",
+              "is_leader": false,
+              "is_tenant_manager": false,
+              "name": "黄海雄",
+              "type": "manager"
+            }
+          ],
+          "title": "自产"
+        },
+        "id": "0b5b7de5-8cc7-498b-84fa-091798a4ef27",
+        "position": {
+          "x": -598.9045000970023,
+          "y": 520.5532998365933
+        },
+        "type": "approval"
+      },
+      {
+        "data": {
+          "members": [
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_0012v_5b6d9266-1669-4ad2-aaea-c3d607f7093g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "项目组",
+              "department_path": "产品总监 / 产品部 / 项目组",
+              "email": "vincentlin@gzyanxun.com",
+              "is_leader": true,
+              "is_tenant_manager": false,
+              "name": "林树佳",
+              "type": "manager"
+            }
+          ],
+          "title": "外购"
+        },
+        "id": "d870743f-f290-44c1-9546-095bac03ba80",
+        "position": {
+          "x": -145.6919918992281,
+          "y": 447.6672908608343
+        },
+        "type": "approval"
+      },
+      {
+        "data": {
+          "members": [
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00le_ac86275a-7735-4aa4-af3e-de4a8ac7aecg~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "PMC部门",
+              "department_path": "总经理 / 物控部 / PMC部门",
+              "email": "chenyin@gzyanxun.com",
+              "is_leader": true,
+              "is_tenant_manager": false,
+              "name": "陈颖",
+              "type": "manager"
+            }
+          ],
+          "title": "PMC审批"
+        },
+        "id": "ecfa928b-7fda-400c-8651-a3305d3268af",
+        "position": {
+          "x": -902.4969898915485,
+          "y": 916.5332902893354
+        },
+        "type": "approval"
+      },
+      {
+        "data": {},
+        "id": "961ee28d-b2f1-4304-8a3d-0d0f77a76d0c",
+        "position": {
+          "x": -1628.421815664597,
+          "y": 340.4708513715721
+        },
+        "type": "condition"
+      },
+      {
+        "data": {
+          "members": [
+            {
+              "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_0013b_93000287-00ce-41fd-98f5-4cf9c1a65c8g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+              "department": "财务BP组",
+              "department_path": "总经理 / 财务部 / 财务BP组",
+              "email": "chenpf@gzyanxun.com",
+              "is_leader": false,
+              "is_tenant_manager": false,
+              "name": "陈培锋",
+              "type": "manager"
+            }
+          ],
+          "title": "暂定"
+        },
+        "id": "a379e8de-70d6-4eff-8f6f-1caa02f913ba",
+        "position": {
+          "x": -1483.4440370174852,
+          "y": 929.8076258945749
+        },
+        "type": "approval"
+      }
+    ],
+    "viewport": {
+      "x": 442.9693443621686,
+      "y": 113.26221681361619,
+      "zoom": 0.45471496995312183
+    }
+  }
+}

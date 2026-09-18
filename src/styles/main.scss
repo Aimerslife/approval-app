@@ -1,0 +1,113 @@
+@use './flow-theme';
+
+@layer vuetify-overrides {
+  code, pre, .v-code {
+    font-family: var(--v-font-mono);
+  }
+}
+
+/* =========================================================
+   通用页面规范（各页面统一使用，勿再散落硬编码背景/标题）
+   用法：<v-container fluid class="page-bg"> ... </v-container>
+   ========================================================= */
+
+/* 页面灰底：浅色 / 深色自动切换，替代各页 isDark 三元硬编码。
+   .page-bg = 背景 + min-height:100vh（整页可滚动时用）
+   .bg-app   = 仅背景色（页面自己管理高度/滚动布局时叠加用） */
+.page-bg,
+.bg-app {
+  background-color: #eef1f6;
+}
+
+.v-theme--dark .page-bg,
+.v-theme--dark .bg-app {
+  background-color: #0f1115;
+}
+
+.page-bg {
+  min-height: 100vh;
+}
+
+/* 区块标题：左侧品牌蓝竖条 + 主题文字色 */
+.block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: rgb(var(--v-theme-on-surface));
+
+  &::before {
+    content: '';
+    width: 4px;
+    height: 15px;
+    border-radius: 3px;
+    background-color: rgb(var(--v-theme-primary));
+  }
+}
+
+/* 字段区块内的小节标签（弹窗/表单里用） */
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  // color: rgb(var(--v-theme-on-surface-variant));
+  // margin-bottom: 8px;
+}
+
+/* ===== 紧凑 v-select：缩小输入框高度与内边距（筛选区统一使用）===== */
+.filter-select {
+  .v-field {
+    --v-field-padding-top: 2px;
+    --v-field-padding-bottom: 1px;
+    --v-input-control-height: 28px;
+    font-size: 12px;
+  }
+
+  .v-field__input {
+    min-height: 26px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+
+  .v-label {
+    font-size: 12px;
+  }
+
+  .v-field__append-inner,
+  .v-field__prepend-inner {
+    padding-top: 0;
+    align-self: center;
+  }
+}
+
+/* ===== 展开后的菜单：更小的文字与更紧凑的行间距（菜单 teleport 到 body，需全局样式）===== */
+.filter-menu {
+  .v-list-item {
+    min-height: 26px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .v-list-item__content {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .v-list-item-title {
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  /* belong 分组标题：更醒目 + 底部下划线分隔区域 */
+  .v-list-subheader,
+  .v-list-header {
+    min-height: 24px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #2D74C5;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+    margin-bottom: 2px;
+  }
+}

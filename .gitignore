@@ -1,0 +1,61 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.DS_Store
+dist
+dist-ssr
+coverage
+*.local
+# 环境变量文件：server/index.ts 会加载 .env.local 与 .env，
+# 两者都可能放飞书凭据 —— *.local 只覆盖了 .env.local，裸 .env 也一并忽略
+.env
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+*.tsbuildinfo
+
+# ===== PocketBase =====
+# pb_data 是**运行时数据**（SQLite 库 51MB + 上传附件 + PocketBase 自己生成的缩略图），
+# 不该进版本库：体积大、每次跑都在变。
+#
+# ⚠️ 更要紧的是它会让 git add **整个失败**（"提交不了 git"就是这个原因）：
+#    pb_data/storage 里的缩略图文件名是"原名_尺寸_质量_格式"再叠一层目录，
+#    在 Windows 上路径超过 260 字符上限 →
+#      error: open("pocketbase/pb_data/storage/...webp"): Filename too long
+#      error: unable to index file '...'
+#      fatal: adding files failed        （退出码 128）
+#    注意：不要用 git config core.longpaths=true 绕 —— 那只是把这些问题文件也放进库里，
+#    数据快照每跑一次就变一份，仓库会迅速膨胀。
+#
+# ⚠️ pb_migrations/ 是**表结构源码**，必须留在版本库里，千万别连它一起忽略。
+pocketbase/pb_data/
+
+# PocketBase 可执行文件（31MB 二进制）：需要时从官网下载，别塞进 git
+pocketbase/pocketbase.exe
+
+# ===== 排查/生成过程留下的临时文件（仓库根目录，不含 src 等正式代码）=====
+# 之前几轮排查 BI 同步、画布、PDF 时留下的探针脚本与输出，不该进首次提交。
+# 需要保留某个就直接从下面删掉对应的行。
+/_*.mjs
+/_*.cjs
+/_*.ts
+/_*.txt
+/_*.log
+/editStream-*.png
+/.playwright-cli/
+

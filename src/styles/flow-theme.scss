@@ -1,0 +1,199 @@
+/**
+ * 流程画布（Vue Flow）主题变量。
+ *
+ * 浅色写在 :root，暗色在 .v-theme--dark 下覆盖：
+ * Vuetify 会把主题类挂在 v-app 的根元素（.v-application）上，画布在其内部，
+ * CSS 变量可正常向下继承，因此切换主题时画布无需任何 JS 参与。
+ *
+ * 所有画布 / 节点相关的颜色都必须走这里的变量，不要再写死色值，
+ * 否则暗色模式下会出现"白底卡片浮在黑底画布上"的问题。
+ */
+:root {
+    /* ===== 画布 ===== */
+    --flow-canvas-bg: #fbfcfe;
+    --flow-canvas-border: #e6eaf0;
+    --flow-dot: #cbd5e1;
+
+    /* ===== 表面 / 描边 ===== */
+    --flow-surface: #ffffff;
+    --flow-surface-sunken: #f8fafc;
+    --flow-surface-hover: #f6f8fb;
+    --flow-border: #e6eaf0;
+    --flow-border-strong: #dde3ec;
+
+    /* ===== 文字 / 图标 ===== */
+    --flow-text: #0f172a;
+    --flow-text-sub: #7b8698;
+    --flow-text-muted: #a9b2c0;
+    --flow-icon: #a3aec0;
+    --flow-icon-hover-bg: #f1f5f9;
+    --flow-icon-hover-text: #475569;
+    --flow-danger-bg: #fef2f2;
+    --flow-danger-text: #dc2626;
+
+    /* ===== 连线 ===== */
+    --flow-edge: #cbd5e1;
+    --flow-edge-hover: #94a3b8;
+    --flow-edge-selected: #f59e0b;
+    --flow-edge-label: #b45309;
+    --flow-edge-label-bg: #fffbeb;
+    --flow-connection: #1e293b;
+
+    /* ===== 连接点 / 框选 ===== */
+    --flow-handle-bg: #ffffff;
+    --flow-handle-border: #b6bfcc;
+    --flow-handle-active: #2563eb;
+    --flow-selection-bg: rgb(30 41 59 / 6%);
+    --flow-selection-border: #1e293b;
+
+    /* ===== 画布控件（缩放按钮 / 缩略图）===== */
+    --flow-control-bg: #ffffff;
+    --flow-control-border: #f1f4f8;
+    --flow-control-fill: #64748b;
+    --flow-control-hover-bg: #f6f8fb;
+    --flow-control-hover-fill: #2563eb;
+    --flow-minimap-bg: #ffffff;
+    --flow-minimap-mask: rgb(240 240 240 / 60%);
+
+    /* ===== 表单控件（分支面板输入框）===== */
+    --flow-input-bg: #ffffff;
+    --flow-input-border: #e2e8f0;
+    --flow-input-text: #1e293b;
+    --flow-input-focus: #f59e0b;
+
+    /* ===== 语义色：节点图标底 / 类型条 ===== */
+    --flow-amber-soft: #fffbeb;
+    --flow-amber-text: #b45309;
+    --flow-blue-soft: #eff6ff;
+    --flow-blue-border: #93b4fd;
+    --flow-green-soft: #ecfdf5;
+    --flow-green-border: #a7f3d0;
+    --flow-green-text: #059669;
+    --flow-green-dot: #22c55e;
+    --flow-role-approve-bg: #ecfdf5;
+    --flow-role-approve-text: #059669;
+    --flow-role-cc-bg: #eff6ff;
+    --flow-role-cc-text: #2563eb;
+}
+
+/* ===== 暗色：Vuetify 切到 dark 时 .v-theme--dark 会出现在 .v-application 上 ===== */
+.v-theme--dark {
+    --flow-canvas-bg: #121212;
+    --flow-canvas-border: #2f343a;
+    --flow-dot: #3a3f47;
+
+    --flow-surface: #1e1e1e;
+    --flow-surface-sunken: #26282c;
+    --flow-surface-hover: #2c2f34;
+    --flow-border: #35393f;
+    --flow-border-strong: #464c54;
+
+    --flow-text: #e6edf3;
+    --flow-text-sub: #9aa5b4;
+    --flow-text-muted: #7d8894;
+    --flow-icon: #8b949e;
+    --flow-icon-hover-bg: #2c2f34;
+    --flow-icon-hover-text: #d7dee6;
+    --flow-danger-bg: #3a1f22;
+    --flow-danger-text: #f87171;
+
+    --flow-edge: #4b5563;
+    --flow-edge-hover: #6b7280;
+    --flow-edge-selected: #fbbf24;
+    --flow-edge-label: #fcd34d;
+    --flow-edge-label-bg: #2e2a1a;
+    --flow-connection: #e6edf3;
+
+    --flow-handle-bg: #1e1e1e;
+    --flow-handle-border: #6b7280;
+    --flow-handle-active: #60a5fa;
+    --flow-selection-bg: rgb(255 255 255 / 8%);
+    --flow-selection-border: #c9d1d9;
+
+    --flow-control-bg: #2c2f34;
+    --flow-control-border: #3a3f47;
+    --flow-control-fill: #c9d1d9;
+    --flow-control-hover-bg: #3a3f47;
+    --flow-control-hover-fill: #93c5fd;
+    --flow-minimap-bg: #1a1d21;
+    --flow-minimap-mask: rgb(0 0 0 / 45%);
+
+    --flow-input-bg: #26282c;
+    --flow-input-border: #3a3f47;
+    --flow-input-text: #e6edf3;
+    --flow-input-focus: #fbbf24;
+
+    --flow-amber-soft: #3a2f16;
+    --flow-amber-text: #fcd34d;
+    --flow-blue-soft: #1d283a;
+    --flow-blue-border: #3b6fd4;
+    --flow-green-soft: #10281c;
+    --flow-green-border: #1f6f43;
+    --flow-green-text: #6ee7b7;
+    --flow-green-dot: #22c55e;
+    --flow-role-approve-bg: #10281c;
+    --flow-role-approve-text: #6ee7b7;
+    --flow-role-cc-bg: #1d283a;
+    --flow-role-cc-text: #93c5fd;
+}
+
+/* ===== 两个画布共用的控件适配（类名来自 vue-flow 自带样式）=====
+   这里只处理各画布没有单独定义的部分，保证缩略图 / 点阵底跟随主题。 */
+.vue-flow__minimap {
+    background: var(--flow-minimap-bg);
+}
+
+.vue-flow__minimap-mask {
+    fill: var(--flow-minimap-mask);
+}
+
+/* Background 的点阵用 presentation attribute 上色，CSS 的 fill 优先级更高 */
+.vue-flow__background circle,
+.vue-flow__background path {
+    fill: var(--flow-dot);
+}
+
+/* ===== 两个画布共用的控件适配 =====
+   带容器类是为了提高特异性，否则可能被 vue-flow 自带样式按加载顺序压过去；
+   StreamPanel 这类没有自定义控件样式的画布也能一并跟随主题。 */
+.flow-canvas,
+.stream-panel {
+    .vue-flow__controls {
+        border: 1px solid var(--flow-border);
+        box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+    }
+
+    .vue-flow__controls-button {
+        border-bottom: 1px solid var(--flow-control-border);
+        background: var(--flow-control-bg);
+        fill: var(--flow-control-fill);
+    }
+
+    .vue-flow__controls-button:hover {
+        background: var(--flow-control-hover-bg);
+        fill: var(--flow-control-hover-fill);
+    }
+
+    .vue-flow__edge-path {
+        stroke: var(--flow-edge);
+    }
+
+    .vue-flow__handle {
+        background: var(--flow-handle-bg);
+        border-color: var(--flow-handle-border);
+    }
+
+    .vue-flow__handle:hover {
+        background: var(--flow-handle-active);
+        border-color: var(--flow-handle-active);
+    }
+}
+
+/* 右下角 vue-flow 水印在暗色下淡化，避免抢视线 */
+.vue-flow__attribution {
+    background: transparent;
+
+    a {
+        color: var(--flow-text-muted);
+    }
+}
