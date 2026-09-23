@@ -15,6 +15,11 @@
  *    import 那个模块。**改一处必须同步改另一处**，否则前端显示的字段名和库里存的会对不上。
  */
 
+// ⚠️ 本模块在**顶层**读 process.env（下面那批 const 紧跟 import 之后执行）。
+// ESM 保证依赖先于使用者求值，所以这一行就能确保 .env.local 已加载 ——
+// 与 index.ts 里 import 的先后顺序无关。原来靠 index.ts 模块体里的 loadEnvFile，
+// 而模块体比 import 晚执行，导致这批 const 全部拿到空串。
+import './env'
 import { BI_ROW_FIELD_BY_KEY, BI_ROW_FIELDS, makeSyncKey, SYNC_KEY_FIELDS } from '../src/utils/biRowFields'
 
 const BI_BASE = process.env.BI_BASE_URL || 'https://work.jiushuyun.com/decision'

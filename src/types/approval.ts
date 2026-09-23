@@ -65,6 +65,28 @@ export interface ApprovalChainItem {
 
   /** 动态审批人（角色）：模板里带这个字段、没有具体姓名，建单时解析成真人 */
   role?: ApprovalRole
+
+  /**
+   * 「按组轮询」：配了它就表示**这一环要展开成 N 环**（每个符合条件的组各一环，
+   * 按销量顺序依次流转），而不是由一个人办 —— 见 RotationSpec 的说明。
+   * 展开后每环的成员是 `role: { kind: 'dept_leader', dept: 组名 }`，
+   * 也就是**复用现有角色解析**（含"该组没设负责人就往上级找"那套口径）。
+   */
+  rotation?: RotationSpec
+
+  /**
+   * 仅「飞书提醒」环节会带（同时 type === 'notify'）：它是通知环节，**不办理**。
+   *
+   * 为什么要塞进 chain 的成员数组里、而不是另开一个字段：
+   * 时间线（ApprovalNode.vue）是按 chain 逐环渲染的，放进来就**不用改任何页面的渲染入口**
+   * 就能多出这一环 —— 三个页面（审批页 / 首页抽屉 / 我的）共用同一个组件。
+   */
+  notify?: {
+    /** 节点上配置的补充文案（可选） */
+    content?: string
+    /** 提醒对象姓名（仅用于展示"通知谁"；真正发送时从 flow 的 members 取邮箱） */
+    to?: string[]
+  }
 }
 
 /**
@@ -84,8 +106,47 @@ export interface ApprovalRole {
   /** 固定部门名（与 deptFrom 二选一；两个都填时 dept 优先） */
   dept?: string
   /** 部门名取自**数据行字段**（中文列名，如「组别」「团队」）——
-     *  「推送至相关部门负责人」就是这种：具体是哪个部门由这一行数据决定 */
+   *  「推送至相关部门负责人」就是这种：具体是哪个部门由这一行数据决定 */
   deptFrom?: string
+}
+
+/**
+ * 「按组轮询」：这一环不是一个人办，而是**一组人依次各办一环**。
+ *
+ * 场景：依据数据筛出若干个组，按销售数量从高到低依次流转给各组负责人，
+ * 直到所有满足条件的组都办完 —— **环节数是数据决定的，模板里画不出来**。
+ *
+ * 怎么进流程（关键）：**建单时展开**，不是运行期循环。
+ *   `expandRotations(flow, groups)` 把配了本配置的环节替换成 N 个普通审批环节
+ *   （第 i 环的成员 = 第 i 个组的负责人），写进本单的 flow 快照。
+ *   之后 `rebuildChain` 一行都不用改：驳回重审、催办、时间线、通知全部照旧可用。
+ *   反过来，运行期再决定"下一个是谁"会让同一份流水重算出不同链路（历史单漂移、
+ *   模板被污染），而且模板里也画不出环 —— graphToFlowFrom 明确拒绝"节点被重复经过"。
+ *
+ * 因此取数也必须发生在**建单那一刻**（那时数据被冻结成 context）：
+ * 展开结果与业务数据一起快照进单据，之后再改数据不影响在途单。
+ */
+export interface RotationSpec {
+  /** 组名取自数据行的哪一列（如「组别」） */
+  groupFrom: string
+  /** 统计范围：按哪一列圈定"相关的行"，默认「SKU」—— 同一个 SKU 的多行里各组的销量 */
+  scopeFrom?: string
+  /** 排序依据列，默认「SKU近一年月平均销量」；同一个组命中多行时先按 aggregate 汇总 */
+  orderFrom?: string
+  /** 排序方向，默认 desc（销量高的组先办） */
+  order?: 'asc' | 'desc'
+  /** 同一个组命中多行时的汇总方式，默认 sum */
+  aggregate?: 'sum' | 'max'
+  /**
+   * 只保留满足条件的组（可选）。
+   * 求值上下文 = 该组**汇总后**的字段（`orderFrom` 那一列是汇总值，另有别名「销量」）
+   * + 该组第一行的业务上下文 —— 所以「销量 > 0」「组别 包含 华东」都能写。
+   */
+  where?: ConditionExpr
+  /** 最多展开几环（安全阀），默认 20。超了判建单失败（不静默截断，否则会漏掉几个组） */
+  limit?: number
+  /** 一个组都没命中时：'skip' 跳过这一环（默认）/ 'fail' 让建单失败 */
+  whenEmpty?: 'skip' | 'fail'
 }
 
 /** 角色的可读描述（模板里没解析时，卡片上显示它；建单失败时的报错也用它） */
@@ -179,16 +240,20 @@ export interface NodeDecision {
 /** 分支内的一个步骤：
  *  - 默认形态（type 缺省 / 'approval'）：一个或多个并行的审批人（即会签），保留旧数据的线性子步骤兼容；
  *  - type='branch'：一个嵌套分支组（分支内再按审批结果 / 业务条件分流），分支组步骤通过 branches 递归承载，
- *    支持任意层级「分支内再分分支」，无需先汇聚。
+ *    支持任意层级「分支内再分分支」，无需先汇聚；
+ *  - type='notify'：飞书提醒步骤（只通知、不办理，见 ApprovalFlowNotifyNode）。
  */
 export interface ApprovalFlowStep {
   id: string
-  /** 步骤名（可选），如「初审」「复核」 */
+  /** 步骤名（可选），如「初审」「复核」；notify 步骤里它是提醒名称 */
   name?: string
-  /** 步骤形态：缺省 'approval'（兼容旧数据）；'branch' = 嵌套分支组 */
-  type?: 'approval' | 'branch'
-  /** 该步骤的审批人（多人即会签）；type='branch' 的分支组步骤可留空 */
+  /** 步骤形态：缺省 'approval'（兼容旧数据）；'branch' = 嵌套分支组；'notify' = 飞书提醒 */
+  type?: 'approval' | 'branch' | 'notify'
+  /** 该步骤的审批人（多人即会签）；type='branch' 的分支组步骤可留空；
+   *  type='notify' 时它是**提醒对象**（同样支持 role 动态负责人） */
   members?: ApprovalChainItem[]
+  /** type='notify' 的补充文案（可选） */
+  content?: string
   /** type='branch' 时的嵌套分支列表（各组内仍可继续递归出现 type='branch' 的步骤） */
   branches?: ApprovalBranch[]
   /** 兼容旧结构的线性子步骤（无新生产方；flowToChain 仍会递归拍平） */
@@ -201,8 +266,18 @@ export interface BranchCondition {
   field: string
   /** 操作符 */
   op: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains'
-  /** 比较值（数字或字符串，求值时自动尝试数值比较） */
-  value: string | number
+  /**
+   * 比较值（数字或字符串，求值时自动尝试数值比较）。
+   *
+   * `op === 'contains'` 时还允许是**一组值**，语义是「命中任一即满足」：
+   *   多值列（销售状态「停售,在售」）经常要一次匹配好几个取值，
+   *   写成数组就不必为同一个字段加好几条条件 —— 而多条条件还得同时选「任一满足」，
+   *   那个组合方式是**整条分支**共用的，会连带影响它与其它条件的组合，很容易配错。
+   *
+   * 其它操作符遇到数组只会 `String()` 成一个逗号串参与比较（等于没填对），
+   * 所以编辑器在**切换操作符时会主动把数组收回单值**（见 createStream 的 onOpChange）。
+   */
+  value: string | number | Array<string | number>
 }
 
 /**
@@ -265,6 +340,7 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: 'cat_infringe', label: '产品侵权类' },
   { value: 'cat_stock', label: '库存管理类' },
   { value: 'cat_env', label: '外部环境类' },
+  { value: 'cat_quality', label: '质量问题类' },
   { value: 'cat_dev', label: '开发类' },
   { value: 'cat_supply', label: '供应链类' },
 ]
@@ -364,19 +440,46 @@ export interface ApprovalFlowBranchNode {
   branches: ApprovalBranch[]
 }
 
-export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode
+/**
+ * 流程节点：飞书提醒（只通知、不办理）。
+ *
+ * 语义（三条，缺一不可）：
+ *  1. **在审批环节中体现**：它会作为一环出现在审批时间线上，看得见「走到了这里、通知了谁」；
+ *  2. **不参与办理**：不产生待办 —— 流程到达即自动穿过，不写 decisions、
+ *     不需要审批人填写结论，因此也**不会**成为 currentStep 卡住整条流程；
+ *  3. **到达即发**：流程刚推进到它的那一刻发一条飞书消息（发送见 composables/useNodeSubmit）。
+ *
+ * 提醒对象复用审批环节的成员结构（`ApprovalChainItem`，含 `role` 动态负责人）：
+ * 「固定的人」与「按数据行字段取部门负责人」两种都能表达，不必再造一套配置交互。
+ *
+ * ⚠️ 出线必须**恰好一条**：它没有结论、也没有条件可分流，多条出线无从选择。
+ */
+export interface ApprovalFlowNotifyNode {
+  id: string
+  type: 'notify'
+  /** 提醒名称，如「通知财务」；也是时间线上显示的那一环 */
+  name: string
+  /** 提醒对象（固定成员 / 动态负责人） */
+  members: ApprovalChainItem[]
+  /** 可选补充文案，拼在自动生成的内容后面 */
+  content?: string
+}
+
+export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode
 
 /** 完整审批流：顺序节点，支持分支 */
 export type ApprovalFlow = ApprovalFlowNode[]
 
 // ===== Vue Flow 画布节点 data =====
 
-/** 审批节点（approval）的画布 data：环节名 + 成员（审批人/抄送人） */
+/** 审批节点（approval）/ 提醒节点（notify）的画布 data：环节名 + 成员（审批人/抄送人/提醒对象） */
 export interface ApprovalNodeData {
-  /** 环节名，如「初审」「财务复核」 */
+  /** 环节名，如「初审」「财务复核」「通知财务」 */
   title: string
-  /** 成员列表，type 区分审批人（manager）/ 抄送人（cc） */
+  /** 成员列表，type 区分审批人（manager）/ 抄送人（cc）；notify 节点里是提醒对象 */
   members: ApprovalChainItem[]
+  /** 仅 notify 节点用：提醒的补充文案 */
+  content?: string
 }
 
 /** 生成节点 / 分支的本地 id */
@@ -416,7 +519,7 @@ export function evalConditionExpr (expr: ConditionExpr, form: Record<string, unk
       ? expr.items.some(i => evalConditionExpr(i, form))
       : expr.items.every(i => evalConditionExpr(i, form))
   }
-  return evalCondition(expr, form[expr.field])
+  return evalCondition(expr, form[expr.field], form)
 }
 
 /** 该条件是不是「按上一环节审批结论分流」的结果条件 */
@@ -433,7 +536,13 @@ export function isResultCondition (expr: ConditionExpr): boolean {
  */
 export function firstResultValueOf (b: ApprovalBranch): string | undefined {
   const hit = branchConditions(b).find(isResultCondition) as BranchCondition | undefined
-  return hit ? String(hit.value ?? '').trim() || undefined : undefined
+  /*
+   * 数组只会出现在「包含」里，而它不是一个结论码 —— 必须挡掉：
+   * 放过去的话 `String(['recycle','discard'])` = "recycle,discard" 会被当成结论码，
+   * 终态判定（outcomeOf）和可选结论就都拿到一个根本不存在的码。
+   */
+  const v = hit && !Array.isArray(hit.value) ? hit.value : ''
+  return String(v ?? '').trim() || undefined
 }
 
 /** 该分支是否为默认（兜底）分支：没有任何命中条件 */
@@ -441,25 +550,131 @@ export function isDefaultBranch (b: ApprovalBranch): boolean {
   return branchConditions(b).length === 0
 }
 
-function evalCondition (c: BranchCondition, raw: unknown): boolean {
+/**
+ * 把条件的比较值读成「值列表」（只有 `contains` 用得上）。
+ *
+ * 不是数组就**就地升级**成数组再返回：历史模板里配好的 contains 都是单值，
+ * 不能假设读到的就是数组；值为空时给一个空元素，否则界面上没地方填第一个值。
+ *
+ * ⚠️ 返回的是 `value` **本身**（不是拷贝）：调用方（编辑器）常常直接写回某个下标
+ * （`condValues(c)[i] = 输入值`），返回拷贝的话写入会静默丢失 —— 输入框看着能打字，
+ * 但存进 flow 的永远是空。
+ */
+export function conditionValues (c: BranchCondition): Array<string | number> {
+  if (!Array.isArray(c.value)) {
+    const v = c.value
+    c.value = v === undefined || v === null || String(v).trim() === '' ? [''] : [v]
+  }
+  return c.value
+}
+
+/**
+ * 把多值收回单值（切换操作符到别的比较方式时用），保留**第一个非空值**。
+ *
+ * 不收的后果：数组会被 `String()` 成 "a,b" 参与比较 —— 条件永远不命中，而且看不出来
+ * （界面上那两个框里的内容都还在）。已填过的第一个值留着，比直接丢掉更符合预期。
+ */
+export function collapseConditionValue (c: BranchCondition): void {
+  if (Array.isArray(c.value)) {
+    c.value = c.value.find(v => String(v ?? '').trim() !== '') ?? ''
+  }
+}
+
+/**
+ * 条件**右侧**「引用另一个字段」的前缀：`@字段名`。
+ *
+ * 用途：把原本写死的比较值换成**另一个字段的值**，例如
+ * 「金额 > 上一环节填的金额」「总库存金额 > 参考MSKU」。
+ * 取数范围就是求值上下文（`FlowContext` / 办理时的 form）里有的东西：
+ * BI 行字段、派生指标（毛利率 / 海外仓库存金额）、办理时填的 amount / qty 等。
+ *
+ * 三条硬约定（改这里必须同时满足，否则会破坏既有分流）：
+ *   1) **常量照旧**：不以 `@` 开头的值仍是字面量 —— 历史模板行为逐字节不变；
+ *   2) **审批结论码不参与引用**：`field === 'result'` 的条件永远按字面量解释。
+ *      结论码（pass / reject …）会被 firstResultValueOf 当标识读走去判定终态与可选结论，
+ *      一旦被当成字段引用，分流与终态就全乱了；
+ *   3) 引用取不到值（字段不存在 / 该字段为空）时按**不命中**处理 ——
+ *      与「未知不当成成立」的既有口径一致（见 deriveFlowFields 里 null 的说明）。
+ *
+ * ⚠️ 代价：真要拿一个**以 `@` 开头**的字符串当常量比较，目前无法表达（会被当成引用）。
+ *    现有业务值（平台名 / 部门名 / 是-否 / 金额）都不以 @ 开头，暂不为它加转义语法。
+ */
+export const FIELD_REF_PREFIX = '@'
+
+/**
+ * 该条件的比较值是否为「引用另一个字段」。
+ * 是则返回**被引用的字段名**，不是引用则返回 null。
+ *
+ * `field === 'result'`（审批结论条件）永不解析引用 —— 见 FIELD_REF_PREFIX 的第 2 条约定。
+ */
+export function conditionRefField (c: BranchCondition): string | null {
+  if (c.field === 'result') {
+    return null
+  }
+  const v = typeof c.value === 'string' ? c.value.trim() : ''
+  if (!v.startsWith(FIELD_REF_PREFIX)) {
+    return null
+  }
+  const name = v.slice(FIELD_REF_PREFIX.length).trim()
+  return name || null
+}
+
+/**
+ * 「包含」的求值：值可以是一个常量、一组常量，或 `@字段名` 引用。
+ *
+ * 多值的语义是**命中任一**（`some`），不是全部，两个理由：
+ *  1. 多值列（销售状态「停售,在售」）的业务读法就是「包含这几个取值之一」；
+ *  2. 「同时包含 A 和 B」用一条 contains 表达不了（子串有先后顺序），
+ *     本来就该写成两条条件 + 「全部满足」；把 some 改成 every 只会让"多勾一个值"
+ *     变得越来越难命中，与用户加值的直觉相反。
+ */
+function containsHit (rawStr: string, c: BranchCondition, form: Record<string, unknown>): boolean {
+  const list = Array.isArray(c.value) ? c.value : [c.value]
+  return list.some(v => {
+    // 单个值也可以写成「@字段名」：复用与单值同一套引用规则（含"result 条件不参与引用"那条）
+    const refField = conditionRefField({ field: c.field, op: 'contains', value: v })
+    const expect = refField ? form[refField] : v
+    // 空值不算命中：一个还没填的空框不该让分支恰好命中
+    if (expect === undefined || expect === null || expect === '') {
+      return false
+    }
+    return rawStr.includes(String(expect))
+  })
+}
+
+/**
+ * @param form 求值上下文。右侧写成 `@字段名` 时从这里取值；
+ *             不传则引用一律取不到 → 按不命中处理（调用方都应显式传入）。
+ */
+function evalCondition (c: BranchCondition, raw: unknown, form: Record<string, unknown> = {}): boolean {
   if (raw === undefined || raw === null || raw === '') {
     return false
   }
   /*
-     * 千分位串要在**比较时**还原成数字："6,000" 直接 Number() 是 NaN，
-     * 于是 gt/gte/lt/lte 一律判 false —— 而两个来源都可能是这种写法：
-     *   ① 表格里的行数据（formatDatas 把数字格式化成 "1,234"）；
-     *   ② 办理时审批人手填的金额。
-     * 业务上下文那条路径已经在 toFlowContext 里归一化过，这里再兜一道，
-     * 保证"条件比较的值"与"数据从哪来"无关。
-     */
+   * 千分位串要在**比较时**还原成数字："6,000" 直接 Number() 是 NaN，
+   * 于是 gt/gte/lt/lte 一律判 false —— 而两个来源都可能是这种写法：
+   *   ① 表格里的行数据（formatDatas 把数字格式化成 "1,234"）；
+   *   ② 办理时审批人手填的金额。
+   * 业务上下文那条路径已经在 toFlowContext 里归一化过，这里再兜一道，
+   * 保证"条件比较的值"与"数据从哪来"无关。
+   */
+  // 右侧可能是「@字段名」：取上下文里该字段的值来比较，取不到就判不命中。
+  // 非引用时 expect === c.value，下面的比较逻辑与改动前完全一致。
+  let expect: unknown = c.value
+  const refField = conditionRefField(c)
+  if (refField) {
+    expect = form[refField]
+    if (expect === undefined || expect === null || expect === '') {
+      return false
+    }
+  }
   const a = Number(typeof raw === 'string' ? raw.replace(/,/g, '').trim() : raw)
-  const b = Number(typeof c.value === 'string' ? c.value.replace(/,/g, '').trim() : c.value)
+  const b = Number(typeof expect === 'string' ? expect.replace(/,/g, '').trim() : expect)
   const numeric = !Number.isNaN(a) && !Number.isNaN(b)
   switch (c.op) {
-    case 'eq': { return numeric ? a === b : String(raw) === String(c.value)
+    case 'eq': { return numeric ? a === b : String(raw) === String(expect)
     }
-    case 'ne': { return numeric ? a !== b : String(raw) !== String(c.value)
+    case 'ne': { return numeric ? a !== b : String(raw) !== String(expect)
     }
     case 'gt': { return numeric && a > b
     }
@@ -469,7 +684,8 @@ function evalCondition (c: BranchCondition, raw: unknown): boolean {
     }
     case 'lte': { return numeric && a <= b
     }
-    case 'contains': { return String(raw).includes(String(c.value))
+    // 「包含」支持一组值（命中任一即满足）；单值走同一条路径，行为与改动前一致
+    case 'contains': { return containsHit(String(raw), c, form)
     }
   }
 }
@@ -494,7 +710,7 @@ export function matchBranch (branches: ApprovalBranch[], form: Record<string, un
     // （放进**组里**的 result 条件不受这个优待，按该组自己的 logic 参与运算，
     //   口径与 firstResultValueOf 的说明一致。）
     const results = list.filter(isResultCondition) as BranchCondition[]
-    if (results.some(c => !evalCondition(c, form[c.field]))) {
+    if (results.some(c => !evalCondition(c, form[c.field], form))) {
       continue
     }
     const rest = list.filter(i => !isResultCondition(i))
@@ -576,6 +792,64 @@ export function collectStepResultOptions (flow: ApprovalFlow): Record<string, st
     }
   }
   return map
+}
+
+/** 一个「飞书提醒」环节的配置（见 collectNotifySteps） */
+export interface NotifyStepInfo {
+  /** 提醒名称（一般就是环节名） */
+  name: string
+  /** 节点上配的补充文案 */
+  content?: string
+  /** 提醒对象（固定成员 / 已解析的 department leader） */
+  members: ApprovalChainItem[]
+}
+
+/**
+ * 收集流程里所有「飞书提醒」节点 / 步骤：stepId → 提醒配置。
+ *
+ * 两个用途：
+ *   1) rebuildChain 把它们作为一环写进 chain（时间线上要看得见），但**不产生待办**；
+ *   2) 提交环节时据此发飞书消息（见 composables/useNodeSubmit）——
+ *      发送必须发生在"流程刚推进到它"的那一刻，**不能**放在 rebuildChain 里：
+ *      那是纯函数、且每次读取都重算（审批页/首页/我的都会调），在里面发消息会重复轰炸。
+ */
+export function collectNotifySteps (flow: ApprovalFlow): Record<string, NotifyStepInfo> {
+  const out: Record<string, NotifyStepInfo> = {}
+
+  const walkSteps = (steps?: ApprovalFlowStep[]) => {
+    for (const s of steps ?? []) {
+      if (s.type === 'branch') {
+        for (const b of s.branches ?? []) {
+          walkSteps(b.steps)
+        }
+        continue
+      }
+      if (s.type === 'notify') {
+        out[s.id] = {
+          name: s.name ?? '',
+          ...(s.content ? { content: s.content } : {}),
+          members: s.members ?? [],
+        }
+      }
+    }
+  }
+
+  for (const node of flow) {
+    if (node.type === 'notify') {
+      out[node.id] = {
+        name: node.name,
+        ...(node.content ? { content: node.content } : {}),
+        members: node.members ?? [],
+      }
+      continue
+    }
+    if (node.type === 'branch') {
+      for (const b of node.branches) {
+        walkSteps(b.steps)
+      }
+    }
+  }
+  return out
 }
 
 /**
@@ -691,6 +965,32 @@ export function rebuildChain (
         collect(b.steps)
       }
     }
+  }
+
+  /** stepId → 飞书提醒配置。这类环节**不产生待办**，到达即穿过（见 pushNotify） */
+  const notifyById = collectNotifySteps(flow)
+
+  /**
+   * 把一个「飞书提醒」环节写进 chain。
+   *
+   * 关键：**不消费 decisions、也不设 currentStep** —— 流程不会为它停下等人办理，
+   * 它只是时间线上的一环（即需求里的"在审批环节中体现，但不参与办理"）。
+   * 真正的飞书发送发生在提交那一刻（见 composables/useNodeSubmit）：
+   * 本函数是纯函数且每次读取都会重算，在里面发消息必然重复轰炸。
+   */
+  function pushNotify (stepId: string) {
+    const info = notifyById[stepId]
+    chain.push([{
+      type: 'notify',
+      name: info?.name ?? '',
+      notify: {
+        ...(info?.content ? { content: info.content } : {}),
+        ...(info?.members.length
+          ? { to: info.members.map(m => m.name || m.email || '').filter(Boolean) }
+          : {}),
+      },
+    }])
+    stepIds.push(stepId)
   }
 
   let currentStep = -1
@@ -813,6 +1113,11 @@ export function rebuildChain (
         }
         continue
       }
+      // 飞书提醒步骤：不等待办理，直接穿过（不消费决策、不设 currentStep）
+      if (s.type === 'notify') {
+        pushNotify(s.id)
+        continue
+      }
       const d = pushStep(s.id)
       if (!d) {
         currentStep = chain.length - 1
@@ -837,6 +1142,13 @@ export function rebuildChain (
         return false
       }
       const node = flow[i]
+      // 飞书提醒：只记一环、不停留；后续走向不受它影响
+      // （出线唯一性由 graphToFlowFrom 保证 —— 它没有结论也没有条件，多条出线无从选择）
+      if (node.type === 'notify') {
+        pushNotify(node.id)
+        i++
+        continue
+      }
       if (node.type === 'approval') {
         const d = pushStep(node.id)
         if (!d) {
@@ -966,6 +1278,17 @@ export function flowToChain (flow: ApprovalFlow): ApprovalChain {
       }
       return
     }
+    /*
+     * ⚠️ 飞书提醒步骤必须**跳过**，不能 pushMembers。
+     *
+     * 它的 members 是"提醒对象"，不是审批人。推进线性链的话，
+     * 服务端超时催办（server/reminders.ts 的 pendingStepOf 按 type==='manager' 找待办）
+     * 会把这些**没有审批职责**的人当成待办人去催 —— 一个不该出现的骚扰。
+     * 时间线上要显示它是 rebuildChain 的事（那里写的是 type:'notify' 的占位项）。
+     */
+    if (step.type === 'notify') {
+      return
+    }
     pushMembers(step.members)
     for (const sub of step.steps ?? []) {
       walkStep(sub)
@@ -976,6 +1299,10 @@ export function flowToChain (flow: ApprovalFlow): ApprovalChain {
       if (node.nodes.length > 0) {
         chain.push(node.nodes)
       }
+      continue
+    }
+    // 提醒节点不进线性链，理由同上
+    if (node.type === 'notify') {
       continue
     }
     const first = node.branches.find(isDefaultBranch) ?? node.branches[0]

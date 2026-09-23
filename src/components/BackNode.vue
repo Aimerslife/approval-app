@@ -1,11 +1,11 @@
 <template>
-  <v-sheet class="d-flex align-center gap-1 mb-3" style="background-color: rgb(var(--v-theme-surface))">
+  <div class="d-flex align-center gap-1 mb-3">
     <v-icon-btn size="20" @click="$router.back()">
       <v-icon :icon="props.icon" size="20" />
     </v-icon-btn>
 
     <span class="text-[13px]">{{ props.title }}</span>
-  </v-sheet>
+  </div>
 </template>
 <script lang="ts" setup>
   const props = withDefaults(defineProps<{

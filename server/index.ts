@@ -1,22 +1,13 @@
+// ⚠️ 这一行必须留在最前面：它加载 .env.local（见 server/env.ts 顶部注释）。
+// 放在这里是为了让本文件模块体里的 process.env.* 读得到值；
+// biSync.ts 那批顶层 env 读取则由它**自己** import './env' 来保证，与本行位置无关。
+import './env'
 import http from 'node:http'
 import https from 'node:https'
 import * as lark from '@larksuiteoapi/node-sdk'
 import Database from 'better-sqlite3'
 import { runBiSync, uploadRows } from './biSync'
 import { runReminders } from './reminders'
-
-// tsx **不会**自动加载 .env* 文件，而写 bi_rows 需要 PB 管理员凭据
-// （该集合的 createRule / updateRule 都是 null，只有管理员可写）。
-// 用 node 原生 API 显式加载（node >= 20.12，本项目 v24 满足），
-// 这样把变量写进 .env.local 就行，不必每次 export。
-// 文件不存在会抛错 —— 那是正常情况，忽略即可，别因此起不来。
-for (const file of ['.env.local', '.env']) {
-  try {
-    process.loadEnvFile(file)
-  } catch {
-    /* 文件不存在：忽略 */
-  }
-}
 
 /*
  * 飞书凭据**只从环境变量取**（.env.local，已被 .gitignore 忽略）。

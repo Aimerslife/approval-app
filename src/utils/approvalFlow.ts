@@ -9,7 +9,7 @@ import type {
   ConditionExpr,
   FlowContext,
 } from '../types/approval'
-import { branchConditions, isConditionGroup, isResultCondition, uid } from '../types/approval'
+import { branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, uid } from '../types/approval'
 import { deriveFlowFields } from './biRowFields'
 
 /**
@@ -201,8 +201,29 @@ export function graphToFlowFrom (
           if (!String(it.field ?? '').trim()) {
             return `${where}第 ${k + 1} 个条件未填写字段名`
           }
-          if (String(it.value ?? '').trim() === '') {
+          /*
+           * 值是数组时（只有「包含」会这样）按"有效值拼接"来看：
+           * String(['a','b']) = "a,b" 没问题，但 String(['','']) = "," 会被当成填过，
+           * 而它其实一个值都没填 —— 那种情况应该照常报"未填写比较值"。
+           */
+          const rawValue = (Array.isArray(it.value)
+            ? it.value.filter(v => String(v ?? '').trim() !== '').join(',')
+            : String(it.value ?? '')).trim()
+          if (rawValue === '') {
             return `${where}第 ${k + 1} 个条件未填写比较值`
+          }
+          /*
+           * 「@字段名」= 引用另一个字段的值（见 types/approval 的 FIELD_REF_PREFIX）。
+           * 下面两种写法都会**静默失效**（条件永远不命中），所以在这里明确拦下：
+           *   ① 只写了一个 @，没写字段名；
+           *   ② 审批结论条件写成了引用 —— 它的值会被 firstResultValueOf 当结论码读走
+           *      （用来判定终态和可选结论），引用语法对它一律不生效。
+           */
+          if (rawValue === FIELD_REF_PREFIX) {
+            return `${where}第 ${k + 1} 个条件写了「${FIELD_REF_PREFIX}」但没写引用的字段名`
+          }
+          if (it.field === 'result' && rawValue.startsWith(FIELD_REF_PREFIX)) {
+            return `${where}第 ${k + 1} 个条件是审批结论条件，比较值必须是结论码，不能写成「${FIELD_REF_PREFIX}字段名」`
           }
         }
         return null
@@ -443,6 +464,41 @@ export function graphToFlowFrom (
         continue
       }
 
+      // 飞书提醒：分支里的一环，同样只通知、不办理（不占审批人、不等待结论）
+      if (pn.type === 'notify') {
+        const notifyName = String(pn.data?.title ?? '').trim() || '飞书提醒'
+        if (outs.length !== 1) {
+          return {
+            steps,
+            territory,
+            error: `「${notifyName}」是飞书提醒节点，必须恰好有一条出线（它没有审批结论，无法分流）`,
+            errorNodeId: p,
+          }
+        }
+        const ms = (pn.data?.members ?? []).map((m: any) => ({ ...m }))
+        if (ms.length === 0) {
+          return {
+            steps,
+            territory,
+            error: `「${notifyName}」还没有添加提醒对象，请点击该节点添加`,
+            errorNodeId: p,
+          }
+        }
+        if (!visit(p)) {
+          return { steps, territory, error: '流程中检测到环（节点被重复经过），请检查连线' }
+        }
+        const content = String(pn.data?.content ?? '').trim()
+        steps.push({
+          id: pn.id,
+          type: 'notify',
+          name: notifyName,
+          members: ms,
+          ...(content ? { content } : {}),
+        })
+        p = outs[0].target
+        continue
+      }
+
       return { steps, territory, error: '流程中存在不支持的节点类型，请检查画布' }
     }
     return { steps, territory, error: '流程中检测到环，请检查画布' }
@@ -457,7 +513,7 @@ export function graphToFlowFrom (
       return { flow: [], error: '流程中存在悬空连线' }
     }
     // 分支/主线汇聚之后，业务节点只允许被主路径经过一次；重复经过即存在环或反向回连
-    if ((node.type === 'approval' || node.type === 'condition') && visited.has(cur)) {
+    if ((node.type === 'approval' || node.type === 'condition' || node.type === 'notify') && visited.has(cur)) {
       const t = String((node.data as ApprovalNodeData)?.title || '未命名环节')
       return {
         flow: [],
@@ -469,7 +525,7 @@ export function graphToFlowFrom (
     if (node.type === 'end') {
       // 校验：所有业务节点都必须挂在主路径上
       const orphans = nodes.filter(
-        n => (n.type === 'approval' || n.type === 'condition') && !visited.has(n.id),
+        n => (n.type === 'approval' || n.type === 'condition' || n.type === 'notify') && !visited.has(n.id),
       )
       if (orphans.length > 0) {
         // 点名说清是哪几个环节 —— 只说「存在未连接的节点」用户在几十个框里找不到
@@ -481,6 +537,23 @@ export function graphToFlowFrom (
           flow: [],
           error: `${names}${orphans.length > 3 ? ` 等 ${orphans.length} 个环节` : ''}没有连接进主流程，请检查连线`,
           errorNodeId: orphans[0].id,
+        }
+      }
+      /*
+       * 至少要有一个「审批环节」。
+       *
+       * 飞书提醒环只通知、不办理，**没有谁能推进它** ——
+       * 「开始 → 提醒 → 结束」这种模板建单后会永远停在「进行中」（currentStep 是 -1，
+       * done 也不会变 true），而下面那道 hasMember 检查是为"草稿模板先搭架子"放行的
+       * （编辑器保存时传的是 allowEmptyMembers: true），拦不住它。
+       * 宁可当场拒绝，也不要留一张谁也推不动的单。
+       *
+       * 判"画布上有没有审批节点"就够：走到这里时所有审批节点都已被 orphans 检查确认接入流程。
+       */
+      if (!nodes.some(n => n.type === 'approval')) {
+        return {
+          flow: [],
+          error: '流程里至少要有一个审批环节：飞书提醒只通知、不办理，没法单独构成流程',
         }
       }
       if (!hasMember && !opts.allowEmptyMembers) {
@@ -546,6 +619,40 @@ export function graphToFlowFrom (
       }
       flow.push({ id: node.id, type: 'branch', branches: res.branches! })
       cur = res.converge
+      continue
+    }
+
+    // 飞书提醒：只通知、不办理 —— 直接穿过，成为 flow 里的一个 notify 节点
+    if (node.type === 'notify') {
+      visited.add(cur)
+      const notifyName = String(node.data?.title ?? '').trim() || '飞书提醒'
+      const outs: any[] = out.get(cur) ?? []
+      // 它没有审批结论、也没有条件可分流，所以出线必须恰好一条
+      if (outs.length !== 1) {
+        return {
+          flow: [],
+          error: `「${notifyName}」是飞书提醒节点，必须恰好有一条出线（它没有审批结论，无法分流）`,
+          errorNodeId: cur,
+        }
+      }
+      const members = (node.data?.members ?? []).map((m: any) => ({ ...m }))
+      // 没有人可提醒 = 这一环什么也不会发生。当场报出来，别留一个静默的空环节
+      if (members.length === 0) {
+        return {
+          flow: [],
+          error: `「${notifyName}」还没有添加提醒对象，请点击该节点添加`,
+          errorNodeId: cur,
+        }
+      }
+      const content = String(node.data?.content ?? '').trim()
+      flow.push({
+        id: node.id,
+        type: 'notify',
+        name: notifyName,
+        members,
+        ...(content ? { content } : {}),
+      })
+      cur = outs[0].target
       continue
     }
 

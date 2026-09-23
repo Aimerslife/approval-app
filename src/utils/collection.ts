@@ -1,6 +1,7 @@
 import type { ApprovalAttachment, ApprovalChain, ApprovalFlow, ApprovalModal, ApprovalOrder, FlowGraph } from '@/types/approval'
 import pb from '@/pocketbase.ts'
-import { APPROVAL_STATUS } from '@/types/approval'
+import { APPROVAL_STATUS, buildBranchTerminalMap, rebuildChain } from '@/types/approval'
+import { sendArrivedNotifies } from '@/utils/notifySteps'
 
 export interface DocumentModel {
   collectionId: string
@@ -115,10 +116,55 @@ export async function createApprocalModel (
         + '（加 sync_key 那一版），重启 PB 后新建的单才会带上兜底键。',
       )
     }
+    await notifyOnCreate(data, res)
     return res
   } catch (error: any) {
     console.error('增加审批流失败:', error.response?.data ?? error.data ?? error)
     return error
+  }
+}
+
+/**
+ * 「建单即发」：流程**开头**就是「飞书提醒」环时，到达发生在建单这一刻，而不是第一次办理。
+ *
+ * 为什么放在这一层，而不是各调用方的页面里：
+ * 这里是**所有建单路径的唯一入口**（workspace 批量建单、utils 的演示建单都走它）。
+ * 写在页面里迟早会有一条路径漏掉，而"漏发通知"是**静默失败** —— 最难发现的那种。
+ *
+ * 为什么失败只打日志、不往外抛：
+ * 单子已经建好了。这里抛出去会被下面的 catch 当成"建单失败"返回给调用方，
+ * 调用方可能据此重试，反而建出重复单。通知发不出去 ≠ 单子没建成。
+ */
+async function notifyOnCreate (
+  data: NonNullable<ApprovalOrder['chain']>,
+  order: ApprovalOrder,
+): Promise<void> {
+  const flow = data.flow
+  if (!flow?.length) {
+    return
+  }
+  try {
+    const context = data.context ?? {}
+    // 建单后的初始链路：还没有任何办理流水，所以只能走到第一个待办环节为止。
+    // 开头的提醒环都在这段里 —— 正是要补发的那批。
+    const initial = rebuildChain(
+      flow,
+      data.decisions ?? [],
+      buildBranchTerminalMap(data.graph),
+      context,
+    )
+    const res = await sendArrivedNotifies({
+      flow,
+      before: [], // 建单前什么都没到达过
+      after: initial.stepIds,
+      orderNo: order.order_no,
+      context,
+    })
+    if (res.failed.length > 0) {
+      console.warn('[createApprocalModel] 建单提醒未全部发出:', res.failed.join('；'))
+    }
+  } catch (error) {
+    console.warn('[createApprocalModel] 建单提醒异常（不影响建单）:', error)
   }
 }
 

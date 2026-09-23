@@ -41,6 +41,15 @@
                 variant="tonal"
                 @click="addConditionNode"
               >条件分支</v-btn>
+
+              <!-- 飞书提醒：只通知、不办理 —— 在时间线上占一环，流程到达即自动穿过 -->
+              <v-btn
+                color="info"
+                prepend-icon="mdi-bell-ring-outline"
+                size="small"
+                variant="tonal"
+                @click="addNotifyNode"
+              >飞书提醒</v-btn>
             </div>
 
             <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-0">
@@ -144,20 +153,15 @@
                   {{ isResultEdge ? 'mdi-account-check-outline' : 'mdi-source-branch' }}
                 </v-icon>
               </span>
-
               <span class="panel-title">{{ isResultEdge ? '审批结果分支配置' : '分支配置' }}</span>
-
               <div v-if="selectedEdgeToEnd" class="panel-hint end-branch-hint ml-3">
                 此分支直达「结束」节点：命中该分支时流程直接结束，不再进入后续环节
               </div>
-
               <v-spacer />
-
               <button class="icon-btn" title="关闭" @click="selectedEdge = null">
                 <v-icon size="12">mdi-close</v-icon>
               </button>
             </div>
-
             <div class="panel-body">
               <div class="panel-row">
                 <input
@@ -166,28 +170,23 @@
                   :placeholder="isResultEdge ? '如：驳回走复核' : '如：财务审批'"
                   style="width: 148px"
                 >
-
                 <label class="switch-label">
                   <input
                     :checked="selectedEdgeConditions.length === 0"
                     type="checkbox"
                     @change="onMainToggle"
                   >
-
                   <span v-if="selectedEdgeConditions.length === 0" class="mt-1">{{ isResultEdge ?
                     '主线（审批通过/其他结论未命中时走这条）' : '默认分支（条件都不命中时走这条）' }}</span>
                 </label>
-
                 <div class="panel-row ml-3">
                   <select v-model="selectedEdgeType" class="panel-input" style="width: 128px">
                     <option v-for="t in EDGE_STYLES" :key="t.value" :value="t.value">
                       {{ t.label }}
                     </option>
                   </select>
-
                   <template v-if="selectedEdgeType === 'default'">
                     <span class="panel-label" title="0 = 接近直线，1 = 弯曲最明显">弯曲程度</span>
-
                     <input
                       v-model.number="selectedEdgeCurvature"
                       max="1"
@@ -196,9 +195,7 @@
                       step="0.05"
                       type="range"
                     >
-
-                    <span class="panel-label slider-value">{{ selectedEdgeCurvature.toFixed(2)
-                    }}</span>
+                    <span class="panel-label slider-value">{{ selectedEdgeCurvature.toFixed(2)}}</span>
                   </template>
 
                   <template v-else-if="selectedEdgeType === 'smoothstep'">
@@ -212,36 +209,27 @@
                       step="1"
                       type="range"
                     >
-
                     <span class="panel-label slider-value">{{
                       Math.round(selectedEdgeBorderRadius)
                     }}</span>
                   </template>
                 </div>
               </div>
-              <!--
-                                审批结论（仅结果分支）：单独一行 —— 它是**硬前提**，
-                                与下面那些"附加条件/条件组"不是一个层级（不参与「满足方式」的组合）。
-                            -->
               <template v-if="isResultEdge && selectedEdgeConditions.length > 0">
                 <div class="panel-row">
                   <span class="panel-label">审批结论</span>
-
                   <select v-model="selectedEdgeResult" class="panel-input" style="width: 168px">
                     <option disabled value="">请选择审批结论</option>
-
                     <option v-for="r in APPROVAL_RESULTS" :key="r.value" :value="r.value">
                       {{ r.label }}
                     </option>
                   </select>
                 </div>
-
                 <div v-if="selectedEdgeResult === 'other_reason'" class="panel-hint ml-3">
                   「其他原因」通常需要再细化：可追加条件，如 result_label 包含关键词、amount 大于 5000；
                   多个原因属于同一走向时把满足方式改成「任一满足」
                 </div>
               </template>
-
               <!-- 条件条目：两种分支共用（普通条件 / 条件组混排） -->
               <template v-if="selectedEdgeConditions.length > 0">
                 <div
@@ -288,24 +276,66 @@
                           class="panel-input"
                           list="flow-field-options"
                           placeholder="字段 是否属于灯具"
-                          style="width: 108px"
+                          style="width: 120px"
                         >
 
                         <select
                           v-model="subCondOf(sub).op"
                           class="panel-input"
                           style="width: 88px"
+                          @change="onOpChange(subCondOf(sub), $event)"
                         >
                           <option v-for="op in OPS" :key="op.value" :value="op.value">
                             {{ op.label }}
                           </option>
                         </select>
 
+                        <!--
+                          值：「包含」可以填多个（命中任一即满足）；
+                          其它操作符是单值 —— 常量（是 / 5000）或「@字段名」引用另一字段的值。
+                        -->
+                        <template v-if="subCondOf(sub).op === 'contains'">
+                          <span
+                            v-for="(_, vi) in condValues(subCondOf(sub))"
+                            :key="vi"
+                            class="cond-value"
+                          >
+                            <input
+                              v-model="condValues(subCondOf(sub))[vi]"
+                              class="panel-input"
+                              list="flow-field-ref-options"
+                              placeholder="值"
+                              style="width: 96px"
+                            >
+
+                            <v-icon-btn
+                              v-if="condValues(subCondOf(sub)).length > 1"
+                              size="x-small"
+                              title="删除这个值"
+                              variant="text"
+                              @click="removeCondValue(subCondOf(sub), vi)"
+                            >
+                              <v-icon size="11">mdi-close</v-icon>
+                            </v-icon-btn>
+                          </span>
+
+                          <button
+                            class="add-cond-btn add-cond-btn--inline"
+                            title="再加一个值：命中任一个即算满足"
+                            @click="addCondValue(subCondOf(sub))"
+                          >
+                            <v-icon size="11">mdi-plus</v-icon>
+                            <span>值</span>
+                          </button>
+                        </template>
+
                         <input
+                          v-else
                           v-model="subCondOf(sub).value"
                           class="panel-input"
-                          placeholder="比较值 是 / 5000"
-                          style="width: 108px"
+                          list="flow-field-ref-options"
+                          placeholder="5000 或 @字段"
+                          style="width: 200px"
                         >
 
                         <v-icon-btn
@@ -334,16 +364,64 @@
                       style="width: 108px"
                     >
 
-                    <select v-model="condOf(item).op" class="panel-input" style="width: 88px">
+                    <select
+                      v-model="condOf(item).op"
+                      class="panel-input"
+                      style="width: 88px"
+                      @change="onOpChange(condOf(item), $event)"
+                    >
                       <option v-for="op in OPS" :key="op.value" :value="op.value">{{ op.label }}
                       </option>
                     </select>
 
+                    <!--
+                      「包含」可以填多个值（命中任一即满足）：多值列（销售状态「停售,在售」）
+                      经常要一次匹配好几个取值，多给几个输入框，比"再加一条条件 + 把满足方式
+                      改成任一满足"清楚得多（那个满足方式是整条分支共用的，容易连带配错）。
+                    -->
+                    <template v-if="condOf(item).op === 'contains'">
+                      <span
+                        v-for="(_, vi) in condValues(condOf(item))"
+                        :key="vi"
+                        class="cond-value"
+                      >
+                        <input
+                          v-model="condValues(condOf(item))[vi]"
+                          class="panel-input"
+                          list="flow-field-ref-options"
+                          placeholder="值"
+                          style="width: 96px"
+                        >
+
+                        <v-icon-btn
+                          v-if="condValues(condOf(item)).length > 1"
+                          size="x-small"
+                          title="删除这个值"
+                          variant="text"
+                          @click="removeCondValue(condOf(item), vi)"
+                        >
+                          <v-icon size="11">mdi-close</v-icon>
+                        </v-icon-btn>
+                      </span>
+
+                      <button
+                        class="add-cond-btn add-cond-btn--inline"
+                        title="再加一个值：命中任一个即算满足"
+                        @click="addCondValue(condOf(item))"
+                      >
+                        <v-icon size="11">mdi-plus</v-icon>
+                        <span>值</span>
+                      </button>
+                    </template>
+
+                    <!-- 其它操作符是单值：常量（5000 / 是）或「@字段名」引用另一字段的值，输入 @ 会给候选 -->
                     <input
+                      v-else
                       v-model="condOf(item).value"
                       class="panel-input"
-                      placeholder="比较值 5000"
-                      style="width: 108px"
+                      list="flow-field-ref-options"
+                      placeholder="5000 或 @字段"
+                      style="width: 120px"
                     >
 
                     <v-icon-btn
@@ -390,21 +468,22 @@
               </template>
             </div>
           </div>
-          <!--
-                        条件字段候选。用 datalist 而不是 v-select：
-                        ① 仍允许手输（旧模板里可能有不在清单里的字段名，v-select 会把它们清掉）；
-                        ② 不改变分支面板现有的原生输入框样式。
-                        value 取 f.key（= BI 的中文列名，条件求值就是按它取数），label 显示表格里的标题，
-                        两者不一致时（如 key=图片链接 / title=产品图片）能看出对应关系。
-                    -->
+
           <datalist id="flow-field-options">
             <option v-for="f in FIELD_OPTIONS" :key="f.value" :value="f.value">{{ f.label }}</option>
           </datalist>
           <!--
-                        校验失败的提示条：点名是哪个环节出了问题，并提供「定位」。
-                        环节卡片上也会显示同一句话（见 nodeErrorOf），这里主要是让用户
-                        在别处（比如刚点完保存、视线在别处）也能看到，并一点跳过去。
-                    -->
+            条件**值**侧的候选：带 @ 前缀的「引用另一字段」写法（见 types/approval 的 FIELD_REF_PREFIX）。
+            不复用上面那个 datalist：它给的是字段名本身，直接选进 value 只会变成
+            "总库存金额 == 总库存金额" 这种常量比较，不是引用。
+          -->
+          <datalist id="flow-field-ref-options">
+            <option
+              v-for="f in FIELD_OPTIONS"
+              :key="f.value"
+              :value="FIELD_REF_PREFIX + f.value"
+            >{{ f.label }}</option>
+          </datalist>
           <div v-if="saveError" class="save-error-bar">
             <v-icon size="14">mdi-alert-circle-outline</v-icon>
             <span class="save-error-bar__text">{{ saveError.message }}</span>
@@ -430,11 +509,6 @@
               <Background :gap="16" />
               <Controls position="bottom-left" />
               <MiniMap pannable position="bottom-right" zoomable />
-              <!--
-                                每个节点外面包一层，用来在**卡片正下方**挂校验错误：
-                                错误条是节点的一部分（跟着一起平移缩放），用户一眼就能看到
-                                「是这一环」而不只是弹一句提示。节点组件本身不用改。
-                            -->
               <template #node-start="{ id }">
                 <div class="node-shell">
                   <StartEndNode :key="id" kind="start" />
@@ -466,6 +540,7 @@
                     :selected="selected"
                     @add-member="addMemberTo(id)"
                     @add-role="addRoleMemberTo(id)"
+                    @add-rotation="addRotationMemberTo(id)"
                     @branch-click="selectBranch"
                     @remove="removeNodeById(id)"
                   />
@@ -483,6 +558,29 @@
                     :active-edge-id="selectedEdge?.id"
                     :branches="getBranches(id)"
                     :selected="selected"
+                    @branch-click="selectBranch"
+                    @remove="removeNodeById(id)"
+                  />
+
+                  <div v-if="nodeErrorOf(id)" class="node-error" :title="nodeErrorOf(id)">
+                    <v-icon size="12">mdi-alert-circle-outline</v-icon>
+                    <span>{{ nodeErrorOf(id) }}</span>
+                  </div>
+                </div>
+              </template>
+
+              <!-- 飞书提醒：复用审批节点的卡片（kind=notify 只换配色/文案/图标），
+                   交互完全一致，所以成员增删那两个事件直接复用同一个处理函数 -->
+              <template #node-notify="{ id, data, selected }">
+                <div class="node-shell">
+                  <ApprovalNode
+                    :active-edge-id="selectedEdge?.id"
+                    :branches="outBranches(id)"
+                    :data="data"
+                    kind="notify"
+                    :selected="selected"
+                    @add-member="addMemberTo(id)"
+                    @add-role="addRoleMemberTo(id)"
                     @branch-click="selectBranch"
                     @remove="removeNodeById(id)"
                   />
@@ -592,7 +690,7 @@
   import StartEndNode from '@/components/flow/StartEndNode.vue'
   import OrgTree from '@/components/OrgTree.vue'
   import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
-  import { APPROVAL_RESULTS, flowToChain, isConditionGroup, isResultCondition, uid } from '@/types/approval'
+  import { APPROVAL_RESULTS, collapseConditionValue, conditionValues, FIELD_REF_PREFIX, flowToChain, isConditionGroup, isResultCondition, uid } from '@/types/approval'
   import { ensureRejectLoopBack, graphToFlowFrom } from '@/utils/approvalFlow'
   import { DERIVED_KEYS } from '@/utils/biRowFields'
   import { addApproval, getApprovalOne, updateApprovalModel } from '@/utils/collection'
@@ -682,6 +780,9 @@
    *   2) 派生指标（毛利率 / 海外仓库存金额）—— BI 里没有这两列，由 biRowFields 算出（见 deriveFlowFields）；
    *   3) 审批结论与办理表单字段 —— 上一环节的结论（result）以及办理人填的值（amount / qty / …）。
    * 前两部分的 value 用 `key`（= BI 中文列名，与产品数据里的键一致），label 显示为对应说明。
+   *
+   * 同一份清单也用于条件**值**侧的「@字段名」引用候选（模板里的 flow-field-ref-options）——
+   * 引用和左字段取值都走同一个求值上下文，所以两边能选的东西本来就该一致。
    */
   const FIELD_OPTIONS = computed(() => [
     ...PRODUCT_FIELDS.map(f => ({ value: f.key, label: f.title })),
@@ -784,6 +885,51 @@
    */
   function subCondOf (expr: ConditionExpr): BranchCondition {
     return isConditionGroup(expr) ? EMPTY_COND : expr
+  }
+
+  /*
+   * 「包含」的值列表：读写放在 types/approval.ts（conditionValues / collapseConditionValue）。
+   * 放那边的理由：它们定义的是 `value` 的**数据形状**，必须和求值口径待在一起，
+   * 也才能被 tsx 直接断言 —— 这类"数组被 String() 成 a,b"的错不会报错，只会静默不命中。
+   */
+  const condValues = conditionValues
+
+  /** 给「包含」加一个值输入框 */
+  function addCondValue (c: BranchCondition) {
+    conditionValues(c).push('')
+  }
+
+  /** 删掉第 i 个值；删空了留一个空框，否则用户没地方再输入 */
+  function removeCondValue (c: BranchCondition, i: number) {
+    const list = conditionValues(c)
+    list.splice(i, 1)
+    if (list.length === 0) {
+      list.push('')
+    }
+  }
+
+  /**
+   * 切换操作符时在「单值 ↔ 多值」之间转换。
+   *
+   * 不转换的后果：
+   *  · 从「包含」切到「等于」时 value 还是数组 → 求值时被 String() 成 "a,b"，
+   *    条件永远不命中，而且**看不出来**（界面显示的是两个框里的值）；
+   *  · 反过来切到「包含」：统一成数组后，模板里就只需要处理一种形状。
+   *
+   * op 直接从事件取值，而不是依赖 v-model 已经写过：
+   * 同一个 change 事件上，v-model 的处理函数与本函数谁先执行没有保证。
+   */
+  function onOpChange (c: BranchCondition, e?: Event) {
+    const next = (e?.target as HTMLSelectElement | null)?.value
+    if (next) {
+      c.op = next as BranchCondition['op']
+    }
+    if (c.op === 'contains') {
+      conditionValues(c)
+      return
+    }
+    // 切到别的比较方式：多值收回单值（保留第一个非空值，而不是直接丢掉）
+    collapseConditionValue(c)
   }
 
   /** 多条件组合方式：and = 全部满足，or = 任一满足 */
@@ -1146,6 +1292,22 @@
       return
     }
 
+    /*
+     * 飞书提醒节点**只允许一条出线**（它没有审批结论、也没有条件，多条出线无从分流，
+     * 保存时会被 graphToFlowFrom 拦下）。所以这里再拖一条时不是新增，而是改连已有的那条 ——
+     * 否则用户会得到一条必然报错的线，还得自己去删。
+     */
+    if (sourceNode?.type === 'notify') {
+      const exist = edges.value.find(e => e.source === params.source)
+      if (exist) {
+        if (exist.target === params.target) return
+        exist.target = params.target
+        exist.targetHandle = params.targetHandle ?? undefined
+        showMsg('飞书提醒节点的出线已改连到新目标', 'success')
+        return
+      }
+    }
+
     const outCount = edges.value.filter(e => e.source === params.source).length
     let label: string | undefined
     let data: FlowGraphEdge['data'] | undefined
@@ -1198,11 +1360,11 @@
 
     // 节点近似占位尺寸：卡片宽固定 236，高度按类型粗估（只用于避让，不追求精确）
     const W = 236
-    const H = node.type === 'approval' || node.type === 'condition' ? 130 : 60
+    const H = isCardNode(node.type) ? 130 : 60
     const margin = 30
     const occupied = (px: number, py: number) =>
       nodes.value.some(n => {
-        const nh = n.type === 'approval' || n.type === 'condition' ? 130 : 60
+        const nh = isCardNode(n.type) ? 130 : 60
         return (
           px < n.position.x + W + margin
           && px + W + margin > n.position.x
@@ -1241,6 +1403,28 @@
     addNodeToCanvas({ id: uid(), type: 'condition', position: { x: 0, y: 0 } })
   }
 
+  /**
+   * 加一个「飞书提醒」节点：**只通知、不办理**。
+   *
+   * 它在时间线上占一环（"在审批环节中体现"），但流程到达即自动穿过 ——
+   * 不需要审批人、不产生待办、不消费 decisions（见 types/approval 的 rebuildChain）。
+   * 到达时向配置的提醒对象发一条飞书消息（见 composables/useNodeSubmit）。
+   */
+  function addNotifyNode () {
+    const seq = nodes.value.filter(n => n.type === 'notify').length + 1
+    addNodeToCanvas({
+      id: uid(),
+      type: 'notify',
+      position: { x: 0, y: 0 },
+      data: { title: `提醒${seq}`, members: [] },
+    })
+  }
+
+  /** 画布上的"卡片型"节点：摆放避让时按卡片高度估算（start/end 是小胶囊） */
+  function isCardNode (type?: string): boolean {
+    return type === 'approval' || type === 'condition' || type === 'notify'
+  }
+
   function removeNodeById (id: string) {
     const node = nodes.value.find(n => n.id === id)
     if (!node || node.type === 'start' || node.type === 'end') return
@@ -1259,16 +1443,43 @@
    */
   function addRoleMemberTo (nodeId: string) {
     const node = nodes.value.find(n => n.id === nodeId)
-    if (!node || node.type !== 'approval') return
+    // 审批节点与飞书提醒节点共用这套交互（提醒节点里 role = "提醒给该部门负责人"）
+    if (!node || (node.type !== 'approval' && node.type !== 'notify')) return
     const members = (node.data?.members ?? []) as ApprovalChainItem[]
     members.push({ type: 'manager', name: '', role: { kind: 'dept_leader', deptFrom: '组别' } })
+    node.data = { ...node.data, members }
+  }
+
+  /**
+   * 给**审批**节点加一个「按组轮询」成员：这一环由多个组的负责人**依次各办一环**。
+   *
+   * 只对审批节点开放（飞书提醒节点不参与办理，展开语义不明确）。
+   * 模板里只声明规则（组名取哪列、按哪列排序），真正的展开发生在**建单时**
+   * （见 utils/approvalRotation）：那一刻数据已冻结，才能算出有哪几个组、按什么顺序。
+   *
+   * 默认值就是最常用的口径：同一个 SKU 的多行里，各组按近一年月均销量从高到低依次流转。
+   */
+  function addRotationMemberTo (nodeId: string) {
+    const node = nodes.value.find(n => n.id === nodeId)
+    if (!node || node.type !== 'approval') return
+    const members = (node.data?.members ?? []) as ApprovalChainItem[]
+    if (members.some(m => m.rotation)) {
+      showMsg('这个环节已经配了「按组轮询」，一个环节只能有一个', 'warning')
+      return
+    }
+    members.push({
+      type: 'manager',
+      name: '',
+      role: { kind: 'dept_leader', deptFrom: '组别' },
+      rotation: { groupFrom: '组别' },
+    })
     node.data = { ...node.data, members }
   }
 
   /** 把当前选中员工加入指定审批节点 */
   function addMemberTo (nodeId: string) {
     const node = nodes.value.find(n => n.id === nodeId)
-    if (!node || node.type !== 'approval') return
+    if (!node || (node.type !== 'approval' && node.type !== 'notify')) return
     if (!selectedUser.value) {
       showMsg('请先在左侧选择员工', 'warning')
       return
@@ -1280,7 +1491,7 @@
     }
     data.members.push({ ...selectedUser.value, type: radios.value })
     showMsg(`已将 ${selectedUser.value.name} 加入「${data.title || '未命名环节'}」`, 'success')
-    selectedUser.value = null
+    // selectedUser.value = null
   }
 
   function resetAll () {
@@ -1297,17 +1508,6 @@
     resetHistory()
   }
 
-  // ===== 图 → ApprovalFlow 转换（保存时） =====
-  // 返回类型直接取转换器的（含 errorNodeId / errorEdgeId），避免在这里抄一份类型后漏字段
-  /**
-   * 画布 → flow。
-   *
-   * `allowEmptyMembers: true` —— **允许没有审批人的环节**，两种正当用法：
-   *  ① 模板先搭结构、人之后再配；
-   *  ② 该环节故意留空：由**上一环**的办理人用「选择接收人员」当场指定
-   *     （白板上的「指定接收团队」就是这种环节，见 PICK_MEMBERS_RESULT）。
-   * 卡片上会显示「待指定」，所以不会存成一条"看不出缺人"的流程。
-   */
   function graphToFlow (): ReturnType<typeof graphToFlowFrom> {
     return graphToFlowFrom(nodes.value, edges.value, { allowEmptyMembers: true })
   }
@@ -1338,7 +1538,6 @@
     }
   }
 
-  /** 从入库快照还原画布（含视口） */
   async function loadGraph (id: string) {
     const record = await getApprovalOne(id)
     const graph = record?.chain?.graph
@@ -1349,18 +1548,37 @@
     editId.value = id
     streamName.value = record.name ?? ''
     status.value = Boolean(record.status)
-    nodes.value = graph.nodes.map(n => ({
+
+    const nextNodes = graph.nodes.map(n => ({
       ...n,
       position: { ...n.position },
       data: n.data ? JSON.parse(JSON.stringify(n.data)) : undefined,
     }))
-    edges.value = graph.edges.map(e => ({
+    const nextEdges = (graph.edges ?? []).map(e => ({
       ...e,
       label: e.label ?? '',
       data: e.data ? JSON.parse(JSON.stringify(e.data)) : undefined,
       markerEnd: arrowMarker,
     }))
+
+    // ① 先放节点（旧库可能没有 edges 字段，用 ?? 兜底避免整页崩掉）
+    nodes.value = nextNodes
     await nextTick()
+
+    // ② 再放连线：此时 store 里已有上面的节点，不会被 setEdges 判定为「端点不存在」而丢弃
+    edges.value = nextEdges
+    await nextTick()
+
+    // ③ 兜底：万一仍有连线被丢（时序问题），按 id 补回。
+    //    幂等 —— 正常情况下 dropped 为空，不会执行。
+    const liveIds = new Set(edges.value.map(e => e.id))
+    const dropped = nextEdges.filter(e => !liveIds.has(e.id))
+    if (dropped.length > 0) {
+      console.warn(`[createStream] 还原画布时有 ${dropped.length} 条连线被 Vue Flow 丢弃，正在补回`)
+      edges.value = [...edges.value, ...dropped]
+      await nextTick()
+    }
+
     if (graph.viewport) setViewport(graph.viewport)
     // 加载完成即新基准，撤销不会越过「刚加载」状态
     resetHistory()
@@ -1552,6 +1770,20 @@
     border-radius: 6px;
     background: var(--flow-input-bg);
     outline: none;
+    /*
+     * ⚠️ 必须让行内写死的宽度说话。
+     *
+     * 面板里每个控件的宽度都是**行内**给的（style="width: 108px" / "200px" / "168px" …），
+     * 而它们都躺在 .panel-row 这个 flex 容器里 —— flex 项默认 flex-shrink: 1，
+     * 于是 width 只被当成 flex-basis（基准尺寸）：**这一行放不下时浏览器会把它压回去**，
+     * 表现就是「我把 108px 改成 200px，控件却没变宽」。
+     * （.panel-body 的 overflow-y: auto 会让 overflow-x 计算为 auto，
+     *   所以这一行不会横向溢出，只会把子控件压缩 —— 症状更容易被误判成"样式没生效"。）
+     *
+     * flex: none = flex: 0 0 auto：不压缩、也不拉伸，宽度完全由行内 width 决定。
+     * 放不下时交给父级的 flex-wrap 换行，而不是把控件缩成一团。
+     */
+    flex: none;
     transition:
         border-color 0.15s ease,
         box-shadow 0.15s ease;
@@ -1655,6 +1887,21 @@
     color: var(--flow-handle-active);
     border-color: var(--flow-blue-border);
     background: var(--flow-surface-hover);
+}
+
+/* 「包含」的每个值：输入框 + 删除按钮成组，整组一起换行 */
+.cond-value {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+}
+
+/* 行内版的「加一个值」按钮：默认的 align-self: flex-start + 上边距是给整行按钮用的，
+   放进条件行里会与同行的输入框错开，这里改回垂直居中 */
+.add-cond-btn--inline {
+    margin-top: 0;
+    align-self: center;
+    padding: 4px 6px;
 }
 
 /* ===== 条件条目 / 条件组 ===== */

@@ -1,5 +1,40 @@
 <template>
-  <v-timeline-item class="mb-12" :dot-color="dotColor" :size="size">
+  <!--
+    ===== 飞书提醒环 =====
+    只通知、不办理：没有审批人、没有结论、也没有办理入口。
+    它是流程的一环（"在审批环节中体现"），但流程到达即自动穿过 ——
+    所以这里**不渲染**"办理"按钮，也不显示已办/未到状态。
+
+    用独立的多根分支（v-if / v-else）而不是在原模板里插条件：
+    原审批环节的模板一行都不用动，避免碰坏 4 个标签页共用的办理弹窗。
+  -->
+  <v-timeline-item v-if="isNotify" class="mb-12" dot-color="#0891b2" :size="size">
+    <template #icon>
+      <span class="d-flex align-center justify-center">
+        <v-icon color="#fff" size="14">mdi-bell-ring-outline</v-icon>
+      </span>
+    </template>
+
+    <div class="d-flex align-center gap-2 flex-wrap">
+      <v-chip color="info" label size="x-small" variant="flat">飞书提醒</v-chip>
+
+      <span class="text-[13px] font-weight-medium">{{ notifyInfo.name || '飞书提醒' }}</span>
+
+      <span v-if="notifyInfo.to.length" class="text-[12px] text-medium-emphasis">
+        → {{ notifyInfo.to.join('、') }}
+      </span>
+
+      <span v-else class="text-[12px] text-error">未配置提醒对象，未发送</span>
+    </div>
+
+    <div v-if="notifyInfo.content" class="text-[12px] text-medium-emphasis mt-1">
+      {{ notifyInfo.content }}
+    </div>
+
+    <div class="text-[11px] text-medium-emphasis mt-1">只通知、不办理，流程到达即自动通过</div>
+  </v-timeline-item>
+
+  <v-timeline-item v-else class="mb-12" :dot-color="dotColor" :size="size">
     <template #icon>
       <span :style="{ fontSize: iconFontSize, color: iconColor }">{{
         getPinyinInitials(manageDatas[0]?.name) }}</span>
@@ -472,6 +507,25 @@
   const manageDatas = computed(() => props.data.filter(item => item.type == 'manager'))
   /** 该步骤的审批人（办理信息记录在其上） */
   const manager = computed<ApprovalChainItem | undefined>(() => manageDatas.value[0])
+
+  /**
+   * 这一环是不是「飞书提醒」环。
+   *
+   * 判断依据是 chain 成员里的占位项（type === 'notify'，见 types/approval 的 pushNotify），
+   * 不是「有没有审批人」—— 审批环节也可能暂时没人（待上一环节指定接收人），
+   * 用"没人就算通知环"会把那种环节误判成不办理。
+   */
+  const isNotify = computed(() => props.data?.[0]?.type === 'notify')
+
+  /** 提醒环的展示信息：提醒对象（展示用）与节点上配的补充文案 */
+  const notifyInfo = computed(() => {
+    const item = props.data?.[0]
+    return {
+      name: item?.name ?? '',
+      content: item?.notify?.content ?? '',
+      to: item?.notify?.to ?? [],
+    }
+  })
 
   /** 本环节的办理时间；未办理时为 undefined */
   const handledAt = computed(() => manager.value?.handled_at)

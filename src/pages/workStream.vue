@@ -124,6 +124,9 @@ import { createApprocalModel, getApprovalFirstByFilter, getOrdersByRow, getOrder
 import { toFlowContext } from '@/utils/approvalFlow'
 // 动态审批人（角色）：模板里配「部门负责人」，建单时按组织架构解析成真人（见 utils/approvalRoles）
 import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
+// 「按组轮询」：建单期按数据展开成 N 个顺序环节（依次流转给各组负责人）
+import { expandRotations, flowHasRotation } from '@/utils/approvalRotation'
+import { resolveAllRotationGroups } from '@/utils/rotationData'
 import { fetchOrgTreeCache, type OrgTreeData } from '@/api/api'
 import { APPROVAL_STATUS, flowToChain, type ApprovalFlow, type ApprovalOrder } from '@/types/approval'
 
@@ -961,8 +964,24 @@ async function createTaskForRow(
          */
         const templateFlow = payload.flow as ApprovalFlow | undefined
         let flow = templateFlow
-        if (templateFlow && flowHasRoles(templateFlow)) {
-            const resolved = resolveFlowRoles(templateFlow, await orgTree(), context)
+        /*
+         * 「按组轮询」必须在**建单期**展开（见 utils/approvalRotation 的说明）：
+         * 依据条件筛出几个组、按销量排好序，把那一环换成 N 个普通审批环节。
+         *
+         * 顺序不能颠倒：展开出来的成员是 `role.dept = 组名`，要靠下一步的角色解析填真人；
+         * 先解析再展开的话，被替换掉的那一环解析的是"数据行里那个组"，白解析一次。
+         */
+        if (templateFlow && flowHasRotation(templateFlow)) {
+            const groups = await resolveAllRotationGroups(templateFlow, context)
+            const expanded = expandRotations(templateFlow, groups)
+            if (expanded.issues.length) {
+                return { kind: 'failed', label, detail: expanded.issues.join('；') }
+            }
+            flow = expanded.flow
+        }
+        // 注意用展开后的 flow 判断/解析（轮询展开出来的成员也是"动态负责人"）
+        if (flow && flowHasRoles(flow)) {
+            const resolved = resolveFlowRoles(flow, await orgTree(), context)
             if (resolved.unresolved.length) {
                 const why = resolved.unresolved.map(u => `${u.where}：${u.reason}`).join('；')
                 return { kind: 'failed', label, detail: `动态审批人没解析出来 —— ${why}` }

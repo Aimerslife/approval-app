@@ -31,6 +31,11 @@
       <template #node-condition="{ id }">
         <ConditionNode :branches="getBranches(id)" />
       </template>
+
+      <!-- 飞书提醒环：只读预览，复用审批节点卡片（kind=notify 只换配色与文案） -->
+      <template #node-notify="{ id, data }">
+        <ApprovalNode :branches="getBranches(id)" :data="data" kind="notify" />
+      </template>
       <!-- 手动拖拽曲线：按保存的弯点还原形状；预览态不渲染拖拽圆点 -->
       <template #edge-adjustable="edgeProps">
         <AdjustableEdge v-bind="(edgeProps as any)" :interactive="false" />

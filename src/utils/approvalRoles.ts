@@ -164,15 +164,23 @@ export function flowHasRoles (flow: ApprovalFlow): boolean {
       if (node.nodes.some(m => m.role)) {
         found = true
       }
-    } else {
-      for (const b of node.branches) {
-        if (b.members?.some(m => m.role)) {
-          found = true; break
-        }
-        walkSteps(b.steps)
-        if (found) {
-          break
-        }
+      continue
+    }
+    // 提醒节点的「提醒对象」同样可能是动态负责人：
+    // 不一起算进来的话，建单时不会去拉组织架构，这一环就解析不出人
+    if (node.type === 'notify') {
+      if (node.members?.some(m => m.role)) {
+        found = true
+      }
+      continue
+    }
+    for (const b of node.branches) {
+      if (b.members?.some(m => m.role)) {
+        found = true; break
+      }
+      walkSteps(b.steps)
+      if (found) {
+        break
       }
     }
   }
@@ -245,6 +253,10 @@ export function resolveFlowRoles (
   const outFlow: ApprovalFlow = flow.map(node => {
     if (node.type === 'approval') {
       return { ...node, nodes: membersOf(node.nodes) ?? [] }
+    }
+    // 提醒节点的提醒对象同样要解析（可能含动态负责人）；content 等字段由 ...node 原样带过
+    if (node.type === 'notify') {
+      return { ...node, members: membersOf(node.members) ?? [] }
     }
     return {
       ...node,

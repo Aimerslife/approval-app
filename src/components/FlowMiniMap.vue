@@ -92,11 +92,17 @@
       for (const s of b.steps) walkStep(s)
     }
     for (const n of props.flow) {
-      if (n.type === 'approval') out.push({ id: n.id, name: undefined, members: n.nodes })
-      else {
-        const def = n.branches.find(b => !b.conditions?.length && !b.condition) ?? n.branches[0]
-        if (def) walkBranch(def)
+      if (n.type === 'approval') {
+        out.push({ id: n.id, name: undefined, members: n.nodes })
+        continue
       }
+      // 飞书提醒环：主线里也要出现 —— 它是流程的一环，只是不办理（members 即提醒对象）
+      if (n.type === 'notify') {
+        out.push({ id: n.id, name: n.name, members: n.members })
+        continue
+      }
+      const def = n.branches.find(b => !b.conditions?.length && !b.condition) ?? n.branches[0]
+      if (def) walkBranch(def)
     }
     return out
   })
