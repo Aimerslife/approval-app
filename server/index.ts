@@ -698,7 +698,57 @@ http.createServer(async (req, res) => {
       return
     }
 
-    // ─── 头像代理 ──────────────────────────────
+
+    if (pathname === '/api/word' && req.method === 'GET') {
+      try {
+        const upstream = await fetch('https://v.api.aa1.cn/api/api-wenan-dujitang/index.php?aa1=text', {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000),
+        })
+        const rawText = await upstream.text().catch(() => '')
+        /*
+         * 上游 aa1=text 返回的正文**带 HTML 标签**（实测形如 `<p>“……”</p>`，还可能有 &nbsp; 等实体）。
+         * 不剥干净的话，登录页会把 "<p>" 当正文显示出来 —— 剥标签 + 还原常见实体 + 压平空白。
+         */
+        const text = rawText
+          .replace(/<[^>]*>/g, '')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&quot;/gi, '"')
+          .replace(/&#39;|&apos;/gi, "'")
+          .replace(/&lt;/gi, '<')
+          .replace(/&gt;/gi, '>')
+          .replace(/&amp;/gi, '&')
+          .replace(/\s+/g, ' ')
+          .trim()
+        if (!upstream.ok || !text) {
+          throw new Error(`上游 HTTP ${upstream.status}`)
+        }
+        json(res, 200, {
+          code: 200,
+          msg: 'success',
+          data: { hitokoto: text, author: '', source: '毒鸡汤' },
+        })
+      } catch (err: any) {
+        /*
+         * 上游挂了也要给一句话：这是**装饰文案**，登录页不该因为第三方接口出错就空着。
+         * 兜底**用同样的字段名**（hitokoto/author/source），前端只认一套字段。
+         * 不想要兜底就把下面的 json 换回 502 —— 前端允许拿不到（getWord 返回 undefined）。
+         */
+        console.warn('[Word] 获取一言失败，用内置兜底:', err?.message ?? err)
+        const words = [
+          { hitokoto: '流水不争先，争的是滔滔不绝。', author: '内置兜底', source: '' },
+          { hitokoto: '路虽远行则将至，事虽难做则必成。', author: '内置兜底', source: '' },
+          { hitokoto: '把简单的事做到极致，就是不简单。', author: '内置兜底', source: '' },
+        ]
+        json(res, 200, {
+          code: 200,
+          msg: 'success',
+          data: words[Math.floor(Math.random() * words.length)],
+        })
+      }
+      return
+    }
+
     // GET /api/feishu/avatar?url=xxx
     // 飞书头像 URL 可能为内网地址，通过服务端代理转发，确保前端可加载
     if (pathname === '/api/feishu/avatar' && req.method === 'GET') {

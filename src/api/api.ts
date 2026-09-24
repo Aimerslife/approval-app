@@ -12,7 +12,7 @@ import { resolveFieldKey, resolveFieldValue } from '@/utils/productFields'
 // ========== 通用工具 ==========
 
 /** 将飞书头像 URL 转为服务端代理 URL，确保浏览器能正确加载 */
-export function proxyAvatar (rawUrl?: string): string | undefined {
+export function proxyAvatar(rawUrl?: string): string | undefined {
   if (!rawUrl) {
     console.warn('[proxyAvatar] 原始头像 URL 为空')
     return undefined
@@ -22,7 +22,7 @@ export function proxyAvatar (rawUrl?: string): string | undefined {
   return proxied
 }
 
-async function feishuGet<T = any> (path: string, label: string): Promise<T> {
+async function feishuGet<T = any>(path: string, label: string): Promise<T> {
   console.log(`[${label}] 请求:`, path)
   const res = await fetch(path, { method: 'GET' })
   const data = await res.json()
@@ -72,7 +72,7 @@ export interface OrgTreeResponse {
 
 // ========== 密码重置 ==========
 
-export async function resetPassword (email: string) {
+export async function resetPassword(email: string) {
   try {
     const res = await pb.collection('users').requestPasswordReset(email)
     console.log('重置邮件已发送，请查收')
@@ -85,19 +85,19 @@ export async function resetPassword (email: string) {
 // ========== 部门 ==========
 
 /** 获取指定部门详情 */
-export async function getOrgInfo () {
+export async function getOrgInfo() {
   const deptId = encodeURIComponent(import.meta.env.VITE_FEISHU_DEPARTMENT_ID)
   return feishuGet(`/api/feishu/departments?department_ids=${deptId}`, 'getOrgInfo')
 }
 
 /** 获取子部门列表 */
-export async function fetchChildDepartments (parentDeptId = '0') {
+export async function fetchChildDepartments(parentDeptId = '0') {
   const id = encodeURIComponent(parentDeptId)
   return feishuGet(`/api/feishu/departments/children?parent_department_id=${id}`, 'fetchChildDepartments')
 }
 
 /** 递归拉取所有部门 */
-export async function fetchAllDepartments (parentDeptId = '0'): Promise<any[]> {
+export async function fetchAllDepartments(parentDeptId = '0'): Promise<any[]> {
   return feishuGet(
     `/api/feishu/departments/children?parent_department_id=${encodeURIComponent(parentDeptId)}&fetch_child=true`,
     'fetchAllDepartments',
@@ -107,7 +107,7 @@ export async function fetchAllDepartments (parentDeptId = '0'): Promise<any[]> {
 // ========== 用户 ==========
 
 /** 获取部门直属用户列表 */
-export async function getUsersByDepartment (departmentId: string, pageToken?: string) {
+export async function getUsersByDepartment(departmentId: string, pageToken?: string) {
   let url = `/api/feishu/users?department_id=${encodeURIComponent(departmentId)}`
   if (pageToken) {
     url += `&page_token=${encodeURIComponent(pageToken)}`
@@ -122,7 +122,7 @@ export interface DepartmentUsersData {
   users: UserBrief[]
 }
 
-export async function getDepartmentUsers (openId: string): Promise<{ code: number, msg: string, data: DepartmentUsersData }> {
+export async function getDepartmentUsers(openId: string): Promise<{ code: number, msg: string, data: DepartmentUsersData }> {
   return feishuGet(
     `/api/feishu/department-users?open_id=${encodeURIComponent(openId)}`,
     'getDepartmentUsers',
@@ -143,7 +143,7 @@ export interface UserOrgData {
   company_name: string
 }
 
-export async function getUserOrg (openId: string): Promise<{ code: number, msg?: string, data: UserOrgData }> {
+export async function getUserOrg(openId: string): Promise<{ code: number, msg?: string, data: UserOrgData }> {
   return feishuGet(
     `/api/feishu/user-org?open_id=${encodeURIComponent(openId)}`,
     'getUserOrg',
@@ -151,7 +151,7 @@ export async function getUserOrg (openId: string): Promise<{ code: number, msg?:
 }
 
 /** 获取单个用户详情 */
-export async function getUserDetail (userId: string) {
+export async function getUserDetail(userId: string) {
   return feishuGet(`/api/feishu/users/${encodeURIComponent(userId)}`, 'getUserDetail')
 }
 
@@ -161,7 +161,7 @@ export async function getUserDetail (userId: string) {
  * 从 PocketBase 缓存读取组织架构树（首屏加载，秒级响应）。
  * 首次进入时可能无缓存，需调用 refreshOrgTree() 写入。
  */
-export async function fetchOrgTreeCache (): Promise<OrgTreeResponse> {
+export async function fetchOrgTreeCache(): Promise<OrgTreeResponse> {
   return feishuGet<OrgTreeResponse>('/api/org-tree/cache', 'fetchOrgTreeCache')
 }
 
@@ -169,7 +169,7 @@ export async function fetchOrgTreeCache (): Promise<OrgTreeResponse> {
  * 从飞书重新拉取组织架构树并更新 PocketBase 缓存。
  * 仅点击"刷新组织架构"按钮时调用。
  */
-export async function refreshOrgTree (): Promise<OrgTreeResponse> {
+export async function refreshOrgTree(): Promise<OrgTreeResponse> {
   const res = await fetch('/api/org-tree/refresh', { method: 'POST' })
   const data = await res.json()
   console.log('[refreshOrgTree] 响应:', data)
@@ -195,7 +195,7 @@ export interface SendCardParams {
  * 通过飞书 API 发送卡片/消息
  * POST /api/feishu/send-card
  */
-export async function sendFeishuCard (params: SendCardParams) {
+export async function sendFeishuCard(params: SendCardParams) {
   const res = await fetch('/api/feishu/send-card', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -215,7 +215,7 @@ export async function sendFeishuCard (params: SendCardParams) {
 // 获取数跨境问题
 
 const base = 'https://work.jiushuyun.com/decision'
-async function getToken (ifNew: boolean) {
+async function getToken(ifNew: boolean) {
   let token: string | null = localStorage.getItem('token')
   const tokenTime = localStorage.getItem('tokenTime')
   if (!ifNew && token && tokenTime && Date.now() - Number.parseInt(tokenTime) < 3600 * 1000) {
@@ -224,8 +224,8 @@ async function getToken (ifNew: boolean) {
   const tokenRes = await fetch(
     `${base}/api/v1/corp/oauth/token?accessKeyId=${encodeURIComponent(
       import.meta.env.VITE_ACCESSKEYID)}&accessKeySecret=${encodeURIComponent(
-      import.meta.env.VITE_ACCESSKEYSECRET,
-    )}`,
+        import.meta.env.VITE_ACCESSKEYSECRET,
+      )}`,
     { method: 'GET', headers: { 'Content-Type': 'application/json' } },
   ).then((res: Response) => res.json())
   if (!tokenRes.success || !tokenRes.data) {
@@ -283,7 +283,7 @@ const BI_PAGE_SIZE = 500
  * 把「fields + 二维 rows」的原始返回转成「对象数组」，并套用别名/枚举归一化。
  * 归一化的规则见 productFields.ts 的 resolveFieldKey / resolveFieldValue。
  */
-function normalizeBiRows (data: BiComponentData, offset = 0): Record<string, unknown>[] {
+function normalizeBiRows(data: BiComponentData, offset = 0): Record<string, unknown>[] {
   const fields = data.fields ?? []
   return (data.rows ?? []).map((row, idx) => {
     const item: Record<string, unknown> = { id: offset + idx + 1 }
@@ -336,7 +336,7 @@ export interface BiUploadSummary {
  * @param rows 原始行（**不要传格式化过的**：数字被换成带千分位的字符串后，
  *             PB 的 number 列会写不进去）
  */
-export async function uploadBiRows (
+export async function uploadBiRows(
   rows: Record<string, unknown>[],
   opts: { componentId?: string, dryRun?: boolean, prune?: boolean } = {},
 ): Promise<BiUploadSummary> {
@@ -368,14 +368,7 @@ export async function uploadBiRows (
 // 对外仍从本模块导出，调用方不用改 import。
 export { biColumnOf, type BiRowQuery, buildBiFilter } from '@/utils/biQuery'
 
-/**
- * 取一页数据。
- *
- * fields 只取 `id,data`：`data` 是入库时存的**整行快照（中文 key）**，
- * 而页面的列配置、插槽全用中文 key —— 拿它直接渲染即可，
- * 不用把 65 个真列再翻回中文（那正是 pbRowToProduct 干的事，这里走 data 更省）。
- */
-export async function fetchBiRows (
+export async function fetchBiRows(
   q: BiRowQuery,
 ): Promise<{ rows: Record<string, unknown>[], totalItems: number }> {
   const res = await pb.collection('bi_rows').getList<{ id: string, data: Record<string, unknown> }>(
@@ -395,7 +388,7 @@ export async function fetchBiRows (
 }
 
 /** 导出用：按同样条件取**全量**（分批拉，不请求 total） */
-export async function fetchAllBiRows (q: BiRowQuery): Promise<Record<string, unknown>[]> {
+export async function fetchAllBiRows(q: BiRowQuery): Promise<Record<string, unknown>[]> {
   const items = await pb.collection('bi_rows').getFullList<{ id: string, data: Record<string, unknown> }>({
     filter: buildBiFilter(q),
     ...(q.sort ? { sort: q.sort } : {}),
@@ -414,7 +407,7 @@ export async function fetchAllBiRows (q: BiRowQuery): Promise<Record<string, unk
  *
  * @returns PB 列名 → 去重后的取值数组（服务端已排序；空值已剔除）
  */
-export async function fetchBiFacets (
+export async function fetchBiFacets(
   componentId: string,
   columns: string[],
 ): Promise<Record<string, string[]>> {
@@ -427,7 +420,7 @@ export async function fetchBiFacets (
   return payload.data as Record<string, string[]>
 }
 
-export async function getDashbordDatas (
+export async function getDashbordDatas(
   componentId: string = import.meta.env.VITE_BI_COMPONENT_ID,
   parameters: AnalysisParam[] = [],
 ): Promise<Record<string, unknown>[]> {
@@ -435,7 +428,7 @@ export async function getDashbordDatas (
   console.log(token)
   const all: Record<string, unknown>[] = []
   let pageIndex = 1
-  for (;;) {
+  for (; ;) {
     const res: { code: number, errorMsg?: string, message?: string, data?: BiComponentData } = await fetch(
       `${base}/api/public/analysis/v1/component/data`,
       {
@@ -468,4 +461,48 @@ export async function getDashbordDatas (
   }
 
   return all
+}
+
+/**
+ * 一言接口的返回（字段以官方文档为准：https://docs.tenapi.cn/random/yiyan.html）。
+ *
+ * ⚠️ 字段名是 **hitokoto / author / source**，不是 hitokoto.cn 的 text / from / from_who ——
+ *    两家是不同的服务，别混。tenapi 挂掉时服务端会用**同样的字段名**给内置兜底文案，
+ *    所以前端只认这一套就行。
+ */
+export interface YiyanData {
+  code?: number
+  msg?: string
+  data?: {
+    /** 一言 id */
+    id?: string
+    /** 一言正文 */
+    hitokoto?: string
+    /** 分类码 / 分类名（如 a / Anime - 动画） */
+    cat?: string
+    catname?: string
+    /** 作者 */
+    author?: string
+    /** 出处 */
+    source?: string
+    /** 发布时间（字符串形式的秒级时间戳） */
+    date?: string
+  }
+}
+
+/**
+ * 随机一言（登录页的装饰文案）。
+ *
+ * ⚠️ 走服务端代理（`/api/word` → server/index.ts），**不要**在这里直连 tenapi.cn：
+ *    那个接口不带 CORS 头，浏览器直连会被拦；服务端还兜了 5 秒超时。
+ * 取不到就返回 undefined —— 装饰文案失败不该影响登录。
+ */
+export async function getWord(): Promise<YiyanData | undefined> {
+  try {
+    const res = await fetch('/api/word', { method: 'GET' })
+    console.log(res)
+    return await res.json()
+  } catch (e) {
+    console.log(e)
+  }
 }

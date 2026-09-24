@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import pb from '@/pocketbase.ts'
 import { resolveAvatar } from '@/utils/avatar'
+import { normalizeRole } from '@/utils/permissions'
 
 export interface UserInfo {
   id: string
@@ -14,6 +15,11 @@ export interface UserInfo {
   avatar_url?: string
   avatar?: string
   verified?: boolean
+  /**
+   * 权限档位，取 `users.role` 原始值：`superAdmin` / `approval` / `normal`。
+   * 用前请经 `normalizeRole()` 收敛（未知值按最低档），别直接拿字符串比较。
+   */
+  role?: string
   preferences?: UserPreferences
   /** 飞书租户标识：登录时与 VITE_COMPANY_ID 比对，只有匹配才允许登录 */
   tenant_key?: string
@@ -71,6 +77,11 @@ export const useUserStore = defineStore('user', () => {
   const token = ref('')
 
   const isLoggedIn = computed(() => !!token.value && !!user.value)
+  /**
+   * 当前登录者的权限档位（已收敛，永远是三档之一）。
+   * 菜单过滤与路由守卫都读它，不要在别处自己解析 `user.role`。
+   */
+  const appRole = computed(() => normalizeRole(user.value?.role))
   const displayName = computed(
     () => user.value?.name || user.value?.email || user.value?.username || '未登录',
   )
@@ -89,6 +100,7 @@ export const useUserStore = defineStore('user', () => {
           avatar_url: model.avatar_url,
           avatar: model.avatar,
           verified: model.verified,
+          role: model.role,
           preferences: model.preferences,
           tenant_key: model.tenant_key,
           company_name: model.company_name,
@@ -280,6 +292,7 @@ export const useUserStore = defineStore('user', () => {
     user,
     token,
     isLoggedIn,
+    appRole,
     displayName,
     avatar,
     preferences,

@@ -156,7 +156,7 @@
 
         <span>当前审批人：{{ selectedNode?.approver ?? '—' }}</span>
 
-        <span>审批状态：<v-chip :color="statusMeta(selectedNode?.status).color" size="small">
+        <span>审批状态：<v-chip :color="statusMeta(selectedNode?.status).color" size="x-small">
           {{ statusMeta(selectedNode?.status).text }}
         </v-chip>
         </span>

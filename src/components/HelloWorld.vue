@@ -1,63 +1,44 @@
 <template>
-  <v-container class="fill-height d-flex flex-column justify-center" max-width="900">
-    <div>
+  <v-container class="quick-nav fill-height d-flex flex-column justify-center" max-width="1040">
+    <div class="w-100">
+      <!-- 顶部品牌区：限宽居中，避免 logo 随容器被拉满整行 -->
       <v-img
-        alt="Placeholder logo"
-        class="mb-4 font-weight-bold"
-        height="150"
+        alt="logo"
+        class="mx-auto mb-3"
+        height="96"
+        max-width="240"
         src="@/assets/logo.png"
       />
 
-      <div class="mb-8 text-center">
-        <div class="text-body-medium font-weight-light mb-n1">Welcome to</div>
-        <div class="text-display-medium font-weight-bold">Fiva</div>
+      <div class="mb-10 text-center">
+        <div class="text-[26px] font-weight-bold">快速导航</div>
       </div>
-
       <v-row>
-        <!-- <v-col cols="12">
+        <v-col v-for="link in links" :key="link.href" cols="12" sm="6">
           <v-card
-            class="py-4"
-            color="surface-variant"
-            image="https://cdn.vuetifyjs.com/docs/images/one/create/feature.png"
-            rounded="lg"
-            variant="tonal"
-          >
-            <template #prepend>
-              <v-avatar icon="mdi-rocket-launch-outline" size="60" variant="tonal" class="ml-2 mr-4" />
-            </template>
-
-            <template #image>
-              <v-img position="top right" />
-            </template>
-
-            <template #title>
-              <div class="my-title my-uppercase text-headline-medium font-weight-bold">Get started</div>
-            </template>
-
-            <template #subtitle>
-              <div class="text-body-large">
-                Change this page by updating <v-kbd>{{ `<HelloWorld />` }}</v-kbd> in <v-kbd>components/HelloWorld.vue</v-kbd>.
-              </div>
-            </template>
-          </v-card>
-        </v-col> -->
-
-        <v-col v-for="link in links" :key="link.href" cols="6">
-          <v-card
-            append-icon="mdi-open-in-new"
-            class="py-4"
-            color="surface-variant"
+            class="nav-card"
             :href="link.href"
             rel="noopener noreferrer"
             rounded="lg"
             :subtitle="link.subtitle"
-            target="_blank"
-            :title="link.title"
-            variant="tonal"
+            variant="flat"
           >
-            <template #prepend>
-              <v-avatar class="ml-2 mr-4" :icon="link.icon" size="45" variant="tonal" />
+            <template #title>
+              <span class="text-[19px] font-bold">{{ link.title }}</span>
             </template>
+            <template #prepend>
+              <v-avatar
+                class="nav-avatar ml-2 mr-1"
+                color="primary"
+                :icon="link.icon"
+                size="44"
+                variant="tonal"
+              />
+            </template>
+
+            <v-card-actions class="justify-end px-4 pb-3 pt-0">
+              <v-icon class="nav-arrow" color="primary" icon="mdi-arrow-right" size="18" />
+            </v-card-actions>
           </v-card>
         </v-col>
       </v-row>
@@ -68,28 +49,78 @@
 <script setup lang="ts">
   const links = [
     {
-      href: '/home',
+      href: '/mine',
       icon: 'mdi-text-box-outline',
-      subtitle: 'Learn about all things Vuetify in our documentation.',
+      subtitle: '当前个人名下审批任务.',
       title: '我的任务',
     },
     {
-      href: '/roleSetting',
+      href: '/setDatas',
       icon: 'mdi-star-circle-outline',
       subtitle: 'Explore available framework Features.',
-      title: '个人信息',
+      title: '数据',
     },
     {
-      href: '/history',
+      href: '/analyze',
       icon: 'mdi-widgets-outline',
       subtitle: 'Discover components in the API Explorer.',
-      title: '历史数据',
+      title: '看板',
     },
     {
-      href: '/help',
+      href: '/logic',
       icon: 'mdi-account-group-outline',
       subtitle: 'Connect with Vuetify developers.',
       title: '说明文档',
     },
   ]
 </script>
+
+<style lang="scss" scoped>
+/*
+ * 卡片边框/hover 用 Vuetify 主题变量（rgba(var(--v-theme-xxx), α)），
+ * 这样浅色/深色主题都会自动跟着变，不写死颜色。
+ */
+.quick-nav {
+  .nav-card {
+    height: 100%;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+
+  .nav-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(var(--v-theme-primary), 0.35);
+    /* 阴影用固定值：主题变量里没有合适的阴影色 */
+    box-shadow: 0 12px 26px rgb(0 0 0 / 12%);
+  }
+
+  .nav-arrow,
+  .nav-avatar {
+    transition: transform 0.18s ease;
+  }
+
+  /* 箭头右移 + 头像微放大：不用改布局，纯粹是"可进入"的提示 */
+  .nav-card:hover .nav-arrow {
+    transform: translateX(4px);
+  }
+
+  .nav-card:hover .nav-avatar {
+    transform: scale(1.05);
+  }
+}
+
+/* 用户关掉动效偏好时不做位移（无障碍；也让截图/打印时稳定） */
+@media (prefers-reduced-motion: reduce) {
+  .quick-nav .nav-card,
+  .quick-nav .nav-arrow,
+  .quick-nav .nav-avatar {
+    transition: none;
+  }
+
+  .quick-nav .nav-card:hover,
+  .quick-nav .nav-card:hover .nav-arrow,
+  .quick-nav .nav-card:hover .nav-avatar {
+    transform: none;
+  }
+}
+</style>

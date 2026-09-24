@@ -88,6 +88,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:3002',
         changeOrigin: true,
       },
+      // 一言（第三方接口代理）也要打到 app server（3002），
+      // 同样**必须声明在下面的 '/api' 之前** —— 否则会被兜底规则转给 PocketBase(8091) 而 404
+      '/api/word': {
+        target: 'http://127.0.0.1:3002',
+        changeOrigin: true,
+      },
       '/api': 'http://127.0.0.1:8091',
       'files': 'http://127.0.0.1:8091',
     },

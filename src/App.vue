@@ -10,7 +10,7 @@
 
           <span
             class="brand-name text-[14px] font-bold mt-0.5 cursor-pointer"
-            @click="routerGo('/home')"
+            @click="routerGo('/')"
           >🆈🅰🅽🆇🆄🅽</span>
         </div>
 
@@ -130,23 +130,11 @@
             </div>
           </div>
 
-          <div class="text-[14px] ml-2">
-            <span class="text-[#4F4F4F] text-[12px] font-bold">{{ userStore.displayName }}</span>
-            <span class="text-[#8B8B8B] text-[12px]">{{ userStore.user?.email }}</span>
-
-            <v-btn
-              v-if="!userStore.isLoggedIn"
-              class="ml-3"
-              color="#1055C9"
-              size="small"
-              variant="tonal"
-              @click="routerGo('/login')"
-            >
-              <div class="d-flex justify-center items-center">
-                <span>登陆</span>
-                <v-icon class="mt-1 ml-1">mdi-login</v-icon>
-              </div>
-            </v-btn>
+          <div class="text-[14px] ml-2 d-flex flex-column">
+            <div v-if="userStore.isLoggedIn">
+              <span class="text-[#4F4F4F] text-[12px] font-bold">{{ userStore.displayName }}</span>
+              <span class="text-[#8B8B8B] text-[12px]">{{ userStore.user?.email }}</span>
+            </div>
           </div>
         </v-sheet>
 
@@ -165,7 +153,7 @@
               <v-icon :icon="item.icon" size="20" />
 
               <v-badge
-                v-if="item.text=='我的审批单'"
+                v-if="item.text == '我的审批单'"
                 bordered
                 color="error"
                 content="99+"
@@ -212,6 +200,7 @@
   import logo from '@/assets/logo_.png'
   import { drawerSet, isEditorFullscreen } from '@/composables/useEditorFullscreen'
   import { useUserStore } from '@/stores/user'
+  import { canAccess } from '@/utils/permissions'
 
   // 主题跟随 createVuetify 的 light/dark 主题，并记住用户上次的选择
   const theme = useTheme()
@@ -229,7 +218,8 @@
   // 偏好存在独立集合 user_preferences 里（不再挂在 users 上，否则登录 cookie 会超 4096 字节被丢），
   // 所以要在启动时单独读一次；两个用到偏好的页面都 watch 着它。
   userStore.loadPreferences()
-  const links = [
+  /** 侧边栏的**全部**菜单项（不过滤）；过滤后的 links 见下面 */
+  const allLinks = [
     { icon: 'mdi-view-list', text: '所有审批单', to: '/home' },
     { icon: 'mdi-arrange-send-backward', text: '我的审批单', to: '/mine' },
     { icon: 'mdi-chart-areaspline', text: '分析', to: '/analyze' },
@@ -238,6 +228,11 @@
     { icon: 'mdi-tag-check', text: '审批模板', to: '/approvalModel' },
     { icon: 'mdi-account-group-outline', text: '角色设置', to: '/roleSetting' },
   ]
+  /**
+   * 侧边栏菜单：**按角色过滤**。
+   * 用的是与路由守卫同一张表（utils/permissions.ts），所以"能看见的"与"进得去的"必然一致。
+   */
+  const links = computed(() => allLinks.filter(item => canAccess(userStore.appRole, item.to)))
   const drawer = computed(() => !isEditorFullscreen.value && drawerSet.value)
   const icons = [
     'mdi-facebook',
