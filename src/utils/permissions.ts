@@ -61,6 +61,8 @@ const ROUTE_ROLES: Record<string, AppRole[]> = {
   '/workStream': ADMIN_UP,
   '/approvalModel': ADMIN_UP,
   '/createStream': ADMIN_UP,
+  // 流程编排 v2（实验页）：与 createStream 同一档
+  '/createStream2': ADMIN_UP,
   '/editStream': ADMIN_UP,
   '/editRule': ADMIN_UP,
 

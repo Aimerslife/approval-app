@@ -1,7 +1,8 @@
 import type { ApprovalAttachment, ApprovalChain, ApprovalFlow, ApprovalModal, ApprovalOrder, FlowGraph } from '@/types/approval'
-import pb from '@/pocketbase.ts'
+import type { Flow2Template } from '@/types/flow2'
 // 只要类型：组别→默认审批人的"覆盖记录"形状（合并口径见 utils/groupApprovers）
 import type { GroupApproverOverride } from '@/utils/groupApprovers'
+import pb from '@/pocketbase.ts'
 import { APPROVAL_STATUS, buildBranchTerminalMap, rebuildChain } from '@/types/approval'
 import { sendArrivedNotifies } from '@/utils/notifySteps'
 
@@ -297,6 +298,75 @@ export async function getApprovalFirstByFilter (filter: string): Promise<Approva
   } catch (error) {
     console.error(error)
     return undefined
+  }
+}
+
+/* ==================== 流程编排 v2 的模板（app_chain2） ==================== */
+
+/*
+ * v2 模板与 v1 模板是**两张表、两套读法**（见 types/flow2.ts 的说明）：
+ *   · v1（app_chain）：chain = { chain, flow, graph }，给 createStream 的画布用；
+ *   · v2（app_chain2）：spec = { entry, nodes }，节点是运行期执行的函数。
+ * 这里只提供最小 CRUD，与上面那批 v1 函数并列但互不影响。
+ */
+
+/** v2 模板记录（app_chain2） */
+export interface Flow2Model {
+  id: string
+  name: string
+  status: number
+  spec: Flow2Template
+  created?: string
+  updated?: string
+}
+
+/** 集合还没建好时的提示（迁移未应用）。调用方据此给出可操作的提示，而不是抛裸错 */
+export const FLOW2_MIGRATION_HINT
+  = '模板集合 app_chain2 还不存在：重启一次 PocketBase（yarn dev:pb）让它应用 1790600000 那条迁移'
+
+export async function getFlow2List (): Promise<Flow2Model[]> {
+  try {
+    const res = await pb.collection('app_chain2').getList<Flow2Model>(1, 50, { sort: '-updated' })
+    return res.items
+  } catch (error) {
+    console.error(error)
+    return []
+  }
+}
+
+export async function getFlow2One (id: string): Promise<Flow2Model | undefined> {
+  try {
+    return await pb.collection('app_chain2').getOne<Flow2Model>(id)
+  } catch (error) {
+    console.error(error)
+    return undefined
+  }
+}
+
+export async function addFlow2 (name: string, status: number, spec: Flow2Template): Promise<Flow2Model> {
+  return await pb.collection('app_chain2').create<Flow2Model>({ name, status, spec })
+}
+
+export async function updateFlow2 (id: string, data: Partial<Flow2Model>): Promise<Flow2Model> {
+  return await pb.collection('app_chain2').update<Flow2Model>(id, data)
+}
+
+export async function deleteFlow2 (id: string): Promise<void> {
+  await pb.collection('app_chain2').delete(id)
+}
+
+/** 最近 N 条审批单（试算面板拿它们的链条快照当输入） */
+export async function getRecentOrders (limit = 30): Promise<ApprovalOrder[]> {
+  try {
+    // 带 expand：老单没有 chain.context 快照时，flowContextOfOrder 会退化为读实时关联数据
+    const res = await pb.collection('approval_chain').getList<ApprovalOrder>(1, limit, {
+      sort: '-created',
+      expand: 'relation',
+    })
+    return res.items
+  } catch (error) {
+    console.error(error)
+    return []
   }
 }
 

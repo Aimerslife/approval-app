@@ -228,6 +228,7 @@
     { icon: 'mdi-creation', text: '任务', to: '/workStream' },
     { icon: 'mdi-file-table-box', text: '数据', to: '/setDatas' },
     { icon: 'mdi-tag-check', text: '审批模板', to: '/approvalModel' },
+    { icon: 'mdi-flask-outline', text: '流程编排 v2', to: '/createStream2' },
     { icon: 'mdi-account-group-outline', text: '角色设置', to: '/roleSetting' },
   ]
   /**
