@@ -137,14 +137,15 @@
     flex-direction: column;
     align-items: flex-start;
     padding: 3px 6px;
-    border: 1px solid rgba(16, 85, 201, 0.25);
+    /* 品牌蓝的深浅由主题给（rgb(var(--v-theme-primary)) 是 R G B 三元组，可直接带透明度） */
+    border: 1px solid rgb(var(--v-theme-primary) / 25%);
     border-radius: 6px;
-    background: rgba(16, 85, 201, 0.04);
+    background: rgb(var(--v-theme-primary) / 4%);
     flex-shrink: 0;
 }
 .fmm-step-name {
     font-size: 11px;
-    color: #1055c9;
+    color: rgb(var(--v-theme-primary));
     line-height: 1.1;
     margin-bottom: 2px;
     max-width: 90px;
@@ -158,32 +159,33 @@
     gap: 2px;
 }
 .fmm-avatar {
-    border: 1px solid #fff;
+    /* 头像外圈要跟"头像后面那层背景"一致，用主题的 surface 才不会在深色下露白边 */
+    border: 1px solid rgb(var(--v-theme-surface));
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 .fmm-more {
     font-size: 11px;
-    color: #6b7280;
+    color: var(--flow-text-sub);
     margin-left: 2px;
 }
 .fmm-empty {
     font-size: 11px;
-    color: #9ca3af;
+    color: var(--flow-text-muted);
 }
 .fmm-more-steps {
     font-size: 11px;
-    color: #6b7280;
+    color: var(--flow-text-sub);
     margin-left: 2px;
     white-space: nowrap;
 }
 .fmm-arrow {
-    color: #94a3b8;
+    color: var(--flow-text-muted);
     font-size: 12px;
     flex-shrink: 0;
 }
 
 .fmm-empty-block {
     font-size: 12px;
-    color: #9ca3af;
+    color: var(--flow-text-muted);
 }
 </style>

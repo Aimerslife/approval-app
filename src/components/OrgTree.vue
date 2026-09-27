@@ -15,7 +15,7 @@
               variant="flat"
               @click="refreshTreeFromServer"
             >
-              <v-icon color="#1055C9" size="20">mdi-refresh</v-icon>
+              <v-icon color="primary" size="20">mdi-refresh</v-icon>
             </v-btn>
           </template>
 
@@ -61,7 +61,7 @@
         :items="treeItems"
         open-all
         open-on-click
-        color="#E8F0FE"
+        :color="activeTint"
         :search="search"
         active-class="tree-active-item"
         :separate-roots="true"
@@ -89,7 +89,7 @@
         </template>
 
         <template #prepend="{ item, isOpen }">
-          <v-icon v-if="item.type === 'dept'" color="#1055C9" size="25">
+          <v-icon v-if="item.type === 'dept'" color="primary" size="25">
             {{ item.has_child ? (isOpen ? 'mdi-layers-outline' : 'mdi-layers') :
               'mdi-account-group' }}
           </v-icon>
@@ -109,7 +109,18 @@
 </template>
 
 <script lang="ts" setup>
+  import { useTheme } from 'vuetify'
   import { fetchOrgTreeCache, type OrgTreeData, type OrgTreeNode, refreshOrgTree } from '@/api/api'
+
+  /*
+   * 树节点选中态的浅蓝底。
+   *
+   * 这里没能走"主题 token"：Vuetify 的 color 属性只认主题色，喂不进 CSS 变量，
+   * 所以按项目里已有的写法用 isDark 三元（另见 ProductInfoCard / StreamPanel）。
+   * 原来写死 E8F0FE —— 深色主题下那是一整块刺眼的浅蓝。
+   */
+  const { current: currentTheme } = useTheme()
+  const activeTint = computed(() => (currentTheme.value.dark ? '#1D283A' : '#E8F0FE'))
 
   // ===== 对外类型 =====
 
@@ -359,12 +370,13 @@
 }
 
 .org-scroll::-webkit-scrollbar-thumb {
-    background: #d8dee8;
+    /* 跟着主题：深色下原来的浅灰滑块会变成一条亮线 */
+    background: rgb(var(--v-theme-on-surface) / 30%);
     border-radius: 3px;
 }
 
 .org-scroll::-webkit-scrollbar-thumb:hover {
-    background: #b9c2cf;
+    background: rgb(var(--v-theme-on-surface) / 45%);
 }
 
 .org-scroll::-webkit-scrollbar-track {
@@ -373,11 +385,13 @@
 
 /* 树节点选中态：文字颜色 */
 ::deep(.tree-active-item) {
-    color: #1A73E8 !important;
+    /* 原来写死 1A73E8（既不是主题主色，深色下也偏暗） */
+    color: rgb(var(--v-theme-primary)) !important;
 }
 
 ::deep(.tree-active-item span) {
-    color: #1A73E8 !important;
+    /* 原来写死 1A73E8（既不是主题主色，深色下也偏暗） */
+    color: rgb(var(--v-theme-primary)) !important;
 }
 
 .filter-input {

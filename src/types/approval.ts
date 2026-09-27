@@ -129,8 +129,31 @@ export interface ApprovalRole {
 export interface RotationSpec {
   /** 组名取自数据行的哪一列（如「组别」） */
   groupFrom: string
-  /** 统计范围：按哪一列圈定"相关的行"，默认「SKU」—— 同一个 SKU 的多行里各组的销量 */
+  /** 统计范围：按哪一列圈定"相关的行"，默认「SKU」—— 同一个 SKU 的多行里各组的销量。
+   *  ⚠️ 配了 `rowFilter` 时**不看它**（范围由行条件自己定，通常是"同团队"） */
   scopeFrom?: string
+  /**
+   * **行级条件**（可选，PB filter 语法，写数据行自己的列名）：先按它筛行，再按 `groupFrom` 分组。
+   *
+   * 「这个组里**存在**这样的行」由此自然成立 —— 一行都没命中的组根本不会出现在结果里，
+   * 所以业务上说的"某组是否存在在售/非呆滞的货"不用另有语法。
+   *
+   * `{:字段名}` 从**当前审批单**取值（中文列名，与条件字段同一套），例如：
+   *
+   *     主MODEL = {:主MODEL} && 是否属于呆滞库存 = "否" && 销售状态 ~ "在售"
+   *
+   * 读作"与当前单同主MODEL、非呆滞、且在售"。绑定由 `pb.filter` 完成并自动转义
+   * （见 utils/rotationQuery.ts），**不要把字段值手工拼进字符串**。
+   */
+  rowFilter?: string
+  /**
+   * 只看与当前单**同团队**的组别（团队→组别 的映射见 utils/organazation.ts 的 `parent`/`group`）。
+   *
+   * 为什么专门一个开关、而不是写成行条件：`bi_rows` 里**没有「团队」这一列**，
+   * 归属关系只维护在组织架构文件里，写不进 PB filter。
+   * 取值用**当前单的 `groupFrom` 那一列**（如「组别」），查不到会判建单失败。
+   */
+  sameTeam?: boolean
   /** 排序依据列，默认「SKU近一年月平均销量」；同一个组命中多行时先按 aggregate 汇总 */
   orderFrom?: string
   /** 排序方向，默认 desc（销量高的组先办） */
@@ -241,20 +264,23 @@ export interface NodeDecision {
  *  - 默认形态（type 缺省 / 'approval'）：一个或多个并行的审批人（即会签），保留旧数据的线性子步骤兼容；
  *  - type='branch'：一个嵌套分支组（分支内再按审批结果 / 业务条件分流），分支组步骤通过 branches 递归承载，
  *    支持任意层级「分支内再分分支」，无需先汇聚；
- *  - type='notify'：飞书提醒步骤（只通知、不办理，见 ApprovalFlowNotifyNode）。
+ *  - type='notify'：飞书提醒步骤（只通知、不办理，见 ApprovalFlowNotifyNode）；
+ *  - type='probe'：数据查询步骤（分支里的查询节点，走向在建单期由查询结果冻定，见 utils/approvalProbe）。
  */
 export interface ApprovalFlowStep {
   id: string
   /** 步骤名（可选），如「初审」「复核」；notify 步骤里它是提醒名称 */
   name?: string
-  /** 步骤形态：缺省 'approval'（兼容旧数据）；'branch' = 嵌套分支组；'notify' = 飞书提醒 */
-  type?: 'approval' | 'branch' | 'notify'
+  /** 步骤形态：缺省 'approval'（兼容旧数据）；'branch' = 嵌套分支组；'notify' = 飞书提醒；'probe' = 数据查询 */
+  type?: 'approval' | 'branch' | 'notify' | 'probe'
   /** 该步骤的审批人（多人即会签）；type='branch' 的分支组步骤可留空；
    *  type='notify' 时它是**提醒对象**（同样支持 role 动态负责人） */
   members?: ApprovalChainItem[]
   /** type='notify' 的补充文案（可选） */
   content?: string
-  /** type='branch' 时的嵌套分支列表（各组内仍可继续递归出现 type='branch' 的步骤） */
+  /** type='probe' 的查询配置（建单期求值，与顶层数据查询节点同一套） */
+  probe?: ProbeSpec
+  /** type='branch' / type='probe' 时的分支列表（各组内仍可继续递归出现分支步骤） */
   branches?: ApprovalBranch[]
   /** 兼容旧结构的线性子步骤（无新生产方；flowToChain 仍会递归拍平） */
   steps?: ApprovalFlowStep[]
@@ -465,10 +491,59 @@ export interface ApprovalFlowNotifyNode {
   content?: string
 }
 
-export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode
+/**
+ * 「数据查询」节点的配置：**建单时**去 PocketBase 查"有没有满足条件的记录"。
+ *
+ * 为什么不能运行期查（三条理由，与 utils/approvalRotation 的说明同源）：
+ *  1. `rebuildChain` 是**纯同步**函数，被审批页 / 首页抽屉 / 提交环节反复调用 —— 塞 IO 等于每次渲染打库；
+ *  2. 同一份 decisions 在不同时间必须算出同一条链，否则历史单会"漂移"（待办人自己变、时间线错位）；
+ *  3. 查询结果不可重现（数据一周一刷），事后查不出"当时是按什么定的路"。
+ *
+ * 所以：**建单那一刻查一次，把走哪条分支冻进单据**（见 utils/approvalProbe）。
+ */
+export interface ProbeSpec {
+  /** PocketBase 集合名（保存期按白名单校验，见 utils/approvalProbe 的 PROBE_COLLECTIONS） */
+  collection: string
+  /**
+   * PB filter（可留空 = 只要该集合里有记录就命中）。
+   * `{:字段名}` 取**当前审批单**的值，与轮转行条件同一套写法，例如：
+   *   `sku = {:SKU} && status = 0`
+   */
+  filter?: string
+}
+
+/** 「数据查询」节点两条出边的名字：画布上连线的名称必须与之一致（保存期校验） */
+export const PROBE_EXISTS_BRANCH = '存在'
+export const PROBE_EMPTY_BRANCH = '不存在'
+
+/**
+ * 流程节点：数据查询（存在性判断）。
+ *
+ * 建单时查一次，命中 ≥1 条走「存在」分支、否则走「不存在」分支；
+ * 展开时**只保留命中的那条分支**（见 utils/approvalProbe 的 expandProbes），
+ * 所以 `rebuildChain` / 时间线 / 催办 / 驳回重审全都不需要改。
+ */
+export interface ApprovalFlowProbeNode {
+  id: string
+  type: 'probe'
+  /** 环节名（时间线上显示，如「查是否已有在办单」） */
+  name?: string
+  spec: ProbeSpec
+  /** 两条分支：`PROBE_EXISTS_BRANCH` / `PROBE_EMPTY_BRANCH` */
+  branches: ApprovalBranch[]
+}
+
+export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode
 
 /** 完整审批流：顺序节点，支持分支 */
 export type ApprovalFlow = ApprovalFlowNode[]
+
+/** 画布上「数据查询」节点的 data（graphToFlowFrom 读它转成 ApprovalFlowProbeNode） */
+export interface ProbeNodeData {
+  /** 环节名（时间线上显示） */
+  title: string
+  probe: ProbeSpec
+}
 
 // ===== Vue Flow 画布节点 data =====
 
@@ -1094,6 +1169,14 @@ export function rebuildChain (
       if (guard++ > 500) {
         return false
       } // 防御：回退 + 同样的结论会形成死循环
+      /*
+       * 「数据查询」步骤必须在建单期展开掉（见 utils/approvalProbe 的 expandProbes）。
+       * 走到这里说明单据数据不完整 —— 直接抛错，理由同顶层节点：
+       * 静默跳过会变成"单据一建出来就是已完成"，那种失败最难查。
+       */
+      if (s.type === 'probe') {
+        throw new Error('流程里的「数据查询」步骤没有在建单时展开，单据数据不完整（见 utils/approvalProbe）')
+      }
       if (s.type === 'branch' && s.branches?.length) {
         const b = matchBranch(s.branches, form)
         if (!b) {
@@ -1142,6 +1225,17 @@ export function rebuildChain (
         return false
       }
       const node = flow[i]
+      /*
+       * 「数据查询」节点必须在**建单期**展开掉（见 utils/approvalProbe 的 expandProbes）。
+       * 走到这里说明单据数据不完整 —— 直接抛错。
+       *
+       * 为什么不能"忽略它继续走"：忽略的表现是 chain 为空、done=true，
+       * 也就是**单据一建出来就是已完成** —— 这种静默失败最难查，不如当场报出来。
+       */
+      if (node.type === 'probe') {
+        throw new Error('流程里的「数据查询」节点没有在建单时展开，单据数据不完整（见 utils/approvalProbe）')
+      }
+
       // 飞书提醒：只记一环、不停留；后续走向不受它影响
       // （出线唯一性由 graphToFlowFrom 保证 —— 它没有结论也没有条件，多条出线无从选择）
       if (node.type === 'notify') {

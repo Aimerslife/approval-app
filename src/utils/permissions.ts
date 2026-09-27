@@ -94,3 +94,59 @@ export function canAccess (role: AppRole, path: string): boolean {
 export function entryPath (role: AppRole): string {
   return ENTRY_PATH[role]
 }
+
+/**
+ * 操作级权限（动作 → 允许的档位）。
+ *
+ * 为什么还要一张表：`ROUTE_ROLES` 管的是"能不能进这个页面"，而**同一个页面里
+ * 往往还有更敏感的动作** —— 「数据」页三档都能进（员工要能查数据），
+ * 但上传 BI 数据不该给他们：上传会按唯一键**删掉库里多出来的旧行**
+ * （`uploadBiRows` 的 `prune`），是整库级别的写操作。
+ * 别把"能进页面"当成"页面里什么都能做"。
+ *
+ * ⚠️ 口径与 `ROUTE_ROLES` **相反**：路由表里"未登记"是**放行**（宁可漏拦一个新页面，
+ *    也别因为忘了登记把人锁在外面）；这里"未登记"必须**拒绝** ——
+ *    漏登记一个动作等于悄悄给所有人开了个高权限操作，那是更糟的方向。
+ */
+const ACTION_ROLES = {
+  /** 上传 BI 数据到库（会按唯一键删旧行） */
+  'bi:upload': ADMIN_UP,
+  /**
+   * 清空 BI 数据（`bi_rows`）：只给超级管理员。
+   *
+   * 比上传更狠一档：上传还要选一个文件、还只替换文件覆盖到的行，这里是把整张表清空。
+   * 好在 `bi_rows` 是 BI 的**镜像**，可以再同步回来；但一天之内全公司看不了数据，
+   * 所以按"整库级操作"对待。
+   * 服务端还会再校验一次（server/purgeData.ts 拿 token 问 PB 的 role），
+   * 所以这张表是"界面别给人看到"，不是"权限的最终防线"。
+   */
+  'bi:purge': ['superAdmin'],
+} as const
+
+export type AppAction = keyof typeof ACTION_ROLES
+
+/**
+ * 该档位能不能做这个动作。
+ * 未知动作返回 **false**（fail-closed，理由见 `ACTION_ROLES` 的说明）——
+ * 传错动作名的后果是"少给了权限"，而不是"悄悄放行"。
+ */
+export function canAct (role: AppRole, action: AppAction): boolean {
+  const allowed: readonly AppRole[] | undefined = ACTION_ROLES[action]
+  return allowed ? allowed.includes(role) : false
+}
+
+/**
+ * 登录后能不能回跳到这个地址：**只接受站内路径**，否则返回空串。
+ *
+ * 用途：路由守卫拦下未登录用户时会带上 `?redirect=<原地址>`，登录页据此回跳
+ * （飞书卡片深链 `/approvalPage?order_no=…` 靠它保住参数）。
+ *
+ * 两道检查缺一不可：
+ *   1. 必须以 `/` 开头 —— 否则 `redirect=https://evil.com` 就能把人带去外部站点；
+ *   2. 不能以 `//` 开头 —— `//evil.com` 是**协议相对地址**，浏览器会当成外部站点，
+ *      只查第 1 条会被它绕过。
+ */
+export function safeRedirectPath (raw: unknown): string {
+  const s = typeof raw === 'string' ? raw.trim() : ''
+  return s.startsWith('/') && !s.startsWith('//') ? s : ''
+}

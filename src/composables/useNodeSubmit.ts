@@ -11,6 +11,7 @@ import {
   PICK_MEMBERS_RESULT,
   rebuildChain,
 } from '@/types/approval'
+import { usePendingStore } from '@/stores/pending'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 import { updateApprovalOrder, uploadApprovalFile } from '@/utils/collection'
 import { sendArrivedNotifies } from '@/utils/notifySteps'
@@ -38,6 +39,9 @@ export function useNodeSubmit (options: {
 }) {
   /** 提交中：防止连点造成两条流水 */
   const submitting = ref(false)
+
+  /** 侧边栏的「未审批单数」角标（见 stores/pending.ts）—— 提交会改 status，角标要跟着变 */
+  const pending = usePendingStore()
 
   /**
      * 最近一次写入成功的记录。
@@ -160,6 +164,16 @@ export function useNodeSubmit (options: {
       // 记下最新版本，供下一次提交的「读-改-写」使用（见 latest 的说明）
       latest = { ...order, ...updated }
       options.onUpdated?.(updated)
+
+      /*
+       * 角标跟着变。放在这里是刻意的：**本函数是唯一会改 status 的入口**
+       * （页面各自实现迟早有一条路径漏掉，而漏掉的表现是角标一直不动 —— 静默失效）。
+       *
+       * 不 await、不 await 到通知之后：发飞书消息可能要几秒，
+       * 角标没必要等它；也不放在最前面 —— 得等 status 真的写进库再数，
+       * 否则会数到写库前的旧值。
+       */
+      void pending.refresh()
 
       /*
        * 6. 「飞书提醒」环：把这一轮**刚到达**的通知环节各发一条飞书消息。

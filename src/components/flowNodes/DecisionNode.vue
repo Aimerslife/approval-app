@@ -37,7 +37,7 @@
     height: `${props.data.height ?? 70}px`,
     // 描边没法直接画在 clip-path 上（会被一起裁掉）：外层铺描边色、内层铺填充色，
     // 两层用同一个菱形裁剪，露出的一圈就是描边
-    background: props.data.stroke ?? '#facc15',
+    background: props.data.stroke ?? 'var(--flow-edge-selected)',
   }))
 
   const innerStyle = computed(() => ({

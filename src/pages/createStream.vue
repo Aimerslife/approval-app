@@ -2,7 +2,7 @@
   <v-container :class="{ 'screen-full': fullSceen }" fluid>
     <BackNode title="审批模板" />
 
-    <v-row align="stretch" class="flow-grid">
+    <v-row align="stretch" class="flow-grid" density="compact">
       <v-col class="min-w-0 flow-col-left" :class="{ 'flow-col-left--collapsed': leftCollapsed }" cols="2">
         <!-- 收起 / 展开。按钮固定在栏内同一个位置，收起后仍在原处 → 不会"收起来就找不回来" -->
         <v-icon-btn
@@ -13,8 +13,11 @@
           variant="text"
           @click="leftCollapsed = !leftCollapsed"
         />
-        <!-- v-show 而不是 v-if：收起再展开要保住树的展开状态、滚动位置和已选部门 -->
-        <OrgTree v-show="!leftCollapsed" @select="onOrgSelect" />
+        <!-- v-show 而不是 v-if：收起再展开要保住树的展开状态、滚动位置和已选部门。
+             外面套 Transition：播完淡出/位移后 Vue 才真正把它设为 display:none -->
+        <Transition name="org-panel">
+          <OrgTree v-show="!leftCollapsed" @select="onOrgSelect" />
+        </Transition>
       </v-col>
 
       <v-col class="min-w-0 flow-col-right" cols="10">
@@ -41,6 +44,15 @@
                 variant="tonal"
                 @click="addConditionNode"
               >条件分支</v-btn>
+
+              <!-- 数据查询：建单时查一次 PB 集合，按"有没有记录"走「存在」/「不存在」两条出边 -->
+              <v-btn
+                color="info"
+                prepend-icon="mdi-database-search-outline"
+                size="small"
+                variant="tonal"
+                @click="addProbeNode"
+              >数据查询</v-btn>
 
               <!-- 飞书提醒：只通知、不办理 —— 在时间线上占一环，流程到达即自动穿过 -->
               <v-btn
@@ -569,6 +581,24 @@
                 </div>
               </template>
 
+              <!-- 数据查询：卡片上只配「集合 + 条件」，两条出边的走向由建单期的查询结果决定，
+                   所以不联动分支配置面板（点它的出线不会打开条件编辑器） -->
+              <template #node-probe="{ id, data, selected }">
+                <div class="node-shell">
+                  <ProbeNode
+                    :branches="getBranches(id)"
+                    :probe="probeDataOf(data)"
+                    :selected="selected"
+                    :title="data?.title"
+                    @remove="removeNodeById(id)"
+                  />
+
+                  <div v-if="nodeErrorOf(id)" class="node-error" :title="nodeErrorOf(id)">
+                    <v-icon size="12">mdi-alert-circle-outline</v-icon>
+                  </div>
+                </div>
+              </template>
+
               <!-- 飞书提醒：复用审批节点的卡片（kind=notify 只换配色/文案/图标），
                    交互完全一致，所以成员增删那两个事件直接复用同一个处理函数 -->
               <template #node-notify="{ id, data, selected }">
@@ -687,10 +717,11 @@
   import AdjustableEdge from '@/components/flow/AdjustableEdge.vue'
   import ApprovalNode from '@/components/flow/ApprovalNode.vue'
   import ConditionNode from '@/components/flow/ConditionNode.vue'
+  import ProbeNode from '@/components/flow/ProbeNode.vue'
   import StartEndNode from '@/components/flow/StartEndNode.vue'
   import OrgTree from '@/components/OrgTree.vue'
   import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
-  import { APPROVAL_RESULTS, collapseConditionValue, conditionValues, FIELD_REF_PREFIX, flowToChain, isConditionGroup, isResultCondition, uid } from '@/types/approval'
+  import { APPROVAL_RESULTS, collapseConditionValue, conditionValues, FIELD_REF_PREFIX, flowToChain, isConditionGroup, isResultCondition, PROBE_EMPTY_BRANCH, PROBE_EXISTS_BRANCH, uid } from '@/types/approval'
   import { ensureRejectLoopBack, graphToFlowFrom } from '@/utils/approvalFlow'
   import { DERIVED_KEYS } from '@/utils/biRowFields'
   import { addApproval, getApprovalOne, updateApprovalModel } from '@/utils/collection'
@@ -1277,7 +1308,7 @@
 
     const sourceNode = nodes.value.find(n => n.id === params.source)
     const selected = selectedEdge.value
-    const branchable = sourceNode?.type === 'condition' || sourceNode?.type === 'approval'
+    const branchable = sourceNode?.type === 'condition' || sourceNode?.type === 'approval' || sourceNode?.type === 'probe'
 
     // 已选中本节点某条出线：把这条分支改连到新目标，而不是再建一条
     // （条件分支与审批结果分支共用这套语义）
@@ -1312,7 +1343,17 @@
     let label: string | undefined
     let data: FlowGraphEdge['data'] | undefined
     let newResultBranch = false
-    if (sourceNode?.type === 'condition') {
+    if (sourceNode?.type === 'probe') {
+      /*
+       * 数据查询的两条出边按拖出顺序自动命名：第一条「存在」、第二条「不存在」。
+       * 名字是**语义的一部分**（建单期按名字挑分支），所以不给「分支N」这种可随便改的名字；
+       * 拖多了的第三条给个明显不合法的名字，交给保存期校验报错。
+       */
+      label = outCount === 0
+        ? PROBE_EXISTS_BRANCH
+        : (outCount === 1 ? PROBE_EMPTY_BRANCH : `多余分支${outCount + 1}`)
+      data = {}
+    } else if (sourceNode?.type === 'condition') {
       label = `分支${outCount + 1}`
       data = { condition: null, conditions: [] }
     } else if (sourceNode?.type === 'approval' && outCount >= 1) {
@@ -1404,6 +1445,36 @@
   }
 
   /**
+   * 加一个「数据查询」节点：建单时查一次 PB 集合，按"有没有记录"决定走哪条出边。
+   *
+   * 两条出边的名字**是语义的一部分**（建单期按名字挑分支，见 utils/approvalProbe），
+   * 所以拖线时自动命名、保存时再校验一次，不让用户手写。
+   */
+  function addProbeNode () {
+    const seq = nodes.value.filter(n => n.type === 'probe').length + 1
+    addNodeToCanvas({
+      id: uid(),
+      type: 'probe',
+      position: { x: 0, y: 0 },
+      data: { title: `数据查询${seq}`, probe: { collection: '', filter: '' } },
+    })
+  }
+
+  /**
+   * 卡片里直接改这个对象（父级与卡片持有同一引用，与 roleOf / rotationOf 同一套写法），
+   * 所以取不到时补一个空壳，而不是返回 undefined 让卡片炸掉。
+   */
+  function probeDataOf (data: any): { collection: string, filter: string } {
+    if (!data) {
+      return { collection: '', filter: '' }
+    }
+    if (!data.probe) {
+      data.probe = { collection: '', filter: '' }
+    }
+    return data.probe as { collection: string, filter: string }
+  }
+
+  /**
    * 加一个「飞书提醒」节点：**只通知、不办理**。
    *
    * 它在时间线上占一环（"在审批环节中体现"），但流程到达即自动穿过 ——
@@ -1422,7 +1493,7 @@
 
   /** 画布上的"卡片型"节点：摆放避让时按卡片高度估算（start/end 是小胶囊） */
   function isCardNode (type?: string): boolean {
-    return type === 'approval' || type === 'condition' || type === 'notify'
+    return type === 'approval' || type === 'condition' || type === 'notify' || type === 'probe'
   }
 
   function removeNodeById (id: string) {
@@ -1989,25 +2060,88 @@
     min-width: 0;
     /* 给栏内的收起按钮当定位参照 */
     position: relative;
+    /* 收起/展开的主运动：栏宽、内边距一起过渡（不能只过渡 flex，见 collapsed 里的 padding: 0） */
+    transition:
+        flex-basis 0.26s cubic-bezier(0.2, 0.8, 0.2, 1),
+        max-width 0.26s cubic-bezier(0.2, 0.8, 0.2, 1),
+        padding 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /*
- * 收起：整列缩成一条 36px 窄栏，只剩那个按钮。
- * ⚠️ 这里**不写 overflow: hidden**：一是 OrgTree 内部自带横向滚动（.org-scroll），
- *    父级裁切会让它的滚动区域失效；二是窄栏只有 36px，按钮靠绝对定位溢出内边距才放得下，
- *    裁切会把它直接切掉。内容用模板里的 v-show 隐藏就够了。
+ * 收起：整列收到 **0 宽**，画布拿回全部宽度（此前是缩到 36px 窄栏，仍占着一条）。
+ * 内容不在这里隐藏 —— 由模板的 v-show 负责，这样树的展开状态/滚动位置/已选部门都能保住。
+ * ⚠️ 这里**不写 overflow: hidden**：OrgTree 内部自带横向滚动（.org-scroll），
+ *    父级裁切会让它的滚动区域失效。0 宽盒子本来也不会有可见内容。
  */
 .flow-col-left--collapsed {
-    flex: 0 0 36px !important;
-    max-width: 36px !important;
+    flex: 0 0 0 !important;
+    max-width: 0 !important;
+    /* 内边距必须一起归零：box-sizing 是 border-box，但内边距之和大于指定宽度时
+       盒子不会被压到 0（内容盒取 max(0, ...)），仍会撑出 24px 的空白 */
+    padding: 0 !important;
 }
 
-/* 收起按钮：展开 / 收起两个状态下都在栏目左上角同一处，收起后不必去别处找 */
+/* 展开状态：按钮固定在栏目右上角（见下面的收起态另有位置） */
 .flow-col-left__toggle {
     position: absolute;
     top: 12px;
     right: 4px;
     z-index: 2;
+    /* 展开态在栏内右上角、收起态贴在交界并垂直居中：两个位置之间也要过渡，
+       否则按钮会"瞬移"。位置、圆角、底色、阴影一起走，用 all 最省事（本项目已有同样写法） */
+    transition: all 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/*
+ * 收起后整列 0 宽，按钮改为贴在"栏与画布的交界"上、垂直居中：
+ *   · 不占空间就只能浮在画布之上，所以要给它底色 + 描边 + 阴影才看得出是个按钮；
+ *   · 不放顶部，是因为那里正好是画布面板的标题行，会压住"编辑审批流"和那几个按钮。
+ */
+.flow-col-left--collapsed .flow-col-left__toggle {
+    top: 50%;
+    right: auto;
+    left: 0;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: rgb(var(--v-theme-surface));
+    box-shadow: 0 1px 3px rgb(15 23 42 / 18%), 0 0 0 1px rgb(var(--v-theme-on-surface) / 8%);
+}
+
+/*
+ * 收起/展开的内容动效（配合模板里的 <Transition name="org-panel">）。
+ *
+ * 关键是**时长错开**，而不是各自为政：
+ *   · 收：内容 0.12s 快速淡出 + 左移，栏宽 0.26s —— 内容先走完；
+ *   · 展：内容延迟 0.16s 再淡入，等栏宽基本就位。
+ * 为什么非要错开：栏宽在变的过程中，树里的文字会**逐帧重排**，
+ * 那正是"卡顿感"的来源。让内容只在"可见期之外"存在，重排就看不见了。
+ */
+.org-panel-leave-active {
+    transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.org-panel-leave-to {
+    opacity: 0;
+    transform: translateX(-10px);
+}
+
+.org-panel-enter-active {
+    transition: opacity 0.18s ease 0.16s, transform 0.18s ease 0.16s;
+}
+
+.org-panel-enter-from {
+    opacity: 0;
+    transform: translateX(-10px);
+}
+
+/* 关掉动效偏好时不做动画（与 index.vue 里那条同一口径） */
+@media (prefers-reduced-motion: reduce) {
+    .flow-col-left,
+    .flow-col-left__toggle,
+    .org-panel-leave-active,
+    .org-panel-enter-active {
+        transition: none !important;
+    }
 }
 
 .flow-col-right {
@@ -2026,6 +2160,14 @@
     .flow-col-right {
         flex: 0 0 100% !important;
         max-width: 100% !important;
+    }
+
+    /* 窄屏下"收起"也要真的收起：否则上面那条 100% 会把 0 宽压回去，
+       表现就是点了收起、树没了但整屏仍被占着 */
+    .flow-col-left--collapsed {
+        flex: 0 0 0 !important;
+        max-width: 0 !important;
+        padding: 0 !important;
     }
 }
 

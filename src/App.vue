@@ -65,24 +65,21 @@
               :offset="[-50, -60]"
             >
               <template #activator="{ props }">
-                <v-avatar
-                  class="mb-2  cursor-pointer"
-                  :color="userStore.isLoggedIn ? '#2196F3' : 'info'"
-                  size="50"
+                <!-- 菜单锚点必须是真实元素（见上面的说明），所以这里把头像本身当锚点。
+                     v-bind="props" 照旧：菜单的定位/键盘交互都靠它。 -->
+                <UserAvatar
+                  class="mb-2"
+                  interactive
+                  :size="50"
                   v-bind="props"
-                >
-                  <v-img v-if="userStore.avatar" :src="userStore.avatar" />
-                  <v-icon v-else icon="mdi-account" size="35" />
-                </v-avatar>
+                />
               </template>
 
               <v-card min-width="200">
                 <v-list>
                   <v-list-item>
                     <template #prepend>
-                      <v-avatar size="40">
-                        <v-img v-if="userStore.avatar" :src="userStore.avatar" />
-                      </v-avatar>
+                      <UserAvatar :size="40" />
 
                       <div class="d-flex flex-column ml-3">
                         <span class="text-[14px]">{{ userStore.displayName }}</span>
@@ -152,11 +149,14 @@
             <template #prepend>
               <v-icon :icon="item.icon" size="20" />
 
+              <!-- 未审批单数（status === 0）：与「我的审批单」列表同口径，见 stores/pending.ts。
+                   数量为 0 时整块不渲染 —— 否则会留下一个空红点或一个"0"。
+                   判断用 to 而不是文案：文案是给人看的，改文案不该让角标消失 -->
               <v-badge
-                v-if="item.text == '我的审批单'"
+                v-if="item.to === '/mine' && pending.count > 0"
                 bordered
                 color="error"
-                content="99+"
+                :content="pending.count > 99 ? '99+' : String(pending.count)"
                 location="top right"
                 :offset-x="-100"
                 :offset-y="-10"
@@ -198,7 +198,9 @@
 <script lang="ts" setup>
   import { useTheme } from 'vuetify'
   import logo from '@/assets/logo_.png'
+  import UserAvatar from '@/components/UserAvatar.vue'
   import { drawerSet, isEditorFullscreen } from '@/composables/useEditorFullscreen'
+  import { usePendingStore } from '@/stores/pending'
   import { useUserStore } from '@/stores/user'
   import { canAccess } from '@/utils/permissions'
 
@@ -247,6 +249,36 @@
   }
   const route = useRoute()
   const isPublic = computed(() => route.meta.public === true)
+
+  /*
+   * 未审批单数角标（侧边栏「我的审批单」上的红点数字，口径见 stores/pending.ts）。
+   *
+   * 为什么 watch 登录态而不是挂载时拉一次：
+   * 登录可能发生在本次挂载**之后**（飞书 OAuth 是跳出去再回来），未登录时请求会被 PB 拒绝；
+   * 退出登录还要 stop() 清零，否则角标会留着上一个账号的数字。
+   */
+  const pending = usePendingStore()
+  watch(() => userStore.isLoggedIn, logged => {
+    if (logged) {
+      void pending.refresh()
+      pending.start()
+    } else {
+      pending.stop()
+    }
+  }, { immediate: true })
+
+  /*
+   * 切页就刷新：审批、建单都发生在页面里，办完切页时把角标对齐到最新。
+   * （提交审批**那一刻**的刷新在 composables/useNodeSubmit 里 —— 那里是唯一改 status 的入口，
+   *   写在这里会漏掉"不切页就提交"的情况。）
+   */
+  watch(() => route.path, () => {
+    if (userStore.isLoggedIn) {
+      void pending.refresh()
+    }
+  })
+
+  onBeforeUnmount(() => pending.stop())
   function setDrawer () {
     drawerSet.value = !drawerSet.value
   }

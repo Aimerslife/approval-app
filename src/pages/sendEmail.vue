@@ -88,7 +88,7 @@
 
 <script lang="ts" setup>
   import { resetPassword } from '@/api/api'
-  import backgroud from '@/assets/backgroud.jpg'
+  import backgroud from '@/assets/background.jpg'
   import logo from '@/assets/logo.png'
 
   const email = ref('')

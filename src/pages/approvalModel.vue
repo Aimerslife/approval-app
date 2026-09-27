@@ -249,9 +249,8 @@
   }
 
   function goEdit (id: string) {
-    console.log('goEdit', id)
     router.push({
-      path: '/editStream',
+      path: '/createStream',
       query: {
         id,
       },

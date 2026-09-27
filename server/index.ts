@@ -7,6 +7,7 @@ import https from 'node:https'
 import * as lark from '@larksuiteoapi/node-sdk'
 import Database from 'better-sqlite3'
 import { runBiSync, uploadRows } from './biSync'
+import { purgeBiData } from './purgeData'
 import { runReminders } from './reminders'
 
 /*
@@ -939,6 +940,30 @@ http.createServer(async (req, res) => {
       } catch (error: any) {
         console.error('[biSync] 同步失败:', error?.message ?? error)
         json(res, 500, { code: -1, msg: error?.message || String(error) })
+      }
+      return
+    }
+
+    // ─── 清空 BI 数据（仅超级管理员，只清 bi_rows） ─────
+    // POST /api/admin/purge?dryRun=1   只统计条数、不删（确认框先用它把数量摆出来）
+    // POST /api/admin/purge            真删（bi_rows 可再用 /api/bi/sync 拉回来）
+    //
+    // 权限校验在 server/purgeData.ts 里做：用调用者自己的 token 调 PB 的 auth-refresh，
+    // 由 PocketBase 判定这个 token 是谁、role 是不是 superAdmin —— 不信前端传来的任何字段。
+    if (pathname === '/api/admin/purge' && req.method === 'POST') {
+      try {
+        const token = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+        const dryRun = url.searchParams.get('dryRun') === '1' || url.searchParams.get('dryRun') === 'true'
+        const summary = await purgeBiData({ token, dryRun })
+        console.log(
+          `[purge] ${summary.by.email ?? summary.by.id} ${dryRun ? '统计' : '清空'}：`
+          + `共 ${summary.totalCount} 条，删除 ${summary.totalDeleted} 条`,
+        )
+        json(res, 200, { code: 0, data: summary })
+      } catch (error: any) {
+        console.error('[purge] 失败:', error?.message ?? error)
+        // 400：身份/权限/集合问题都是调用方能修的，不要混进 500
+        json(res, 400, { code: -1, msg: error?.message || String(error) })
       }
       return
     }

@@ -6,6 +6,8 @@ import type {
   ApprovalFlowStep,
   RotationSpec,
 } from '../types/approval'
+import { BI_ROW_FIELD_BY_KEY, BI_ROW_KEY_BY_FIELD, DERIVED_KEYS } from './biRowFields'
+import { extractFilterParams, filterFieldNames } from './rotationQuery'
 
 /**
  * 「按组轮询」的**建单期展开**（纯函数：不碰网络、不碰 PocketBase，能被 tsx 直接断言）。
@@ -115,6 +117,84 @@ export function collectRotations (flow: ApprovalFlow): Array<{ id: string, label
 /** 流程里有没有轮询（没有就不必去查数） */
 export function flowHasRotation (flow: ApprovalFlow): boolean {
   return collectRotations(flow).length > 0
+}
+
+/* ==================== 保存期校验 ==================== */
+
+/**
+ * 「行条件」里**不能**引用的字段。
+ *
+ * 这几个恰恰是条件编辑器里会给出的候选（上一环节结论 / 办理时填的值，见
+ * createStream.vue 的 FIELD_OPTIONS），所以很容易被顺手写进行条件 ——
+ * 但它们要到**办理时**才有值，而行条件在**建单那一刻**就要算，绑不出值来。
+ * 那种写法建单时才会炸（报"这一列没有值"），在这里提前拦下更省事。
+ */
+const RUNTIME_ONLY_FIELDS = new Set([
+  'result',
+  'amount',
+  'qty',
+  'reason_belong',
+  'second_reason',
+  'remark',
+])
+
+/**
+ * 组级上下文里的别名：只在**该组汇总之后**的 `where` 里有效，
+ * 行条件跑在分组之前，引用不到（也不会命中）。
+ */
+const GROUP_ALIAS_FIELDS = new Set(['销量', '命中行数'])
+
+/** 可以当作行条件占位符的字段：65 个数据列 + 两个派生指标 */
+const BINDABLE_FIELDS = new Set<string>([
+  ...Object.keys(BI_ROW_FIELD_BY_KEY),
+  DERIVED_KEYS.grossMargin,
+  DERIVED_KEYS.overseasAmount,
+])
+
+/**
+ * 轮询配置的**保存期**校验。返回错误文案，null = 没问题。
+ *
+ * 只查"不看数据就能判定"的问题。数据相关的（组别在组织架构里查不到、该列这一行没值）
+ * 只能等具体那条数据建单时才报 —— 见 utils/rotationData.ts 的 buildRowFilter/buildTeamWhitelist。
+ *
+ * 为什么要在这里拦：行条件里写错一个字段名，症状是"这一环没人办/这一条建单失败"，
+ * 而配置的人往往在几天后才从别人的报错里知道。
+ */
+export function findBadRotation (spec: RotationSpec): string | null {
+  const label = rotationLabel(spec)
+  const raw = (spec.rowFilter ?? '').trim()
+  if (!raw) {
+    return null
+  }
+  for (const name of extractFilterParams(raw)) {
+    if (GROUP_ALIAS_FIELDS.has(name)) {
+      return `${label}：行条件里的「{:${name}}」用不了 —— 「${name}」是该组**汇总之后**才有的别名，行条件跑在分组之前`
+    }
+    if (RUNTIME_ONLY_FIELDS.has(name)) {
+      return `${label}：行条件里的「{:${name}}」取不到值 —— 它是办理时/上一环节才有的字段，而行条件在建单那一刻就要算`
+    }
+    if (!BINDABLE_FIELDS.has(name)) {
+      return `${label}：行条件里的「{:${name}}」不是已知的数据列，请从数据字段里选（写错列名会让条件永远不命中）`
+    }
+  }
+
+  /*
+   * 列名（filter 左边那些）也要查：
+   * 写错的症状不是"不命中"，而是**服务端直接 400、这一条建单失败**（实测踩过）——
+   * 所以不值得等建单时才发现。
+   *
+   * ⚠️ 派生指标在这里**不能用**：毛利率 / 海外仓库存金额是取出数据后在 TS 里算的，
+   * 数据库里没有这两列，写进 filter 一样会被 400。它们只能用作 `{:占位符}`（值取自当前单）。
+   */
+  for (const name of filterFieldNames(raw)) {
+    if (DERIVED_KEYS.grossMargin === name || DERIVED_KEYS.overseasAmount === name) {
+      return `${label}：行条件里的列名「${name}」是派生指标（不落库），只能用成「{:${name}}」取值来比，不能当成数据表的列`
+    }
+    if (!BINDABLE_FIELDS.has(name) && !(name in BI_ROW_KEY_BY_FIELD)) {
+      return `${label}：行条件里的列名「${name}」不是已知的数据列（写错会让服务端直接拒绝这条建单）`
+    }
+  }
+  return null
 }
 
 /** 汇总值的展示：整数不带小数，小数最多两位（千分位） */

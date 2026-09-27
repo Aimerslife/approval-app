@@ -14,10 +14,9 @@
 
             <div class="setting-row-value">
               <template v-if="item.key === 'avatar_url'">
-                <v-avatar color="primary" size="42" variant="tonal">
-                  <v-img v-if="userStore.user?.avatar_url" :src="userStore.user?.avatar_url" />
-                  <v-icon v-else icon="mdi-account" size="26" />
-                </v-avatar>
+                <!-- 走 UserAvatar：URL 统一经 store 的 resolveAvatar 兜底，
+                     图加载失败时退回姓名首字（原来这里直接读 user.avatar_url，会绕过兜底） -->
+                <UserAvatar :size="42" />
               </template>
               <!-- 部门行把完整路径挂到 title 上，鼠标悬浮可见（如「总公司 / 财务部 / 财务BP组」） -->
               <span
@@ -154,6 +153,7 @@
 </template>
 <script lang="ts" setup>
   import type { UserInfo } from '@/stores/user'
+  import UserAvatar from '@/components/UserAvatar.vue'
   import { useUserStore } from '@/stores/user'
   import { DEFAULT_VISUALABLE, PRODUCT_FIELDS } from '@/utils/productFields'
 

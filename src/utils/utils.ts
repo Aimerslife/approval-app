@@ -1,10 +1,19 @@
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import pinyinModule from 'pinyin'
-import * as XLSX from 'xlsx'
 import { flowToChain } from '@/types/approval'
 import { createApprocalModel, getApprovalFirstByFilter } from '@/utils/collection'
+
+/*
+ * ⚠️ 本文件里**不要**再静态 import 重型库。
+ *
+ * home / mine / setDatas / workStream / approvalPage / logic … 都要从这里取
+ * formatDate / formatTimeDiff，所以本文件被**每个页面**静态依赖 ——
+ * 顶部静态 import 什么，所有页面就在渲染前一起付这笔下载与解析成本。
+ * 曾经因此进过 6.3MB 的公共 chunk：xlsx（875KB，只在导出用）与
+ * pinyin（入口文件 7.2MB，只在算姓名首字母时用）。
+ * 两者现在都是动态 import：xlsx 见 exportExcel，pinyin 见 utils/pinyin.ts。
+ */
 
 import 'dayjs/locale/zh-cn'
 
@@ -13,8 +22,12 @@ dayjs.extend(duration)
 // 设置为中文
 dayjs.locale('zh-cn')
 
-// 导出表格数据
-export function exportExcel (data: any[], fileName: string) {
+/**
+ * 导出表格数据。
+ * xlsx 改成**动态** import：它 875KB，而只在点「导出」时才需要（见文件顶部的说明）。
+ */
+export async function exportExcel (data: any[], fileName: string) {
+  const XLSX = await import('xlsx')
   const worksheet = XLSX.utils.json_to_sheet(data)
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, fileName)
@@ -89,19 +102,11 @@ export function formatTimeDiff (time?: string | null, end?: string | number | Da
  */
 export { formatDatas, formatNumber, parseFormattedNumber } from './number'
 
-const pinyin = (pinyinModule as unknown as { default?: typeof pinyinModule }).default ?? pinyinModule
-
-export function getPinyinInitials (name?: string | null, separator = ''): string {
-  if (!name || name.trim() === '') {
-    return ''
-  }
-  const initials = pinyin(name, {
-    style: pinyin.STYLE_FIRST_LETTER,
-  })
-
-  const flatInitials = initials.flat()
-  return flatInitials.slice(0, 2).join(separator)
-}
+/*
+ * getPinyinInitials 已移到 utils/pinyin.ts，并改成**动态**加载：
+ * pinyin 的入口文件 7.2MB，不能挂在每个页面的关键路径上。
+ * 那边导出的是 ensurePinyin() + pinyinInitials()，唯一调用方见 components/ApprovalNode.vue。
+ */
 
 export async function generateApprovalChain () {
   const res = await getApprovalFirstByFilter(`name="测试模板"`)

@@ -1,5 +1,7 @@
 import type { ApprovalAttachment, ApprovalChain, ApprovalFlow, ApprovalModal, ApprovalOrder, FlowGraph } from '@/types/approval'
 import pb from '@/pocketbase.ts'
+// 只要类型：组别→默认审批人的"覆盖记录"形状（合并口径见 utils/groupApprovers）
+import type { GroupApproverOverride } from '@/utils/groupApprovers'
 import { APPROVAL_STATUS, buildBranchTerminalMap, rebuildChain } from '@/types/approval'
 import { sendArrivedNotifies } from '@/utils/notifySteps'
 
@@ -447,5 +449,76 @@ export async function updateUserRole (id: string, role: string) {
     console.error('获取用户信息失败:', error)
     // 列表接口失败时返回空数组，保证调用方拿到的类型稳定为 UserInfo[]
     return []
+  }
+}
+
+/* ==================== 组别默认审批人（覆盖值） ==================== */
+
+/**
+ * 组别 → 默认审批人 的**覆盖值**：只存"在角色设置里通过通讯录换过的人"。
+ * 默认值维护在 `utils/organazation.ts`，两者的合并口径见 `utils/groupApprovers`。
+ */
+const GROUP_APPROVER_COLLECTION = 'group_approvers'
+
+/**
+ * PB 记录 = 业务字段 + 记录 id。
+ * 读回来才有 id（update / delete 要靠它定位），写进去时不需要 —— 所以分成两个类型，
+ * 避免让"写"的调用方也得编一个 id 出来。
+ */
+type GroupApproverRecord = GroupApproverOverride & { id: string }
+
+/**
+ * 读全部覆盖记录（按组别名排序）。
+ *
+ * ⚠️ 失败时返回**空数组**而不是抛错：集合可能还没建（PB 没应用 1789700000 迁移），
+ * 那种情况下页面应当照常显示文件里的默认值，而不是整页报错。
+ */
+export async function getGroupApproverOverrides (): Promise<GroupApproverOverride[]> {
+  try {
+    return await pb
+      .collection(GROUP_APPROVER_COLLECTION)
+      .getFullList<GroupApproverRecord>({ sort: 'group' })
+  } catch (error) {
+    console.warn('[groupApprovers] 读取覆盖记录失败（多半是还没应用迁移）:', error)
+    return []
+  }
+}
+
+/**
+ * 写入某组别的审批人（同组 upsert）。
+ *
+ * 为什么先查再写、而不是直接 create 靠唯一索引兜底：那样第二次改同一组会直接报错，
+ * 而且错误信息对用户没有意义；先拿到 id 才能"改"它。记录数不增长 —— 同组始终一条。
+ *
+ * 失败**向上抛**（与读取相反）：这是"改数据"的动作，静默失败会让用户以为改好了。
+ */
+export async function saveGroupApprover (row: {
+  group: string
+  parent?: string
+  manager: string
+  manager_email?: string
+  manager_avatar?: string
+  manager_department?: string
+  manager_department_path?: string
+}): Promise<GroupApproverOverride> {
+  const existing = await pb
+    .collection(GROUP_APPROVER_COLLECTION)
+    .getFirstListItem<GroupApproverRecord>(pb.filter('group = {:g}', { g: row.group }))
+    .catch(() => null)
+
+  return existing
+    ? await pb.collection(GROUP_APPROVER_COLLECTION).update<GroupApproverOverride>(existing.id, { ...row })
+    : await pb.collection(GROUP_APPROVER_COLLECTION).create<GroupApproverOverride>({ ...row })
+}
+
+/** 恢复默认：删掉该组别的覆盖记录（本来就没有则什么都不做） */
+export async function deleteGroupApproverOverride (group: string): Promise<void> {
+  const existing = await pb
+    .collection(GROUP_APPROVER_COLLECTION)
+    .getFirstListItem<GroupApproverRecord>(pb.filter('group = {:g}', { g: group }))
+    .catch(() => null)
+
+  if (existing) {
+    await pb.collection(GROUP_APPROVER_COLLECTION).delete(existing.id)
   }
 }

@@ -169,6 +169,44 @@ export async function fetchOrgTreeCache(): Promise<OrgTreeResponse> {
  * 从飞书重新拉取组织架构树并更新 PocketBase 缓存。
  * 仅点击"刷新组织架构"按钮时调用。
  */
+/**
+ * 清空 BI 数据（`bi_rows`，**仅超级管理员**）。
+ *
+ * 只清这一张表 —— 它是 BI 同步进来的镜像，可以再 `POST /api/bi/sync` 拉回来；
+ * 审批单/模板/账号不在清空范围内（见 server/purgeData.ts 的说明）。
+ *
+ * 权限由服务端判定：它拿我们带过去的 token 去问 PocketBase 这是谁、role 是不是 superAdmin。
+ * 前端把按钮藏起来只是界面礼貌 —— 真正拦住人的是服务端那一步，别把这里当权限。
+ *
+ * @param dryRun true = 只统计条数不删（确认框用它先把"要删掉多少"摆出来）
+ */
+export async function purgeBiData (dryRun = true): Promise<PurgeSummary> {
+  const token = pb.authStore.token
+  if (!token) {
+    throw new Error('未登录')
+  }
+  const res = await fetch(`/api/admin/purge${dryRun ? '?dryRun=1' : ''}`, {
+    method: 'POST',
+    headers: { Authorization: token },
+  })
+  const data = await res.json().catch(() => null)
+  if (!res.ok || data?.code !== 0) {
+    throw new Error(data?.msg || `清空失败：HTTP ${res.status}`)
+  }
+  return data.data as PurgeSummary
+}
+
+/** 清空结果（与 server/purgeData.ts 的 PurgeSummary 对应） */
+export interface PurgeSummary {
+  dryRun: boolean
+  by: { id: string, role: string, name?: string, email?: string }
+  collections: Array<{ name: string, count: number, deleted: number }>
+  /** 明确不动的集合（账号等），界面上要说明 */
+  kept: string[]
+  totalCount: number
+  totalDeleted: number
+}
+
 export async function refreshOrgTree(): Promise<OrgTreeResponse> {
   const res = await fetch('/api/org-tree/refresh', { method: 'POST' })
   const data = await res.json()

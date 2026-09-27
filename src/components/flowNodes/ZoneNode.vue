@@ -18,7 +18,7 @@
     width: `${props.data.width}px`,
     height: `${props.data.height}px`,
     background: props.data.color,
-    border: `1.5px dashed ${props.data.border || '#cbd5e1'}`,
+    border: `1.5px dashed ${props.data.border || 'var(--flow-edge)'}`,
   }))
 </script>
 
@@ -37,7 +37,7 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--flow-text);
-  border-left: 3px solid #facc15;
+  border-left: 3px solid var(--flow-edge-selected);
   line-height: 18px;
 }
 </style>

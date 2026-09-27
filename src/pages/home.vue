@@ -11,33 +11,14 @@
         <v-sheet class="overflow-hidden mt-3 p-4" rounded="15">
           <div class="block-title">审批信息</div>
 
-          <div class="p-2 d-flex items-center justify-between gap-4">
-            <v-text-field v-model="search" density="compact" flat class="filter-input" hide-details label="搜索"
-              prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" />
-
-            <v-select v-model="typeFilter" clearable class="filter-select" flat hide-details :items="['通过', '驳回']"
-              label="类型选择" :menu-props="{ contentClass: 'filter-menu' }" single-line variant="outlined" />
-
-            <v-select v-model="deptFilter" clearable density="compact" flat class="filter-select" hide-details
-              :items="deptOptions" label="部门选择" :menu-props="{ contentClass: 'filter-menu' }" single-line
-              variant="outlined" />
-
-            <v-date-input v-model="dateRange" class="filter-select" density="compact" label="日期选择" hide-details
-              max-width="368" multiple="range" prepend-icon="" prepend-inner-icon="$calendar" single-line
-              variant="outlined" />
-
-            <v-btn color="surface-variant" size="small" variant="flat" @click="resetHistoryFilters">
-              <span>重置</span>
-            </v-btn>
-
-            <v-btn color="#0052D9" size="small" variant="flat">确认</v-btn>
-          </div>
+          <ApprovalFilterBar :dirty="filtersDirty" :filters="filters" :options="filterOptionsMap"
+            @apply="applyFilters" @patch="patchFilters" @reset="resetFilters" />
 
           <v-divider class="mt-3" />
 
           <v-data-table v-model:page="page" class="text-[12px]" border density="compact" fixed-header :headers="headers"
-            fixed-footer hover :items="pendingRows" :items-per-page="itemsPerPage" striped="odd"
-            @click:row="handleRowClick">
+            fixed-footer hover :items="pendingList" :items-per-page="itemsPerPage" items-per-page-text="每页条数"
+            striped="odd" @click:row="handleRowClick">
             <template #item.order_no="{ value }">
               <span class="font-bold">{{ value }}</span>
             </template>
@@ -71,27 +52,9 @@
         <v-sheet class="p-3 mt-3" rounded="8px">
           <div class="block-title">历史审批单</div>
 
-          <div class="p-2 d-flex items-center justify-between gap-4">
-            <v-text-field v-model="search" density="compact" flat class="filter-input" hide-details label="搜索"
-              prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" />
-
-            <v-select v-model="typeFilter" clearable class="filter-select" flat hide-details :items="['通过', '驳回']"
-              label="类型选择" :menu-props="{ contentClass: 'filter-menu' }" single-line variant="outlined" />
-
-            <v-select v-model="deptFilter" clearable density="compact" flat class="filter-select" hide-details
-              :items="deptOptions" label="部门选择" :menu-props="{ contentClass: 'filter-menu' }" single-line
-              variant="outlined" />
-
-            <v-date-input v-model="dateRange" class="filter-select" density="compact" label="日期选择" hide-details
-              max-width="368" multiple="range" prepend-icon="" prepend-inner-icon="$calendar" single-line
-              variant="outlined" />
-
-            <v-btn color="surface-variant" size="small" variant="flat" @click="resetHistoryFilters">
-              <span>重置</span>
-            </v-btn>
-
-            <v-btn color="#0052D9" size="small" variant="flat">确认</v-btn>
-          </div>
+          <!-- 筛选条件：与 mine.vue 共用同一个组件（加条件只改 utils/approvalFilters 的定义表） -->
+          <ApprovalFilterBar :dirty="filtersDirty" :filters="filters" :options="filterOptionsMap"
+            @apply="applyFilters" @patch="patchFilters" @reset="resetFilters" />
 
           <v-divider class="mt-3" />
 
@@ -205,25 +168,21 @@
 </template>
 
 <script setup lang="ts">
-import type { ApprovalChainItem, ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
+import type { ApprovalChainItem, NodeSubmitPayload } from '@/types/approval'
 import { sendFeishuCard } from '@/api/api'
+import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
 import ApprovalNode from '@/components/ApprovalNode.vue'
 import GoodsInfo from '@/components/GoodsInfo.vue'
 import { drawerSet } from '@/composables/useEditorFullscreen'
 // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
 import { useNodeSubmit } from '@/composables/useNodeSubmit'
-import {
-  APPROVAL_STATUS,
-  buildBranchTerminalMap,
-  collectStepResultOptions,
-  mergeExtraMembers,
-  rebuildChain,
-} from '@/types/approval'
-import { flowContextOfOrder } from '@/utils/approvalFlow'
-// PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
-import { toProductView } from '@/utils/biRowFields'
-import { getApprovalOrder } from '@/utils/collection'
-import { formatDate, formatTimeDiff, generateApprovalChain } from '@/utils/utils'
+// 取数 / 组装行 / 筛选：与 mine.vue 共用（原先两页各写一份，加一列要改两处）
+import { useApprovalTable } from '@/composables/useApprovalTable'
+import { collectStepResultOptions } from '@/types/approval'
+import { approvalStatusMeta } from '@/utils/approvalFilters'
+import { APPROVAL_TABLE_HEADERS, toApprovalRow, type ApprovalRow } from '@/utils/approvalRows'
+import { runtimeOf, stepStartTimesOf } from '@/utils/approvalRuntime'
+import { formatDate, generateApprovalChain } from '@/utils/utils'
 
 // 两个 tab 就是同一批数据的两个切面：当前 = 未结束，历史 = 已结束
 const tab = ref<'home' | 'history'>('home')
@@ -238,149 +197,36 @@ const setOpen = computed(() => open.value && tab.value === 'home')
 const page = ref(1)
 const itemsPerPage = ref(15)
 
-interface ApprovalRow {
-  id: string
-  order_no: string
-  status: number
-  /** 以下三项来自关联产品；没关联数据（或调用方未登录）时是 '—' */
-  sku: string
-  主MODEL: string
-  部门: string
-  /** 当前待办环节的审批人；流程已走完则显示最后一个环节的审批人 */
-  approver: string
-  duration: string
-  created: string
-}
+/** 状态 → 文案 + 颜色（与「状态」筛选项共用同一份定义） */
+const statusMeta = approvalStatusMeta
 
-/** 状态 → 文案 + 颜色（0 待审批 / 1 通过 / 2 驳回，即 APPROVAL_STATUS） */
-const STATUS_META: Record<number, { text: string, color: string }> = {
-  [APPROVAL_STATUS.PENDING]: { text: '待审批', color: 'primary' },
-  [APPROVAL_STATUS.APPROVED]: { text: '通过', color: 'success' },
-  [APPROVAL_STATUS.REJECTED]: { text: '驳回', color: 'error' },
-}
-const statusMeta = (v: unknown) => STATUS_META[Number(v)] ?? STATUS_META[APPROVAL_STATUS.PENDING]
+/** 表格列：与 mine.vue 共用一份定义（加一列只改 utils/approvalRows） */
+const headers = APPROVAL_TABLE_HEADERS
 
-/** 与审批页同一套口径：有 flow 就按 flow + decisions 重算，旧单（只有 chain、没有 flow）原样沿用 */
-function runtimeOf(order: ApprovalOrder) {
-  const snapshot = order.chain
-  const flow = snapshot?.flow
-  if (!flow?.length) {
-    const legacy = snapshot?.chain ?? []
-    return { chain: legacy, stepIds: legacy.map((_, i) => `legacy-${i}`), currentStep: -1, done: false }
-  }
-  // 业务上下文参与条件选路，取法与审批页/提交侧一致（见 flowContextOfOrder）
-  const r = rebuildChain(flow, snapshot?.decisions ?? [], buildBranchTerminalMap(snapshot?.graph), flowContextOfOrder(order))
-  // 合并运行期追加的抄送/转办（转办会把被接替者标成「已转办」，实现见 mergeExtraMembers）
-  mergeExtraMembers(r.chain, r.stepIds, snapshot?.extraMembers)
-  return { ...r, done: r.done }
-}
+/*
+ * 取数 / 组装行 / 筛选：与 mine.vue 共用同一份实现（见 composables/useApprovalTable）。
+ * 两个 tab 是同一批数据的两个切面（当前 = 未结束，历史 = 已结束），两套都过同一组筛选条件。
+ */
+const {
+  orders,
+  filters,
+  filtersDirty,
+  applyFilters,
+  resetFilters,
+  patchFilters,
+  filterOptionsMap,
+  pendingList,
+  historyList,
+  load,
+  applyUpdated,
+} = useApprovalTable()
 
-/** 环节的负责人：优先 manager（办理信息记在它上面，与 ApprovalNode 口径一致） */
-function mainOf(step?: ApprovalChainItem[]) {
-  return step?.find(i => i.type === 'manager') ?? step?.[0]
-}
-
-/** 各环节起始时间：首环节 = 建单时间，其余 = 上一环节的办理时间（与审批页 stepStartTimes 一致） */
-function stepStartTimesOf(order: ApprovalOrder, chain: ApprovalChainItem[][]) {
-  let prev: string | undefined = order.created
-  return chain.map(step => {
-    const from = prev ?? ''
-    const m = mainOf(step)
-    if (m?.handled_at) prev = m.handled_at // 已办理才推进基线
-    return from
-  })
-}
-
-function toRow(order: ApprovalOrder): ApprovalRow {
-  const p = toProductView(order.expand?.relation)
-  const rt = runtimeOf(order)
-  // 当前审批人：有未办环节取它；全办完则取最后一环
-  const idx = rt.currentStep >= 0 ? rt.currentStep : rt.chain.length - 1
-  // 办结时间 = 最后一个有办理时间的环节；还没办结就算到当下
-  let finishedAt: string | undefined
-  for (const step of rt.chain) {
-    const m = mainOf(step)
-    if (m?.handled_at) finishedAt = m.handled_at
-  }
-  return {
-    id: order.id,
-    order_no: order.order_no ?? order.id,
-    status: Number(order.status ?? APPROVAL_STATUS.PENDING),
-    sku: String(p.SKU ?? p['库存SKU'] ?? '—'),
-    主MODEL: String(p['主MODEL'] ?? '—'),
-    部门: String(p['部门'] ?? '—'),
-    approver: mainOf(rt.chain[idx])?.name ?? '—',
-    duration: formatTimeDiff(order.created, finishedAt ?? null),
-    created: order.created ?? '',
-  }
-}
-
-/** 全部审批单（approval_chain），已按创建时间倒序 —— 见 getApprovalOrder */
-const orders = ref<ApprovalOrder[]>([])
-const rows = computed(() => orders.value.map(toRow))
-/** 当前审批单 = 未结束；历史审批单 = 已结束 */
-const pendingRows = computed(() => rows.value.filter(r => r.status === APPROVAL_STATUS.PENDING))
-// const currentProduct=computed(()=> pendingRows.value.filter(r=>r.order_no==selectedNode.value.order_no))
-const historyRows = computed(() => rows.value.filter(r => r.status !== APPROVAL_STATUS.PENDING))
-
-/* ==================== 历史 tab 的筛选 ==================== */
-const search = ref('')
-/** 历史里不可能有「待审批」，所以类型只有这两个 */
-const typeFilter = ref<string | null>(null)
-const deptFilter = ref<string | null>(null)
-/** 日期范围：审批单没有业务日期，只能按**建单时间**（created）筛 */
-const dateRange = ref<(Date | string)[]>([])
-/** 部门选项取自数据本身，不写死 */
-const deptOptions = computed(() =>
-  [...new Set(historyRows.value.map(r => r.部门))].filter(v => v && v !== '—'),
-)
-/** Date 或 'YYYY-MM-DD...' 都能取出日期部分（v-date-input 的模型类型两种都可能给） */
-function isoDay(v: Date | string) {
-  return typeof v === 'string' ? v.slice(0, 10) : `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
-}
-
-const historyList = computed(() =>
-  historyRows.value.filter(r => {
-    if (typeFilter.value && statusMeta(r.status).text !== typeFilter.value) return false
-    if (deptFilter.value && r.部门 !== deptFilter.value) return false
-    if (dateRange.value.length > 0) {
-      // created 是 '2026-09-17 02:05:41.542Z'，前 10 位就是日期，可直接按字典序比
-      const day = r.created.slice(0, 10)
-      // .at(-1) 返回 string | Date | undefined（eslint 的 prefer-at 自动改的），先收窄再用
-      const first = dateRange.value[0]
-      const last = dateRange.value.at(-1)
-      if (!first || !last) return false
-      const from = isoDay(first)
-      const to = isoDay(last)
-      if (!day || day < from || day > to) return false
-    }
-    const kw = search.value.trim().toLowerCase()
-    if (kw && !`${r.order_no} ${r.sku} ${r.主MODEL} ${r.部门}`.toLowerCase().includes(kw)) return false
-    return true
-  }),
-)
-function resetHistoryFilters() {
-  search.value = ''
-  typeFilter.value = null
-  deptFilter.value = null
-  dateRange.value = []
-}
-
-/** 当前 tab 实际渲染的行；分页器要按它算页数（两个 tab 的数据不同） */
-const visibleRows = computed(() => (tab.value === 'history' ? historyList.value : pendingRows.value))
+/**
+ * 当前 tab 实际渲染的行 = **筛过之后**的行。
+ * 分页器按它算页数；抽屉的上/下一条也按它在筛选结果里翻 —— 与表格所见一致。
+ */
+const visibleRows = computed(() => (tab.value === 'history' ? historyList.value : pendingList.value))
 const pageCount = computed(() => Math.max(1, Math.ceil(visibleRows.value.length / itemsPerPage.value)))
-
-const headers = ref([
-  { title: '审批单号', key: 'order_no', align: 'start' },
-  { title: 'SKU', key: 'sku' },
-  { title: '主MODEL', key: '主MODEL' },
-  { title: '部门', key: '部门' },
-  { title: '当前审批人', key: 'approver' },
-  { title: '状态', key: 'status', align: 'center' },
-  { title: '创建时间', key: 'created' },
-  { title: '审批时长', key: 'duration' },
-  { title: '操作', key: 'actions', align: 'center', sortable: false },
-] as const)
 
 /** 右侧抽屉里展开的那一单 */
 const selectedNode = ref<ApprovalRow | null>(null)
@@ -474,11 +320,11 @@ const { submitNode } = useNodeSubmit({
   onMessage: showMsg,
   onUpdated: updated => {
     // 抽屉的时间线由 selectedOrder 派生、而它来自 orders ——
-    // 所以必须更新**列表里那条**；只改 selectedNode 的话时间线不会动。
-    orders.value = orders.value.map(o => (o.id === updated.id ? { ...o, ...updated } : o))
+    // 必须更新**列表里那条**（applyUpdated 就是干这件事）；只改 selectedNode 的话时间线不会动。
+    applyUpdated(updated)
     // 表头的「审批状态 / 当前审批人 / 耗时」读的是行快照，一并刷新
     const row = orders.value.find(o => o.id === updated.id)
-    if (row) selectedNode.value = toRow(row)
+    if (row) selectedNode.value = toApprovalRow(row)
   },
 })
 
@@ -486,57 +332,15 @@ function onDrawerSubmit(payload: NodeSubmitPayload) {
   void submitNode(payload)
 }
 
-async function getDatas() {
-  orders.value = await getApprovalOrder()
-  console.log(orders.value)
-}
-
 onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
-  getDatas()
+  // 一次全量拉取、本地分页与筛选（与 v-data-table 的客户端模式配套），见 useApprovalTable.load
+  void load()
 })
 onUnmounted(() => window.removeEventListener('scroll', onScroll))
 </script>
 
 <style lang="scss" scoped>
-.filter-input {
-  :deep(.v-field) {
-    --v-field-padding-top: 2px;
-    --v-field-padding-bottom: 1px;
-    --v-input-control-height: 25px;
-    font-size: 12px;
-  }
-
-  :deep(.v-field__input) {
-    min-height: 25px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-
-  :deep(.v-label) {
-    font-size: 12px;
-  }
-
-  :deep(.v-field__append-inner) {
-    align-self: center;
-    padding-top: 0;
-  }
-
-  :deep(.v-field__prepend-inner) {
-    margin-top: 0;
-    padding-top: 1px;
-
-    .v-icon {
-      font-size: 14px;
-    }
-  }
-
-  :deep(.v-input__details) {
-    padding-top: 0;
-    min-height: 0;
-  }
-}
-
 .tabs-shadow {
   transition: box-shadow 0.2s ease;
   box-shadow: 0 0 0 rgba(15, 23, 42, 0);

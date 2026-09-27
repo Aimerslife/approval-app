@@ -37,7 +37,7 @@
   <v-timeline-item v-else class="mb-12" :dot-color="dotColor" :size="size">
     <template #icon>
       <span :style="{ fontSize: iconFontSize, color: iconColor }">{{
-        getPinyinInitials(manageDatas[0]?.name) }}</span>
+        memberInitials }}</span>
     </template>
 
     <div class=" d-flex align-center justify-space-between">
@@ -441,7 +441,8 @@
   import { proxyAvatar, type UserBrief } from '@/api/api'
   import { APPROVAL_RESULTS, PICK_MEMBERS_RESULT } from '@/types/approval'
   import { buildColorScale, pickColorStep } from '@/utils/color'
-  import { formatDate, formatTimeDiff, getPinyinInitials } from '@/utils/utils'
+  import { ensurePinyin, pinyinInitials } from '@/utils/pinyin'
+  import { formatDate, formatTimeDiff } from '@/utils/utils'
   import DepartmentNode from './DepartmentNode.vue'
 
   const overlay = ref(false)
@@ -507,6 +508,22 @@
   const manageDatas = computed(() => props.data.filter(item => item.type == 'manager'))
   /** 该步骤的审批人（办理信息记录在其上） */
   const manager = computed<ApprovalChainItem | undefined>(() => manageDatas.value[0])
+
+  /**
+   * 时间线圆点里的两个字母（拼音首字母）。
+   *
+   * 拼音词典是**异步**加载的（入口文件 7.2MB，不能挂在关键路径上，见 utils/pinyin.ts）：
+   * 先用姓名首字兜底（「张」），词典到位后再换成拼音结果（「zs」）。
+   */
+  const memberInitials = ref('')
+  watch(manager, m => {
+    memberInitials.value = pinyinInitials(m?.name)
+  }, { immediate: true })
+  onMounted(() => {
+    void ensurePinyin().then(() => {
+      memberInitials.value = pinyinInitials(manager.value?.name)
+    })
+  })
 
   /**
    * 这一环是不是「飞书提醒」环。

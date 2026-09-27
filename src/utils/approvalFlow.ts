@@ -10,6 +10,9 @@ import type {
   FlowContext,
 } from '../types/approval'
 import { branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, uid } from '../types/approval'
+import { findBadProbe } from './approvalProbe'
+import { collectRotations, findBadRotation } from './approvalRotation'
+import type { ProbeNodeData, ProbeSpec } from '../types/approval'
 import { deriveFlowFields } from './biRowFields'
 
 /**
@@ -122,7 +125,9 @@ export function graphToFlowFrom (
   /**
      * 收集某节点的全部出边为「分支组」：
      * - kind 'approval'：审批结果分支，恰好一条无条件主线 + 其余绑定审批结论（field=result）；
-     * - kind 'condition'：条件分支，默认分支与表单命中条件可混排。
+     * - kind 'condition'：条件分支，默认分支与表单命中条件可混排；
+   * - kind 'probe'：数据查询，两条出边（「存在」/「不存在」），无分支条件 —— 走向由建单期的
+   *   查询结果决定（见 utils/approvalProbe），所以这里只收出边、不校验条件。
      * 每条分支用 walkBranch 沿出边走，直到结束节点或「与兄弟分支合流」的汇聚点；
      * 要求所有分支的终点一致（或都到结束），否则该层无法用线性 flow 表达。
      * 分支内允许继续出现分支（条件节点 / 出线 > 1 的审批节点），由 walkBranch 递归收集，
@@ -133,13 +138,13 @@ export function graphToFlowFrom (
      * 这个函数里的错误全出在 sourceId 身上（出线数不够 / 分支没命名 / 重名 / 条件没填全 / 主线不唯一），
      * 所以不需要在每个 return 上手写归属 —— 漏一个就少一处提示。
      */
-  function collectBranches (sourceId: string, kind: 'approval' | 'condition') {
+  function collectBranches (sourceId: string, kind: 'approval' | 'condition' | 'probe') {
     return tagNode(collectBranchesRaw(sourceId, kind), sourceId)
   }
 
   function collectBranchesRaw (
     sourceId: string,
-    kind: 'approval' | 'condition',
+    kind: 'approval' | 'condition' | 'probe',
   ): {
     branches: ApprovalBranch[]
     converge?: string
@@ -160,7 +165,9 @@ export function graphToFlowFrom (
         error:
                     kind === 'approval'
                       ? '审批结果分支至少需要两条出线（一条主线 + 结果分支），请从节点下方拖出连线'
-                      : '条件分支至少需要两条出边（分支），请从节点下方拖出连线',
+                      : kind === 'probe'
+                        ? '数据查询至少需要两条出边（「存在」与「不存在」），请从节点下方拖出连线'
+                        : '条件分支至少需要两条出边（分支），请从节点下方拖出连线',
       }
     }
     const sourceName = String(nodesById.get(sourceId)?.data?.title ?? '')
@@ -394,9 +401,17 @@ export function graphToFlowFrom (
       territory.add(p)
       const outs: any[] = out.get(p) ?? []
 
-      // 分支内再分流：条件节点 / 出线 > 1 的审批节点
-      if (pn.type === 'condition' || (pn.type === 'approval' && outs.length > 1)) {
-        const nested = collectBranches(p, pn.type === 'condition' ? 'condition' : 'approval')
+      /*
+       * 分支内再分流：条件节点 / 数据查询 / 出线 > 1 的审批节点。
+       *
+       * 「数据查询」允许放在分支里：它和「按组轮询」一样在**建单期**求值、展开成"命中的那条分支"，
+       * 所以"父分支到底走没走到"不影响它 —— 展开后结构是确定的。
+       * 代价也与轮转一致：**没走到的那条分支里的查询也会被执行一次**
+       * （轮转的组也照样会去查），这是"建单期冻结"这条路必须付的。
+       */
+      if (pn.type === 'condition' || pn.type === 'probe' || (pn.type === 'approval' && outs.length > 1)) {
+        const kind = pn.type === 'approval' ? 'approval' : (pn.type === 'probe' ? 'probe' : 'condition')
+        const nested = collectBranches(p, kind)
         if (nested.error) {
           return { steps, territory, error: nested.error }
         }
@@ -420,12 +435,37 @@ export function graphToFlowFrom (
         for (const t of nested.territory) {
           territory.add(t)
         }
-        // 嵌套分支组作为一个分支步骤挂进来（branches 可继续递归，即分支内的分支）
-        steps.push({
-          id: `${pn.id}:nested`,
-          type: 'branch',
-          branches: nested.branches,
-        })
+        if (pn.type === 'probe') {
+          /*
+           * 数据查询：校验集合名与两条出边之后**原样**挂成一步 ——
+           * 不在这里求值，求值统一发生在建单期的 expandProbes（见 utils/approvalProbe）。
+           */
+          const d = pn.data as ProbeNodeData | undefined
+          const filter = String(d?.probe?.filter ?? '').trim()
+          const spec: ProbeSpec = {
+            collection: String(d?.probe?.collection ?? '').trim(),
+            ...(filter ? { filter } : {}),
+          }
+          const bad = findBadProbe(spec, (nested.branches ?? []).map(b => b.name))
+          if (bad) {
+            return { steps, territory, error: bad, errorNodeId: pn.id }
+          }
+          const title = String(d?.title ?? '').trim()
+          steps.push({
+            id: `${pn.id}:nested`,
+            ...(title ? { name: title } : {}),
+            type: 'probe',
+            probe: spec,
+            branches: nested.branches,
+          })
+        } else {
+          // 嵌套分支组作为一个分支步骤挂进来（branches 可继续递归，即分支内的分支）
+          steps.push({
+            id: `${pn.id}:nested`,
+            type: 'branch',
+            branches: nested.branches,
+          })
+        }
 
         // 嵌套分支组都汇到结束：本分支也随之终止
         if (nested.converge === undefined || nested.converge === 'end') {
@@ -513,7 +553,7 @@ export function graphToFlowFrom (
       return { flow: [], error: '流程中存在悬空连线' }
     }
     // 分支/主线汇聚之后，业务节点只允许被主路径经过一次；重复经过即存在环或反向回连
-    if ((node.type === 'approval' || node.type === 'condition' || node.type === 'notify') && visited.has(cur)) {
+    if ((node.type === 'approval' || node.type === 'condition' || node.type === 'notify' || node.type === 'probe') && visited.has(cur)) {
       const t = String((node.data as ApprovalNodeData)?.title || '未命名环节')
       return {
         flow: [],
@@ -525,7 +565,7 @@ export function graphToFlowFrom (
     if (node.type === 'end') {
       // 校验：所有业务节点都必须挂在主路径上
       const orphans = nodes.filter(
-        n => (n.type === 'approval' || n.type === 'condition' || n.type === 'notify') && !visited.has(n.id),
+        n => (n.type === 'approval' || n.type === 'condition' || n.type === 'notify' || n.type === 'probe') && !visited.has(n.id),
       )
       if (orphans.length > 0) {
         // 点名说清是哪几个环节 —— 只说「存在未连接的节点」用户在几十个框里找不到
@@ -568,6 +608,18 @@ export function graphToFlowFrom (
             ? `「${t}」还没有添加审批人，请点击该环节添加`
             : '请至少添加一个审批人',
           ...(noMember ? { errorNodeId: noMember.id } : {}),
+        }
+      }
+      /*
+       * 轮询配置的保存期校验。
+       *
+       * 走 `collectRotations` 而不是在 walk 里逐处查：那个函数已经覆盖了所有能配轮询的位置
+       * （顶层审批节点 / 分支步骤），加校验不必去改四五个地方 —— 漏一处就有一处配错不被拦。
+       */
+      for (const { id, spec } of collectRotations(flow)) {
+        const err = findBadRotation(spec)
+        if (err) {
+          return { flow: [], error: err, errorNodeId: id }
         }
       }
       return { flow }
@@ -618,6 +670,43 @@ export function graphToFlowFrom (
         }
       }
       flow.push({ id: node.id, type: 'branch', branches: res.branches! })
+      cur = res.converge
+      continue
+    }
+
+    /*
+     * 数据查询节点：**两条出边**（存在 / 不存在），本身不带分支条件 ——
+     * 走哪条由**建单期**的查询结果决定（见 utils/approvalProbe）。
+     * 所以这里只收出边 + 做保存期校验（集合白名单、两条出边名字对不对），不校验条件。
+     */
+    if (node.type === 'probe') {
+      visited.add(cur)
+      mainVisited.add(cur)
+      const res = collectBranches(cur, 'probe')
+      if (res.error) {
+        return {
+          flow: [], error: res.error,
+          errorNodeId: res.errorNodeId, errorEdgeId: res.errorEdgeId,
+        }
+      }
+      const d = node.data as ProbeNodeData | undefined
+      const filter = String(d?.probe?.filter ?? '').trim()
+      const spec: ProbeSpec = {
+        collection: String(d?.probe?.collection ?? '').trim(),
+        ...(filter ? { filter } : {}),
+      }
+      const bad = findBadProbe(spec, (res.branches ?? []).map(b => b.name))
+      if (bad) {
+        return { flow: [], error: bad, errorNodeId: cur }
+      }
+      const title = String(d?.title ?? '').trim()
+      flow.push({
+        id: node.id,
+        type: 'probe',
+        ...(title ? { name: title } : {}),
+        spec,
+        branches: res.branches!,
+      })
       cur = res.converge
       continue
     }

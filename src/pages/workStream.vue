@@ -127,6 +127,10 @@ import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
 // 「按组轮询」：建单期按数据展开成 N 个顺序环节（依次流转给各组负责人）
 import { expandRotations, flowHasRotation } from '@/utils/approvalRotation'
 import { resolveAllRotationGroups } from '@/utils/rotationData'
+// 「数据查询」节点：建单期查一次 PB 集合，只保留命中的那条分支
+// （纯逻辑在 utils/approvalProbe，打库在 utils/probeQuery）
+import { expandProbes, flowHasProbe } from '@/utils/approvalProbe'
+import { resolveProbes } from '@/utils/probeQuery'
 import { fetchOrgTreeCache, type OrgTreeData } from '@/api/api'
 import { APPROVAL_STATUS, flowToChain, type ApprovalFlow, type ApprovalOrder } from '@/types/approval'
 
@@ -210,7 +214,7 @@ async function exportToExcel() {
   loading.value = true
   try {
     const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
-    exportExcel(all.map(formatDatas), '导出数据')
+    await exportExcel(all.map(formatDatas), '导出数据')
   } catch (e) {
     console.error('[setDatas] 导出失败:', e)
     showMsg(`导出失败：${e instanceof Error ? e.message : String(e)}`, 'error')
@@ -971,9 +975,27 @@ async function createTaskForRow(
          * 顺序不能颠倒：展开出来的成员是 `role.dept = 组名`，要靠下一步的角色解析填真人；
          * 先解析再展开的话，被替换掉的那一环解析的是"数据行里那个组"，白解析一次。
          */
-        if (templateFlow && flowHasRotation(templateFlow)) {
-            const groups = await resolveAllRotationGroups(templateFlow, context)
-            const expanded = expandRotations(templateFlow, groups)
+        /*
+         * 「数据查询」节点必须**先于轮询**展开：它只保留命中的那条分支，
+         * 没走的那条分支里配的轮询就不该再去查 —— 否则白查一次库，
+         * 而且那次查询失败会把这条本来正常的建单判成失败。
+         */
+        if (flow && flowHasProbe(flow)) {
+            const answers = await resolveProbes(flow, context)
+            const probed = expandProbes(flow, answers)
+            if (probed.issues.length) {
+                return { kind: 'failed', label, detail: probed.issues.join('；') }
+            }
+            flow = probed.flow
+        }
+        /*
+         * ⚠️ 这里必须用 `flow`（已经过 probe 展开的那个），**不能**用 `templateFlow`：
+         *   · 用 templateFlow 会把上一步的 probe 展开结果整个覆盖掉（分支选路白算了）；
+         *   · 而且被丢弃那条分支里的轮询也会被查一遍 —— 白查库，失败还会拖垮这条建单。
+         */
+        if (flow && flowHasRotation(flow)) {
+            const groups = await resolveAllRotationGroups(flow, context)
+            const expanded = expandRotations(flow, groups)
             if (expanded.issues.length) {
                 return { kind: 'failed', label, detail: expanded.issues.join('；') }
             }

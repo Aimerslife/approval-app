@@ -119,7 +119,7 @@
 </template>
 
 <script lang="ts" setup>
-  import backgroud from '@/assets/backgroud.jpg'
+  import backgroud from '@/assets/background.jpg'
   import logo from '@/assets/logo.png'
   import { register } from '@/utils/collection'
 

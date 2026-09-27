@@ -85,6 +85,7 @@ import { useUserStore } from '@/stores/user'
 import { loginWithLarkEmbedded } from '@/utils/oauth'
 import LarkAuthDialog from '@/components/LarkAuthDialog.vue'
 import { getWord } from '@/api/api'
+import { entryPath, safeRedirectPath } from '@/utils/permissions'
 
 const userStore = useUserStore()
 const word = ref('可能又是愉快的一天')
@@ -92,6 +93,22 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const router = useRouter()
+const route = useRoute()
+
+/**
+ * 登录成功后的落地页。
+ *
+ * 优先回到「被守卫拦下的那个地址」（route.query.redirect，见 router/index.ts）——
+ * 飞书卡片是深链进 `/approvalPage?order_no=…`，丢了参数用户就得自己再找一遍单子。
+ * 只接受**站内路径**（以 `/` 开头且不是 `//`），否则一个构造出来的 ?redirect= 就能把人带去外部地址。
+ *
+ * 没有 redirect 时按角色落到入口页：管理员 `/home`、员工 `/mine` ——
+ * 直接打开域名（`/`）属于"没表达具体意图"，落到工作台比落在快速导航页更省一步。
+ */
+function afterLoginPath(): string {
+  // safeRedirectPath 只放行站内路径（挡掉 //evil.com 这类协议相对地址），判定见 utils/permissions
+  return safeRedirectPath(route.query.redirect) || entryPath(userStore.appRole)
+}
 const emailRules = [
   (value: string) => {
     if (!value) return '邮箱不能为空'
@@ -133,9 +150,8 @@ async function submit(event: Event) {
   if (valid) {
     try {
       await userStore.login(email.value, password.value)
-      // 登录后落到 index.vue（路由 `/`）。⚠️ 该页当前渲染的是脚手架欢迎页（HelloWorld），
-      // 若这里要的是"进主界面"，应改成 '/home'。
-      router.push('/')
+      // 落点：被拦下的原地址 → 没有就按角色落到入口页（见 afterLoginPath）
+      router.push(afterLoginPath())
     } catch (error: any) {
       console.error('登录失败:', error.response?.data ?? error.data ?? error)
       showMsg('邮箱或密码错误，请重试', 'error')
@@ -163,7 +179,7 @@ async function loginWithLarks() {
       authDialog.value = true
     })
     await userStore.init()
-    await router.push('/')
+    await router.push(afterLoginPath())
   } catch (error: any) {
     console.error('飞书登录失败:', error)
     showMsg(error?.message ?? '飞书登录失败，请重试', 'error')

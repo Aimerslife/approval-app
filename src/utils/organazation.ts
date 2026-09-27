@@ -1,13 +1,57 @@
-export const groupManage={
-    tk---戴丽淑
-拓业部---彭诗懿
-市场部---市场部1组---林思诺
-         ----市场部2组---林思诺
-B2C---美2组---周开胜
-        美1组---范少玲
-        美3组---李凯杰
-        夜灯-其他---陈颖
-        亚马逊-未维护---陈颖
-        欧洲组---黄伟强
-        多站点组---魏燕玲
-}
+export const groupManage=[
+    {   
+        parent:"tk",
+        group:"tk",
+        manager:"戴丽淑",
+    },
+    {   
+        parent:"市场部",
+        group:"拓业部",
+        manager:"彭诗懿",
+    },
+    {   
+        parent:"市场部",
+        group:"市场部1组",
+        manager:"林思诺",
+    },
+    {   
+        parent:"市场部",
+        group:"市场部2组",
+        manager:"林思诺",
+    },
+    {   
+        parent:"B2C",
+        group:"美2组",
+        manager:"周开胜",
+    },
+    {   
+        parent:"B2C",
+        group:"美1组",
+        manager:"范少玲",
+    },
+    {   
+        parent:"B2C",
+        group:"美3组",
+        manager:"李凯杰",
+    },
+    {   
+        parent:"B2C",
+        group:"夜灯-其他",
+        manager:"陈颖",
+    },
+    {   
+        parent:"B2C",
+        group:"亚马逊-未维护",
+        manager:"陈颖",
+    },
+     {   
+        parent:"B2C",
+        group:"多站点组",
+        manager:"魏燕玲",
+    },
+     {   
+        parent:"B2C",
+        group:"欧洲组",
+        manager:"黄伟强",
+    }
+]

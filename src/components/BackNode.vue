@@ -1,5 +1,5 @@
 <template>
-  <div class="d-flex align-center gap-1 mb-3">
+  <div class="d-flex align-center gap-1 mb-">
     <v-icon-btn size="20" @click="$router.back()">
       <v-icon :icon="props.icon" size="20" />
     </v-icon-btn>

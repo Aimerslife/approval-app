@@ -13,7 +13,6 @@ import Codemirror from 'codemirror'
 import hljs from 'highlight.js'
 // Composables
 import { createApp } from 'vue'
-import VueApexCharts from 'vue3-apexcharts'
 import VxeUI from 'vxe-pc-ui'
 import VxeUITable from 'vxe-table'
 
@@ -22,12 +21,13 @@ import { registerPlugins } from '@/plugins'
 import App from './App.vue'
 import '@kangc/v-md-editor/lib/style/codemirror-editor.css'
 import '@kangc/v-md-editor/lib/theme/style/github.css'
-// ApexCharts 从 v4 起把样式拆成了独立 CSS，**不再随 JS 注入**
-// （实测 v7.3.0 的 ESM 里搜不到内嵌的 CSS 文本），必须手动引。
-// 不引的话图表会缺 46.8KB 的定位/尺寸规则（含 23 条 position 规则），
-// 画出来是错位的、看起来仍像「没渲染」。
-// 要引在这里：apexcharts 是 vue3-apexcharts 内部 import 的，业务代码不会直接碰它。
-import 'apexcharts/dist/apexcharts.css'
+/*
+ * ApexCharts 已移除：全仓（除本文件外）**没有任何地方使用它** ——
+ * 之前这里 `app.use(VueApexCharts)` + 引它的 CSS，等于让每个用户都白下 496KB 的 chunk
+ * 与一份图表样式，而「分析」页至今是空占位。
+ * 以后真要画图：在用到图表的那个页面里局部 import（别再挂回全局），
+ * 并记得 apexcharts v4 起样式是独立的 CSS，要单独引，否则图表会错位。
+ */
 // mode
 import 'codemirror/mode/markdown/markdown'
 import 'codemirror/mode/javascript/javascript'
@@ -73,6 +73,5 @@ app.use(VMdEditor)
 app.use(VMdPreview)
 app.use(VxeUI)
 app.use(VxeUITable)
-app.use(VueApexCharts)
 
 app.mount('#app')

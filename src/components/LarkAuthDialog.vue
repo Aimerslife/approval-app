@@ -17,7 +17,7 @@
         <v-progress-circular
           v-if="!loaded && !returned"
           class="frame-loading"
-          color="#3378FF"
+          color="primary"
           indeterminate
           size="28"
         />
@@ -45,13 +45,13 @@
         />
 
         <div v-if="returned" class="frame-done">
-          <v-progress-circular class="mb-3" color="#3378FF" indeterminate size="22" />
-          <span class="text-[13px] text-[#8B8B8B]">已授权，正在进入首页…</span>
+          <v-progress-circular class="mb-3" color="primary" indeterminate size="22" />
+          <span class="text-[13px]" style="color: rgb(var(--v-theme-on-surface) / 60%)">已授权，正在进入首页…</span>
         </div>
       </div>
 
       <v-card-actions class="px-4 pb-3">
-        <span class="text-[12px] text-[#8B8B8B]">用飞书扫码，授权后自动进入首页</span>
+        <span class="text-[12px]" style="color: rgb(var(--v-theme-on-surface) / 60%)">用飞书扫码，授权后自动进入首页</span>
         <v-spacer />
         <v-btn variant="text" @click="close()">取消</v-btn>
       </v-card-actions>
@@ -175,7 +175,8 @@
 .frame-wrap {
   position: relative;
   height: 520px;
-  background: #fff;
+  /* 飞书授权页是白底 iframe，外框跟主题走（原来写死白，深色下是一块白板） */
+  background: rgb(var(--v-theme-surface));
 }
 
 .frame {

@@ -26,8 +26,8 @@
   const boxStyle = computed(() => ({
     ...(props.data.width ? { width: `${props.data.width}px` } : {}),
     ...(props.data.height ? { minHeight: `${props.data.height}px` } : {}),
-    background: props.data.fill ?? '#22c55e',
-    borderColor: props.data.fill ?? '#22c55e',
+    background: props.data.fill ?? 'var(--flow-green-dot)',
+    borderColor: props.data.fill ?? 'var(--flow-green-dot)',
     ...(props.data.textColor ? { color: props.data.textColor } : {}),
   }))
 </script>
@@ -38,7 +38,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid #22c55e;
+  /* 与 boxStyle 的默认底色同一个变量（原来两处都写死 22c55e，深色下不跟着变） */
+  border: 1.5px solid var(--flow-green-dot);
   border-radius: 18px;
   padding: 8px 18px;
   min-width: 110px;

@@ -46,6 +46,8 @@
           <!-- totalItems 是 PB 按当前筛选统计的总行数（**不是**当前页行数） -->
           <span class="text-[12px] text-medium-emphasis"> · 库中共 {{ totalItems }} 行</span>
           <span v-if="activeFilterCount" class="text-primary text-[12px]"> · 已启用 {{ activeFilterCount }} 项筛选</span>
+          <!-- 按钮为什么点不动要写出来：看不到原因只会以为页面坏了 -->
+          <span v-if="!canUpload" class="text-[12px] text-medium-emphasis"> · {{ NO_UPLOAD_TIP }}</span>
           <!-- 待上传文件：先告诉用户入库后是多少行，避免上传完以为丢了数据 -->
           <span v-if="pendingRows.length > 0" class="text-[12px] text-medium-emphasis">
             · 待上传 {{ pendingRows.length }} 行</span>
@@ -74,12 +76,15 @@
         </div>
 
         <div class="d-flex align-center ml-2">
+          <!-- 上传是管理员及以上的操作（见 utils/permissions 的 ACTION_ROLES）。
+               输入框也要禁用：只拦那个文字入口的话，键盘/程序化触发仍能选到文件 -->
           <v-file-input
             ref="fileInputRef"
             v-model="attachment"
             accept=".xlsx,.xls,.csv"
             class="attachment-input"
             density="compact"
+            :disabled="!canUpload"
             hide-input
             @update:model-value="onFileChange"
           >
@@ -98,8 +103,10 @@
 
           <span
             v-else
-            class="text-[12px] text-medium-emphasis cursor-pointer"
-            @click="fileInputRef?.click()"
+            class="text-[12px] text-medium-emphasis"
+            :class="canUpload ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
+            :title="canUpload ? undefined : NO_UPLOAD_TIP"
+            @click="openFilePicker"
           >上传附件</span>
 
           <v-btn
@@ -115,14 +122,90 @@
 
         <v-btn
           color="#0052D9"
-          :disabled="pendingRows.length === 0 || uploading"
+          :disabled="!canUpload || pendingRows.length === 0 || uploading"
           :loading="uploading"
           size="x-small"
-          title="把选中的文件写入数据库，并删除库里多出来的旧行"
+          :title="canUpload ? '把选中的文件写入数据库，并删除库里多出来的旧行' : NO_UPLOAD_TIP"
           variant="flat"
           @click="uploadDatas"
         >上传到数据库</v-btn>
+
+        <!--
+          清空数据：**只给超级管理员**看。
+          ⚠️ 这只是界面礼貌，不是权限 —— 真正的校验在服务端
+          （server/purgeData.ts 拿 token 去问 PocketBase 这个人的 role 是不是 superAdmin）；
+          而且这些集合在 PB 里的 deleteRule 是空的（只有 superuser 能删），前端本来也删不掉。
+        -->
+        <v-btn
+          v-if="canPurge"
+          class="ml-3"
+          color="error"
+          prepend-icon="mdi-database-remove-outline"
+          size="x-small"
+          variant="tonal"
+          @click="openPurgeDialog"
+        >清空 BI 数据</v-btn>
       </div>
+
+      <!-- 确认框：先把"要删多少、不动什么"摆出来，再要求手动输入才能执行 -->
+      <v-dialog v-model="purgeDialog" max-width="620" persistent>
+        <v-card>
+          <v-card-title class="text-error">清空 BI 数据（bi_rows）</v-card-title>
+
+          <v-card-text>
+            <p class="text-[13px] mb-2">
+              将<strong>永久删除</strong> BI 数据表（<code>bi_rows</code>）的全部记录。
+              它是 BI 同步进来的镜像，之后可以用「BI 同步」再拉回来；但同步之前的这段时间
+              <strong>页面上的数据是空的</strong>，建议先用「导出」留一份备份。
+            </p>
+
+            <v-table v-if="purgeSummary" class="purge-table" density="compact">
+              <thead>
+                <tr>
+                  <th>集合</th>
+                  <th class="text-right">现有条数</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="c in purgeSummary.collections" :key="c.name">
+                  <td>{{ c.name }}</td>
+                  <td class="text-right">{{ c.count }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+
+            <div v-else class="text-[12px] text-medium-emphasis">正在统计…</div>
+
+            <div v-if="purgeSummary" class="text-[12px] mt-2">
+              共 <strong>{{ purgeSummary.totalCount }}</strong> 条将被删除；
+              <strong>不会动</strong>：{{ purgeSummary.kept.join('、') }}（账号留着才登得进来）
+            </div>
+
+            <v-text-field
+              v-model="purgeConfirmText"
+              class="mt-3"
+              density="compact"
+              :disabled="purging"
+              hide-details
+              label="输入「清空」以确认"
+              variant="outlined"
+            />
+          </v-card-text>
+
+          <v-card-actions>
+            <v-spacer />
+            <v-btn :disabled="purging" variant="text" @click="purgeDialog = false">取消</v-btn>
+
+            <v-btn
+              color="error"
+              :disabled="purgeConfirmText !== '清空' || purging"
+              :loading="purging"
+              variant="flat"
+              @click="doPurge"
+            >确认清空</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
 
       <div>
         <v-icon-btn
@@ -269,10 +352,11 @@
 <script lang="ts" setup>
   import {
     biColumnOf, type BiRowQuery, fetchAllBiRows, fetchBiFacets, fetchBiRows,
-    uploadBiRows,
+    purgeBiData, type PurgeSummary, uploadBiRows,
   } from '@/api/api'
   import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
   import { useUserStore } from '@/stores/user'
+  import { canAct } from '@/utils/permissions'
   // 与服务端**同一个**唯一键实现，用来预告「这份文件入库后是多少行」
   import { makeSyncKey } from '@/utils/biRowFields'
   // Excel 解析放在独立模块里（纯函数，能被 tsx 直接跑单测），页面只负责接线
@@ -380,6 +464,89 @@
 
   const userStore = useUserStore()
 
+  /** 提示与按钮的 title 共用一份，免得"按钮说的"和"点了之后弹的"对不上 */
+  const NO_UPLOAD_TIP = '仅管理员可上传数据'
+
+  /**
+   * 能不能上传 BI 数据 —— **操作级**权限，与"能不能进本页面"无关
+   * （数据页三档都能进，但上传会按唯一键删旧行，是整库级写操作）。
+   * 判定表在 utils/permissions.ts，不要在这里写死角色比较：那样下一条规则又会是另一种写法。
+   */
+  const canUpload = computed(() => canAct(userStore.appRole, 'bi:upload'))
+
+  /* ==================== 清空数据（仅超级管理员） ==================== */
+
+  /**
+   * 能不能清空数据 —— 同样走权限判定表，不在这里写死角色比较
+   * （见 utils/permissions 的 ACTION_ROLES 说明：未知动作 fail-closed）。
+   *
+   * ⚠️ 这是**界面**权限：真正拦住人的是服务端 —— server/purgeData.ts 拿我们带过去的 token
+   * 去问 PocketBase 这是谁、role 是不是 superAdmin；而且这些集合在 PB 里的 deleteRule 是空的
+   * （只有 superuser 能删），前端哪怕绕过界面也删不掉。
+   */
+  const canPurge = computed(() => canAct(userStore.appRole, 'bi:purge'))
+
+  const purgeDialog = ref(false)
+  const purging = ref(false)
+  /** 必须手动输入这个字才能点确认 —— 不可恢复的操作，不给"手滑连点两下就没了"的机会 */
+  const purgeConfirmText = ref('')
+  const purgeSummary = ref<PurgeSummary | null>(null)
+
+  /** 打开确认框：先 dry-run 统计一次，把"将要删掉多少"摆出来再让人确认 */
+  async function openPurgeDialog () {
+    if (!canPurge.value) {
+      showMsg('只有超级管理员可以清空数据', 'warning')
+      return
+    }
+    purgeConfirmText.value = ''
+    purgeSummary.value = null
+    purgeDialog.value = true
+    try {
+      purgeSummary.value = await purgeBiData(true)
+    } catch (error) {
+      purgeDialog.value = false
+      showMsg(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  async function doPurge () {
+    // 双保险：按钮已经禁用/藏起来了，这里再拦一次（与 uploadDatas 同一套口径）
+    if (!canPurge.value) {
+      showMsg('只有超级管理员可以清空数据', 'warning')
+      return
+    }
+    if (purgeConfirmText.value !== '清空') {
+      return
+    }
+    purging.value = true
+    try {
+      const res = await purgeBiData(false)
+      purgeDialog.value = false
+      const touched = res.collections.filter(c => c.count > 0).length
+      showMsg(`已清空 ${touched} 个集合，共删除 ${res.totalDeleted} 条记录`, 'success')
+      // 清完把表格置空：否则页面上还列着已经不存在的行
+      rows.value = []
+      totalItems.value = 0
+    } catch (error) {
+      console.error('[setDatas] 清空失败:', error)
+      showMsg(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      purging.value = false
+    }
+  }
+
+  /**
+   * 打开文件选择器。
+   * 无权限时**不静默 return**：点了没反应会让人以为页面坏了，所以补一条提示。
+   */
+  function openFilePicker () {
+    if (!canUpload.value) {
+      showMsg(NO_UPLOAD_TIP, 'warning')
+      return
+    }
+    fileInputRef.value?.click()
+  }
+
   /** 字段清单里该列的默认显隐 */
   function defaultVisible (key: string): boolean {
     return PRODUCT_FIELDS.find(f => f.key === key)?.visualable ?? true
@@ -403,7 +570,7 @@
     loading.value = true
     try {
       const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
-      exportExcel(all.map(formatDatas), '导出数据')
+      await exportExcel(all.map(formatDatas), '导出数据')
     } catch (error) {
       console.error('[setDatas] 导出失败:', error)
       showMsg(`导出失败：${error instanceof Error ? error.message : String(error)}`, 'error')
@@ -978,12 +1145,14 @@
   }
   /** 上传结果反馈。用 snackbar 而不是顶部那条 fetchError 文案：后者是 text-error（红字），
    *  成功也显示成红的会被当成失败。 */
-  const snackbar = ref<{ show: boolean, text: string, color: 'success' | 'error' }>({
+  const snackbar = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
     show: false,
     text: '',
     color: 'success',
   })
-  function showMsg (text: string, color: 'success' | 'error' = 'success') {
+  // color 允许 warning：无权限、去重提示这类"不是失败但要让人注意"的情况要用它。
+  // 与 home.vue / mine.vue 的那份签名保持一致，免得同一类提示在三个页面显示成不同颜色。
+  function showMsg (text: string, color: 'success' | 'error' | 'warning' = 'success') {
     snackbar.value = { show: true, text, color }
   }
 
@@ -997,6 +1166,11 @@
    * 写完重新从 PB 读一次，表格立刻反映新数据。
    */
   async function uploadDatas () {
+    // 双保险：按钮已按权限禁用，这里再拦一次 —— 权限不能只靠"按钮点不到"来保证
+    if (!canUpload.value) {
+      showMsg(NO_UPLOAD_TIP, 'warning')
+      return
+    }
     const pending = pendingRows.value
     if (pending.length === 0) {
       showMsg('没有可上传的数据，请先选择 Excel 文件', 'error')
