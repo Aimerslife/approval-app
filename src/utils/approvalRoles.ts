@@ -174,6 +174,16 @@ export function flowHasRoles (flow: ApprovalFlow): boolean {
       }
       continue
     }
+    /*
+     * 「组间轮询」卡片：内部的动态负责人同样要算进来。
+     * 卡片内部的默认审批人就是 `loop_leader`（"本环的组负责人"），展开时才变成 `dept_leader`；
+     * 不在这里认出来，建单时就**不会去拉组织架构缓存**，展开出来的那一环解析不出人。
+     * （正常顺序是"先展开、再解析"，那时卡片已经不存在了；这里兜的是"拿未展开的 flow 判断"的场景。）
+     */
+    if (node.type === 'loop') {
+      walkSteps(node.steps)
+      continue
+    }
     for (const b of node.branches) {
       if (b.members?.some(m => m.role)) {
         found = true; break
@@ -257,6 +267,14 @@ export function resolveFlowRoles (
     // 提醒节点的提醒对象同样要解析（可能含动态负责人）；content 等字段由 ...node 原样带过
     if (node.type === 'notify') {
       return { ...node, members: membersOf(node.members) ?? [] }
+    }
+    /*
+     * 「组间轮询」卡片：内部子流程同样解析（步骤与嵌套分支里的成员都要填真人）。
+     * 正常路径下这一步不会遇到卡片 —— 建单期是"先展开、再解析"（展开后卡片已不存在）；
+     * 这里兜的是"拿未展开的 flow 直接解析"的场景，照 reason 报错比留一堆空名字好。
+     */
+    if (node.type === 'loop') {
+      return { ...node, steps: stepsOf(node.steps) ?? [] }
     }
     return {
       ...node,

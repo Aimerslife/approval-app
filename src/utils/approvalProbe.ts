@@ -69,6 +69,11 @@ export function collectProbes (flow: ApprovalFlow): Array<{ id: string, label: s
         }
         continue
       }
+      // 组间轮询步骤（卡片放在分支链里）：内部也可能有查询 —— 每环都要答案
+      if (s.type === 'loop') {
+        walkSteps(s.steps)
+        continue
+      }
       if (s.type === 'probe' && s.probe) {
         note(s.id, s.probe)
       }
@@ -79,6 +84,14 @@ export function collectProbes (flow: ApprovalFlow): Array<{ id: string, label: s
   for (const node of flow) {
     if (node.type === 'probe') {
       note(node.id, node.spec)
+      continue
+    }
+    /*
+     * 「组间轮询」卡片内部的查询也要收集：卡片会按组复制 N 份（见 utils/approvalRotation），
+     * 每份里的查询都得先有答案才能展开 —— 而且必须在**轮询展开之前**拿到（见 workStream 的顺序说明）。
+     */
+    if (node.type === 'loop') {
+      walkSteps(node.steps)
       continue
     }
     if (node.type === 'branch') {
@@ -145,6 +158,10 @@ export function expandProbes (
         // 展开不了就原样保留（issues 非空 → 该条建单失败）
         return hit ? { id: s.id, name: s.name, type: 'branch' as const, branches: hit } : s
       }
+      // 组间轮询步骤（卡片放在分支链里）：内部的查询同样先展开（见 collectProbes 的说明）
+      if (s.type === 'loop') {
+        return { ...s, steps: mapSteps(s.steps) }
+      }
       return { ...s, steps: mapSteps(s.steps) }
     })
 
@@ -157,6 +174,15 @@ export function expandProbes (
     }
     if (node.type === 'branch') {
       nodes.push({ ...node, branches: (node.branches ?? []).map(b => ({ ...b, steps: mapSteps(b.steps) })) })
+      continue
+    }
+    /*
+     * 「组间轮询」卡片：内部的查询步骤同样**先于**轮询展开（按答案只留命中那条分支）。
+     * 顺序不能颠倒：展开后再查的话，答案是"卡片的哪一环"就对不上了 ——
+     * 而且那时同一个查询会被复制成 N 份，每份都要答案。
+     */
+    if (node.type === 'loop') {
+      nodes.push({ ...node, steps: mapSteps(node.steps) })
       continue
     }
     nodes.push(node)

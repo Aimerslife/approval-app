@@ -73,7 +73,7 @@ export default defineConfig({
        *
        * 中途重新预构建会**批量作废已有的模块 URL**（旧的 /node_modules/.vite/deps/*.js?v=<hash>
        * 直接 404），表现就是用户看到的：
-       *   Failed to fetch dynamically imported module: http://localhost:3000/src/pages/xxx.vue?t=...
+       *   Failed to fetch dynamically imported module: http://localhost:3001/src/pages/xxx.vue?t=...
        * ——报错指的是那个页面 chunk，真正 404 的却是它内部引用的依赖。
        * 显式列进来，让它们和上面那批在同一批次里预构建，就不会中途重建了。
        */
@@ -82,7 +82,7 @@ export default defineConfig({
     ],
   },
   server: {
-    port: 3000,
+    port: 3001,
     watch: {
       ignored: [
         '**/auth-state.json',

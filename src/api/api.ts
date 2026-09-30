@@ -169,44 +169,6 @@ export async function fetchOrgTreeCache(): Promise<OrgTreeResponse> {
  * 从飞书重新拉取组织架构树并更新 PocketBase 缓存。
  * 仅点击"刷新组织架构"按钮时调用。
  */
-/**
- * 清空 BI 数据（`bi_rows`，**仅超级管理员**）。
- *
- * 只清这一张表 —— 它是 BI 同步进来的镜像，可以再 `POST /api/bi/sync` 拉回来；
- * 审批单/模板/账号不在清空范围内（见 server/purgeData.ts 的说明）。
- *
- * 权限由服务端判定：它拿我们带过去的 token 去问 PocketBase 这是谁、role 是不是 superAdmin。
- * 前端把按钮藏起来只是界面礼貌 —— 真正拦住人的是服务端那一步，别把这里当权限。
- *
- * @param dryRun true = 只统计条数不删（确认框用它先把"要删掉多少"摆出来）
- */
-export async function purgeBiData (dryRun = true): Promise<PurgeSummary> {
-  const token = pb.authStore.token
-  if (!token) {
-    throw new Error('未登录')
-  }
-  const res = await fetch(`/api/admin/purge${dryRun ? '?dryRun=1' : ''}`, {
-    method: 'POST',
-    headers: { Authorization: token },
-  })
-  const data = await res.json().catch(() => null)
-  if (!res.ok || data?.code !== 0) {
-    throw new Error(data?.msg || `清空失败：HTTP ${res.status}`)
-  }
-  return data.data as PurgeSummary
-}
-
-/** 清空结果（与 server/purgeData.ts 的 PurgeSummary 对应） */
-export interface PurgeSummary {
-  dryRun: boolean
-  by: { id: string, role: string, name?: string, email?: string }
-  collections: Array<{ name: string, count: number, deleted: number }>
-  /** 明确不动的集合（账号等），界面上要说明 */
-  kept: string[]
-  totalCount: number
-  totalDeleted: number
-}
-
 export async function refreshOrgTree(): Promise<OrgTreeResponse> {
   const res = await fetch('/api/org-tree/refresh', { method: 'POST' })
   const data = await res.json()
@@ -400,6 +362,47 @@ export async function uploadBiRows(
   return payload.data as BiUploadSummary
 }
 
+/* ==================== 清空 BI 数据（仅超级管理员） ==================== */
+
+/**
+ * 「清空 BI 数据」的返回体，形状与 server/purgeData.ts 的 PurgeSummary 一致。
+ *
+ * 只清 `bi_rows`（BI 同步进来的镜像，可随时再用「BI 同步」拉回来）；
+ * 审批单 / 模板 / 账号刻意**不动** —— 那些删了就真没了。
+ */
+export interface PurgeSummary {
+  dryRun: boolean
+  /** 谁执行的：服务端拿调用者的 token 问过 PocketBase，不采信前端传来的任何字段 */
+  by: { id: string, role: string, name?: string, email?: string }
+  /** 每个目标集合：现有条数 / 实际删除条数（dryRun 时 deleted 恒为 0） */
+  collections: Array<{ name: string, count: number, deleted: number }>
+  /** 明确**不会**碰的集合（界面上要写出来，让人放心点确认） */
+  kept: string[]
+  /** 将删除 / 已删除的总条数 */
+  totalCount: number
+  totalDeleted: number
+}
+
+/**
+ * 清空 BI 数据（`bi_rows`）。
+ *
+ * ⚠️ 走 **app server**（`/api/bi` 前缀由 vite 代理到它，与 uploadBiRows 同一条路），
+ *    并把**调用者自己的 PB token** 放进 Authorization：服务端据此向 PocketBase 核实
+ *    "这是谁、role 是不是 superAdmin"（前端说什么都不作数，见 server/purgeData.ts）。
+ *    `dryRun = true` 只统计条数，用于在确认框里先显示"将要删除多少"。
+ */
+export async function purgeBiData (dryRun = false): Promise<PurgeSummary> {
+  const res = await fetch(`/api/bi/purge${dryRun ? '?dryRun=1' : ''}`, {
+    method: 'POST',
+    headers: { Authorization: pb.authStore.token },
+  })
+  const payload = await res.json().catch(() => null)
+  if (!res.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.msg || `清空失败：HTTP ${res.status}`)
+  }
+  return payload.data as PurgeSummary
+}
+
 /* ==================== 从 bi_rows 读数据 ==================== */
 
 // 纯逻辑（列名翻译 / 转义 / filter 拼装）已移到 @/utils/biQuery，这里只做 I/O。
@@ -537,8 +540,7 @@ export interface YiyanData {
  */
 export async function getWord(): Promise<YiyanData | undefined> {
   try {
-    const res = await fetch('/api/word', { method: 'GET' })
-    console.log(res)
+    const res = await fetch('/api/word', { method: 'POST' })
     return await res.json()
   } catch (e) {
     console.log(e)

@@ -124,13 +124,6 @@ import { createApprocalModel, getApprovalFirstByFilter, getOrdersByRow, getOrder
 import { toFlowContext } from '@/utils/approvalFlow'
 // 动态审批人（角色）：模板里配「部门负责人」，建单时按组织架构解析成真人（见 utils/approvalRoles）
 import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
-// 「按组轮询」：建单期按数据展开成 N 个顺序环节（依次流转给各组负责人）
-import { expandRotations, flowHasRotation } from '@/utils/approvalRotation'
-import { resolveAllRotationGroups } from '@/utils/rotationData'
-// 「数据查询」节点：建单期查一次 PB 集合，只保留命中的那条分支
-// （纯逻辑在 utils/approvalProbe，打库在 utils/probeQuery）
-import { expandProbes, flowHasProbe } from '@/utils/approvalProbe'
-import { resolveProbes } from '@/utils/probeQuery'
 import { fetchOrgTreeCache, type OrgTreeData } from '@/api/api'
 import { APPROVAL_STATUS, flowToChain, type ApprovalFlow, type ApprovalOrder } from '@/types/approval'
 
@@ -214,7 +207,7 @@ async function exportToExcel() {
   loading.value = true
   try {
     const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
-    await exportExcel(all.map(formatDatas), '导出数据')
+    exportExcel(all.map(formatDatas), '导出数据')
   } catch (e) {
     console.error('[setDatas] 导出失败:', e)
     showMsg(`导出失败：${e instanceof Error ? e.message : String(e)}`, 'error')
@@ -416,18 +409,6 @@ function setFullScreen() {
 
 /** 表格高度：全屏时顶部系统栏（.app-titlebar 的 36px）不再占位，可用高度多 36px */
 const tableHeight = computed(() => (fullSceen.value ? 'calc(100vh - 162px)' : 'calc(100vh - 198px)'))
-
-
-/* ==================== 任务状态列（右侧固定） ==================== */
-
-/**
- * 「任务状态」列的 key。
- *
- * ⚠️ 它不是 bi_rows 的字段，而是**按行关联 approval_chain** 算出来的，所以：
- *   - 不进「列设置」面板（那个面板由 PRODUCT_FIELDS 驱动，天然不含它）；
- *   - 永远显示、固定在右侧（见下面 headers 里的 fixed: 'end'）。
- *   模板里的插槽名必须与它一致：v-slot:item.__task_status__
- */
 const TASK_STATUS_KEY = '__task_status__'
 
 interface TaskView {
@@ -464,25 +445,11 @@ function taskChip(rowId: unknown) {
     return { color, variant, title }
 }
 
-/**
- * 该行当前的单：**进行中优先**，否则取最新的一张。
- * 一行可能有多张单（办完一张又开一张、驳回后重开），列表上要显示的是"当前"那张。
- * （getOrdersByRows 已按 -created 排序，所以 [0] 就是最新的一张。）
- */
+
 function currentOrderOf(list: ApprovalOrder[]): ApprovalOrder | undefined {
     return list.find(o => o.status === APPROVAL_STATUS.PENDING) ?? list[0]
 }
 
-/**
- * 拉当前页每行的任务状态。
- *
- * 关联口径与建单时完全一致：`relation`（记录 id）**或** `sync_key`（业务键）——
- * 业务键用**同一个** makeSyncKey 现算，而不是读行上的 sync_key
- * （fetchBiRows 只取 id,data，行对象里根本没有这个字段）。
- * 整页一次批量查（见 getOrdersByRows），不做逐行请求。
- *
- * 读失败就整列回落成「未开启任务」：这是只读的状态展示，一次读失败不该让表格报错。
- */
 async function loadTaskStatus(list: Record<string, unknown>[]) {
     const keys = list.map(row => ({ id: String(row.id ?? ''), syncKey: makeSyncKey(row) }))
     try {
@@ -549,14 +516,6 @@ const headers = computed(() => [
 
 let resizing: { key: string; startX: number; startWidth: number } | null = null
 
-/**
- * 表头里排在 headers **之前**的列数。
- *
- * ⚠️ `show-select` 会往表头最前面插一个多选框 th（展开列同理）。
- *   开了它之后，"th 在表头行里的序号"就比 headers 的下标多 1 ——
- *   不减这个偏移，拖 A 列的边框会改到 B 列的宽度，看起来像"拖错了列"。
- *   改表格的 show-select / 展开列时，这里的数字必须跟着改。
- */
 const LEADING_COLUMNS = 1
 
 function resizeTargetOf(e: { target: EventTarget | null; offsetX: number }) {
@@ -844,7 +803,7 @@ function showMsg(text: string, color: 'success' | 'warning' | 'error' = 'success
 }
 /* ==================== 开启任务（对当前页第一条数据建审批单） ==================== */
 
-const TASK_TEMPLATE_NAME = '测试模板'
+const TASK_TEMPLATE_NAME = '美2组-前置审批'
 
 
 const PB_RECORD_ID_RE = /^[a-z0-9]{15}$/
@@ -968,42 +927,8 @@ async function createTaskForRow(
          */
         const templateFlow = payload.flow as ApprovalFlow | undefined
         let flow = templateFlow
-        /*
-         * 「按组轮询」必须在**建单期**展开（见 utils/approvalRotation 的说明）：
-         * 依据条件筛出几个组、按销量排好序，把那一环换成 N 个普通审批环节。
-         *
-         * 顺序不能颠倒：展开出来的成员是 `role.dept = 组名`，要靠下一步的角色解析填真人；
-         * 先解析再展开的话，被替换掉的那一环解析的是"数据行里那个组"，白解析一次。
-         */
-        /*
-         * 「数据查询」节点必须**先于轮询**展开：它只保留命中的那条分支，
-         * 没走的那条分支里配的轮询就不该再去查 —— 否则白查一次库，
-         * 而且那次查询失败会把这条本来正常的建单判成失败。
-         */
-        if (flow && flowHasProbe(flow)) {
-            const answers = await resolveProbes(flow, context)
-            const probed = expandProbes(flow, answers)
-            if (probed.issues.length) {
-                return { kind: 'failed', label, detail: probed.issues.join('；') }
-            }
-            flow = probed.flow
-        }
-        /*
-         * ⚠️ 这里必须用 `flow`（已经过 probe 展开的那个），**不能**用 `templateFlow`：
-         *   · 用 templateFlow 会把上一步的 probe 展开结果整个覆盖掉（分支选路白算了）；
-         *   · 而且被丢弃那条分支里的轮询也会被查一遍 —— 白查库，失败还会拖垮这条建单。
-         */
-        if (flow && flowHasRotation(flow)) {
-            const groups = await resolveAllRotationGroups(flow, context)
-            const expanded = expandRotations(flow, groups)
-            if (expanded.issues.length) {
-                return { kind: 'failed', label, detail: expanded.issues.join('；') }
-            }
-            flow = expanded.flow
-        }
-        // 注意用展开后的 flow 判断/解析（轮询展开出来的成员也是"动态负责人"）
-        if (flow && flowHasRoles(flow)) {
-            const resolved = resolveFlowRoles(flow, await orgTree(), context)
+        if (templateFlow && flowHasRoles(templateFlow)) {
+            const resolved = resolveFlowRoles(templateFlow, await orgTree(), context)
             if (resolved.unresolved.length) {
                 const why = resolved.unresolved.map(u => `${u.where}：${u.reason}`).join('；')
                 return { kind: 'failed', label, detail: `动态审批人没解析出来 —— ${why}` }

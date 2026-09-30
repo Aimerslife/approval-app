@@ -11,10 +11,8 @@ import {
   PICK_MEMBERS_RESULT,
   rebuildChain,
 } from '@/types/approval'
-import { usePendingStore } from '@/stores/pending'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 import { updateApprovalOrder, uploadApprovalFile } from '@/utils/collection'
-import { sendArrivedNotifies } from '@/utils/notifySteps'
 
 /**
  * 审批环节「提交办理」的**唯一实现**：
@@ -39,9 +37,6 @@ export function useNodeSubmit (options: {
 }) {
   /** 提交中：防止连点造成两条流水 */
   const submitting = ref(false)
-
-  /** 侧边栏的「未审批单数」角标（见 stores/pending.ts）—— 提交会改 status，角标要跟着变 */
-  const pending = usePendingStore()
 
   /**
      * 最近一次写入成功的记录。
@@ -99,9 +94,7 @@ export function useNodeSubmit (options: {
     // ⚠️ 业务上下文必须与展示侧**完全一致**：分支条件会按它选路，
     //    上下文不同 → 算出的 stepIds 不同 → 结论记到别的环节上
     const context = flowContextOfOrder(order)
-    // 推进**前**的链路：既用来定位本次要办的环节，也用来差分出"这一轮刚到达的提醒环"
-    const before = rebuildChain(flow, snapshot?.decisions ?? [], terminalMap, context)
-    const stepId = before.stepIds[payload.index]
+    const stepId = rebuildChain(flow, snapshot?.decisions ?? [], terminalMap, context).stepIds[payload.index]
     if (!stepId) {
       options.onMessage?.('环节不存在，提交失败', 'error')
       payload.done(false)
@@ -164,48 +157,7 @@ export function useNodeSubmit (options: {
       // 记下最新版本，供下一次提交的「读-改-写」使用（见 latest 的说明）
       latest = { ...order, ...updated }
       options.onUpdated?.(updated)
-
-      /*
-       * 角标跟着变。放在这里是刻意的：**本函数是唯一会改 status 的入口**
-       * （页面各自实现迟早有一条路径漏掉，而漏掉的表现是角标一直不动 —— 静默失效）。
-       *
-       * 不 await、不 await 到通知之后：发飞书消息可能要几秒，
-       * 角标没必要等它；也不放在最前面 —— 得等 status 真的写进库再数，
-       * 否则会数到写库前的旧值。
-       */
-      void pending.refresh()
-
-      /*
-       * 6. 「飞书提醒」环：把这一轮**刚到达**的通知环节各发一条飞书消息。
-       *
-       * 必须放在写库**之后**：审批已经落库，发消息失败绝不能把审批回滚 ——
-       * 回滚会让用户以为没提交成功，于是再提交一遍，反而造成重复办理。
-       * 所以这里只提示失败，不 throw（见 utils/notifySteps 的口径说明）。
-       */
-      const notify = await sendArrivedNotifies({
-        flow,
-        /*
-         * "推进前"必须用**重算结果**，不能图省事取空集。
-         *
-         * 流程开头就是提醒环的那种模板，已经在**建单那一刻**发过了
-         * （见 utils/collection.ts 里 createApprocalModel 的 notifyOnCreate）；
-         * 这里若取空集会把同一批环再发一遍 → 每次建单都重复通知一次。
-         * 用差分则天然不会重复：已经在链上的环不进"刚到达"集合。
-         */
-        before: before.stepIds,
-        after: rebuilt.stepIds,
-        orderNo: order.order_no,
-        context,
-      }).catch(error => {
-        console.warn('[useNodeSubmit] 发送飞书提醒时出错:', error)
-        return null
-      })
-
-      if (notify?.failed.length) {
-        options.onMessage?.(`审批已保存，但提醒发送失败：${notify.failed.join('；')}`, 'warning')
-      } else {
-        options.onMessage?.('审批信息已保存', 'success')
-      }
+      options.onMessage?.('审批信息已保存', 'success')
       payload.done(true)
       return updated
     } catch (error) {

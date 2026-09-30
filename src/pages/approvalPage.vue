@@ -34,6 +34,7 @@
             <ApprovalNode
               v-for="(item, index) in runtime.chain"
               :key="index"
+              :allowed-options="stepOptionItems[runtime.stepIds[index]]"
               :allowed-results="stepResultOptions[runtime.stepIds[index]]"
               :data="item"
               :index="index"
@@ -129,6 +130,7 @@
   import {
     APPROVAL_STATUS,
     buildBranchTerminalMap,
+    collectStepOptionItems,
     collectStepResultOptions,
     mergeExtraMembers,
     rebuildChain,
@@ -242,6 +244,12 @@
   const stepResultOptions = computed(() => {
     const flow = orderDatas.value?.chain?.flow
     return flow?.length ? collectStepResultOptions(flow) : {}
+  })
+
+  /** 各环节的**选项数组**：模板里在审批节点上配的 options，办理下拉框直接用它渲染 */
+  const stepOptionItems = computed(() => {
+    const flow = orderDatas.value?.chain?.flow
+    return flow?.length ? collectStepOptionItems(flow) : {}
   })
 
   /**
@@ -378,7 +386,20 @@
   })
 
   async function onNodeSubmit (payload: NodeSubmitPayload) {
-    await submitNode(payload)
+    const updated = await submitNode(payload)
+    /*
+     * 落库成功后，再按单号向服务端读一次这张单。
+     *
+     * 为什么值得多这一次请求：时间线上的环节是「flow + decisions **现算**」出来的，
+     * 提交后本地这份单据必须**确实**带上刚写进去的那条流水，新环节才会出现 ——
+     * 否则现象就是「点了通过，时间线没多出节点，刷新页面才看到」。
+     * onUpdated 已经把更新响应合回来了，但那依赖"响应里带着完整 chain"这个前提；
+     * 这里直接以**服务端记录**为准，把这类"看起来没生效"的问题一次性消掉
+     * （审批单量很小，多一次读的成本可以忽略）。
+     */
+    if (updated) {
+      await getDatas()
+    }
   }
 
   onMounted(() => {

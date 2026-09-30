@@ -24,9 +24,21 @@ let loading: Promise<void> | null = null
 export function ensurePinyin (): Promise<void> {
   loading ??= import('pinyin')
     .then(mod => {
-      // 包的入口同时有 default 与具名导出，取可直接调用的那个
-      // （与原先 utils.ts 里的取法一致：常量挂在默认导出的函数对象上）
-      const fn = ((mod as { default?: unknown }).default ?? mod) as PinyinFn
+      /*
+       * 取"**真正可调用的那个**"。
+       *
+       * ⚠️ 不能只写 `mod.default ?? mod`：这个包在不同打包产物下形状不一样
+       *    （CJS 互操作时 `default` 可能不存在，函数也可能挂在具名导出上），
+       *    取错的后果不是"没拼音"，而是 `pinyinFn is not a function` ——
+       *    在 watch 里抛错、头像那两个字母变空，光看代码完全看不出来（实测踩过）。
+       *    按"找第一个函数"取，打包形状变了也不会坏。
+       */
+      const m = mod as unknown as Record<string, unknown>
+      const fn = [m.default, m.pinyin, m].find(x => typeof x === 'function') as PinyinFn | undefined
+      if (!fn) {
+        console.warn('[pinyin] 没找到可调用的导出，姓名将只显示首字')
+        return
+      }
       pinyinFn = fn
       firstLetterStyle = fn.STYLE_FIRST_LETTER ?? firstLetterStyle
     })
@@ -53,5 +65,16 @@ export function pinyinInitials (name?: string | null, separator = ''): string {
   if (!pinyinFn) {
     return n.slice(0, 1)
   }
-  return pinyinFn(n, { style: firstLetterStyle }).flat().slice(0, 2).join(separator)
+  try {
+    return pinyinFn(n, { style: firstLetterStyle }).flat().slice(0, 2).join(separator)
+  } catch (error) {
+    /*
+     * 词典形状不对 / 某个字查不到：退回首字，**绝不把异常抛给调用方** ——
+     * 这个函数只用来渲染头像上的两个字母，为它让整条时间线报错不值得。
+     * 同时把 pinyinFn 置空，后续调用直接走首字兜底，不会每次都抛。
+     */
+    console.warn('[pinyin] 取首字母失败，退回姓名首字:', error)
+    pinyinFn = null
+    return n.slice(0, 1)
+  }
 }

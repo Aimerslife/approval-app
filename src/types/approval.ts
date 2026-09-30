@@ -71,6 +71,15 @@ export interface ApprovalChainItem {
    * 按销量顺序依次流转），而不是由一个人办 —— 见 RotationSpec 的说明。
    * 展开后每环的成员是 `role: { kind: 'dept_leader', dept: 组名 }`，
    * 也就是**复用现有角色解析**（含"该组没设负责人就往上级找"那套口径）。
+   *
+   * ⚠️ **已废弃（2026-09）**：组间流转改用画布上的「组间轮询」卡片
+   *    （`ApprovalFlowLoopNode` —— 卡片内部能放条件分支与审批节点，**每个组各走一遍**）。
+   *    编辑器里的入口已移除（见 components/flow/ApprovalNode.vue），新模板不会再产生这个字段。
+   *
+   *    但**类型与运行时展开（utils/approvalRotation 的 splitMembers）都保留**：
+   *    旧模板、在途单还有数据带这个字段，删掉会让它们**静默地不再按组流转**
+   *    （表面上"办完了"，实际漏掉几个组）—— 那种失败最难发现。
+   *    真要下线，得先把旧模板迁移成卡片（迁移脚本另说）。
    */
   rotation?: RotationSpec
 
@@ -101,8 +110,17 @@ export interface ApprovalChainItem {
  * 历史单不能因为后来的人事变动而被改写。
  */
 export interface ApprovalRole {
-  /** 解析方式：部门负责人 / 组织管理员 */
-  kind: 'dept_leader' | 'tenant_admin'
+  /**
+   * 解析方式：部门负责人 / 组织管理员 / **本环轮询到的组的负责人**。
+   *
+   * `loop_leader` 只在**「组间轮询」卡片内部**有意义：建单期展开时，卡片内部子流程会
+   * 按组复制 N 份，每一份里的 `loop_leader` 都被填成**那一环的组名**（`role.dept = 组名`），
+   * 再交给同一个角色解析器找真人（见 utils/approvalRotation 的 stampRing）。
+   *
+   * 所以它**不是**运行期概念：展开之后流程里不会再出现它。万一出现了（卡片没展开就进引擎），
+   * 角色解析会明确报"没指定部门"，而不是悄悄变成一个没人办的环节。
+   */
+  kind: 'dept_leader' | 'tenant_admin' | 'loop_leader'
   /** 固定部门名（与 deptFrom 二选一；两个都填时 dept 优先） */
   dept?: string
   /** 部门名取自**数据行字段**（中文列名，如「组别」「团队」）——
@@ -172,9 +190,16 @@ export interface RotationSpec {
   whenEmpty?: 'skip' | 'fail'
 }
 
+/** 角色种类的可读名（用查表而不是嵌套三元：种类以后还会加） */
+const ROLE_KIND_LABEL: Record<ApprovalRole['kind'], string> = {
+  tenant_admin: '组织管理员',
+  loop_leader: '本环的组负责人',
+  dept_leader: '部门负责人',
+}
+
 /** 角色的可读描述（模板里没解析时，卡片上显示它；建单失败时的报错也用它） */
 export function roleLabel (role: ApprovalRole): string {
-  const kind = role.kind === 'tenant_admin' ? '组织管理员' : '部门负责人'
+  const kind = ROLE_KIND_LABEL[role.kind] ?? '部门负责人'
   const dept = role.dept ? `（${role.dept}）` : (role.deptFrom ? `（取数据行「${role.deptFrom}」）` : '')
   return `${kind}${dept}`
 }
@@ -271,8 +296,17 @@ export interface ApprovalFlowStep {
   id: string
   /** 步骤名（可选），如「初审」「复核」；notify 步骤里它是提醒名称 */
   name?: string
-  /** 步骤形态：缺省 'approval'（兼容旧数据）；'branch' = 嵌套分支组；'notify' = 飞书提醒；'probe' = 数据查询 */
-  type?: 'approval' | 'branch' | 'notify' | 'probe'
+  /**
+   * 步骤形态：缺省 'approval'（兼容旧数据）；'branch' = 嵌套分支组；'notify' = 飞书提醒；
+   * 'probe' = 数据查询；**'loop' = 组间轮询卡片**（按组各走一遍内部子流程，见 ApprovalFlowLoopNode）。
+   *
+   * 为什么卡片既要是"节点"又要是"步骤"：它在画布上是**一个节点**，但可以摆在两个位置 ——
+   * 主流程上（= 顶层节点）或某条分支的链上（= 分支里的步骤）。
+   * 后者就是需求里的「先按条件分流、只有某条分支里才轮询各组」。
+   * 运行时两者走**同一套**建单期展开（见 utils/approvalRotation），只是产物形态不同：
+   * 顶层展开成节点、分支里展开成步骤。
+   */
+  type?: 'approval' | 'branch' | 'notify' | 'probe' | 'loop'
   /** 该步骤的审批人（多人即会签）；type='branch' 的分支组步骤可留空；
    *  type='notify' 时它是**提醒对象**（同样支持 role 动态负责人） */
   members?: ApprovalChainItem[]
@@ -280,10 +314,23 @@ export interface ApprovalFlowStep {
   content?: string
   /** type='probe' 的查询配置（建单期求值，与顶层数据查询节点同一套） */
   probe?: ProbeSpec
+  /**
+   * type='loop'（组间轮询卡片）的轮询配置：按哪些组、什么顺序。
+   * 与顶层卡片、成员级轮询共用同一个 RotationSpec（建单期取数见 utils/rotationData）。
+   */
+  rotation?: RotationSpec
   /** type='branch' / type='probe' 时的分支列表（各组内仍可继续递归出现分支步骤） */
   branches?: ApprovalBranch[]
-  /** 兼容旧结构的线性子步骤（无新生产方；flowToChain 仍会递归拍平） */
+  /**
+   * type='loop' 时是**卡片内部的子流程**（每个组各走一遍）；
+   * 另外还兼容旧结构的线性子步骤（无新生产方；flowToChain 仍会递归拍平）。
+   */
   steps?: ApprovalFlowStep[]
+  /**
+   * 审批步骤（type 缺省 / 'approval'）的**环节级办理选项树** ——
+   * 与 ApprovalFlowApprovalNode.optionGroups 同一件事，只是这个环节挂在分支里（画布上审批节点画在分支内）。
+   */
+  optionGroups?: ApprovalOptionGroup[]
 }
 
 /** 分支命中条件：字段 + 操作符 + 值；branch.condition 为空表示兜底（默认）分支 */
@@ -437,17 +484,168 @@ export interface ApprovalBranch {
   conditions?: ConditionExpr[]
   /** 顶级分支直属审批人（可选，顺序排在 steps 之前） */
   members?: ApprovalChainItem[]
+  /**
+   * 该分支的**选项文本**（结果分支专用，可选，见 ApprovalNodeOption）：
+   * 办理下拉里按这些文本逐条渲染；**选哪个都提交本分支绑定的那个审批结论**。
+   * 空 / 未配 = 下拉里退回用分支名当一个选项（旧口径）。
+   */
+  options?: string[]
+  /**
+   * 该分支的**选项树**（结果分支专用，可选，见 ApprovalOptionGroup）：
+   * 配了它就以它为准 —— 办理时按「类别 → 一级 → 二级」分类展示，
+   * 且每个一级选项的 `link` 决定**实际走哪条线**（与类别归类解耦）。
+   * 与 `options` 同时存在时**以选项树为准**。
+   *
+   * ⚠️ 这是**老口径**（树挂在连线上）。现在配置是**环节级**的（`ApprovalNodeData.optionGroups`），
+   * 编译时写到 `ApprovalFlowApprovalNode.optionGroups` / `ApprovalFlowStep.optionGroups`；
+   * 两者同时存在时**以环节级为准**（见 collectStepOptionItems 的 optionsOfApproval）。
+   * 保留本字段只为兼容已保存的流程。
+   */
+  optionGroups?: ApprovalOptionGroup[]
   /** 顺序步骤：分支自己的审批环节链；允许出现 type='branch' 的嵌套分支组步骤（递归），
          也允许普通审批步骤带旧式线性 steps（兼容旧数据） */
   steps: ApprovalFlowStep[]
   /** 驳回/打回回到指定步骤：分支不再向后推进，而是把整条审批流回退到目标步骤（按步骤 id 引用）。
      *  steps 可为空（也可附带返回前的处理步骤，如通知）。该分支不会进入主干主链/主干汇聚。 */
   loopBackTo?: { stepId: string }
+  /**
+   * 跳出循环：命中本分支时不再顺序推进，而是**跳到目标环节、从它本身开始办**。
+   *
+   * 与 loopBackTo 的区别只在一处：loopBackTo 从目标的**下一环**续走（目标是"重新办理"），
+   * exitTo 从目标**本身**开始（目标还没办过，要办它），中间的环节全部跳过。
+   *
+   * 典型用途：「组内循环」里某个结论命中即**提前退出轮询**，直接进后续环节 ——
+   * 而画布是树结构（同一节点被重复经过就报错），"分支汇回主干"画不出来，
+   * 所以用这个字段表达"跳过去"，而不是在画布上连一条合并线。
+   *
+   * ⚠️ 目标必须是循环**之后**的环节，否则语义退化成 loopBackTo（回退重办）。
+   * 同样不进入主干主链 / 主干汇聚（与 loopBackTo 一致）。
+   */
+  exitTo?: { stepId: string }
   /** 是否为「出口」：该分支的连线直达结束节点，命中即整条流程终止。
      *  由 graphToFlowFrom 在转换时写入 —— 它算过分支终点，不必等运行时回查画布。
      *  为什么需要：分支汇到后续节点时 steps 同样为空，光看 steps 分不清「终止」和「继续」。
      *  旧数据没有该字段时，运行时退化为查画布快照（buildBranchTerminalMap）。 */
   isEnd?: boolean
+}
+
+/**
+ * 办理下拉里的一个**选项** —— 由该环节的「审批结果分支配置」推导（见 collectStepOptionItems）。
+ *
+ * 三级配置口径（从新到旧）：
+ *   · **环节级选项树**（`node.data.optionGroups`，见 ApprovalOptionGroup）→
+ *     整个环节只有一项，本类型的 `nodeLevel = true`：办理时**不再显示"选择处理方式"**，
+ *     直接把树展开成「类别 → 一级 → 二级」，每个一级自带的「实际链路」决定走哪条线；
+ *   · 线级**选项树**（`edge.data.optionGroups`，老口径，仍兼容）→
+ *     办理时按「类别 → 一级 → 二级」分类展示，**每个一级选项自带「实际链路」** ——
+ *     提交时用的是这个链路码，所以**显示归类与实际走哪条线是解耦的**；
+ *   · 什么都不配 → 下拉里就是分支名（`edge.data.options` 的选项文本同理，都是老口径）。
+ *
+ * `result` 是运行时匹配连线用的结论码；`text` 只给人看（提交时随 result_label 落到单据上）。
+ */
+export interface ApprovalNodeOption {
+  /** 显示文字 = 线上配的选项文本（没配则取分支名）；环节级选项树时用不上（没有"处理方式"这一层） */
+  text: string
+  /** 提交时用的结论码（决定走哪条线）：配了选项树取一级的 link，否则取本分支绑定的结论码 */
+  result: string
+  /** 该选项的**分类选项树**（配了才在办理时展开成「类别 → 一级 → 二级」） */
+  groups?: ApprovalOptionGroup[]
+  /**
+   * 这一项来自**环节级选项树**（整个环节共用一棵树，见 ApprovalNodeData.optionGroups）。
+   *
+   * 办理时与线级树有两处不同（因为"结论"已由树里的一级决定，不再有"处理方式"这一层）：
+   *   1. 不显示「选择处理方式」控件，直接呈现选项树；
+   *   2. 表单按**所选一级的「实际链路」**展开（如选中链路是「回收」才要填数量/金额）。
+   */
+  nodeLevel?: boolean
+  /**
+   * 本环节有「驳回 → 回退上一环」这个出口（保存期 `ensureRejectLoopBack` 给每个
+   * **有上一环**的环节都注入了一条绑 `reject` 的分支）。
+   *
+   * 为什么单独给这个标记：环节级树下"选什么"全部来自模板的那棵树，而那条驳回分支
+   * **不在树里**（它是流程自带的兜底出口）—— 老口径下它作为一条普通分支出现在下拉里，
+   * 换成环节级树后就没了路，所以办理端要据此在选项**末尾补一个「驳回」**。
+   * 首环节没有上一环 → 没有这条分支 → 不补（不然点了驳回无处可退）。
+   */
+  canReject?: boolean
+}
+
+/** 办理选项树里的一个**一级选项** */
+export interface ApprovalOptionLeaf {
+  /** 显示文案 */
+  text: string
+  /**
+   * **实际链路**：本节点**哪条出线**（= 那条线绑定的审批结论码）。
+   * 它才是提交时真正用的结果码 —— 与上面的类别归类**无关**
+   * （例如：类别「开发类」下的「产品质量问题」可以指向"产品质量"那条线，
+   *  而其余原因都指向另一条线）。
+   */
+  link: string
+  /** 二级选项（只细分展示，**实际链路跟随本一级**） */
+  children?: string[]
+}
+
+/** 办理选项树里的一个**类别**：标题就是办理时的分组标题（如「外部环境」） */
+export interface ApprovalOptionGroup {
+  title: string
+  items: ApprovalOptionLeaf[]
+}
+
+/**
+ * 把线上配的**选项树**规范化：
+ * 类别标题 / 一级文案 trim 后非空才保留；`link` 非空才保留（没有链路就无法决定走向）；
+ * 二级文案走 normalizeOptionTexts 的去空去重。返回空数组 = 这条线没配选项树。
+ */
+export function normalizeOptionGroups (raw: unknown): ApprovalOptionGroup[] {
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  const out: ApprovalOptionGroup[] = []
+  for (const g of raw as Array<Partial<ApprovalOptionGroup>>) {
+    const title = String(g?.title ?? '').trim()
+    const items: ApprovalOptionLeaf[] = []
+    for (const it of Array.isArray(g?.items) ? g.items : []) {
+      const text = String((it as Partial<ApprovalOptionLeaf>)?.text ?? '').trim()
+      const link = String((it as Partial<ApprovalOptionLeaf>)?.link ?? '').trim()
+      if (!text || !link) {
+        continue
+      }
+      const children = normalizeOptionTexts((it as Partial<ApprovalOptionLeaf>)?.children)
+      items.push({ text, link, ...(children.length > 0 ? { children } : {}) })
+    }
+    if (items.length > 0) {
+      out.push({ title, items })
+    }
+  }
+  return out
+}
+
+/**
+ * 把线上配的「选项文本」规范化：数组或分隔字符串都收，去空白项、去重（保序）。
+ * 返回空数组 = 这条线没配选项（下拉里退回用分支名）。
+ *
+ * 分隔符支持：`,` `，` `、` 与换行 —— 所以**选项文本里不要再写这些符号**（写进去会被切开）。
+ */
+export function normalizeOptionTexts (raw: unknown): string[] {
+  const list = Array.isArray(raw)
+    ? raw.map(x => String(x ?? ''))
+    : (typeof raw === 'string' ? raw.split(/[,，、\n]/) : [])
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of list) {
+    const t = item.trim()
+    if (!t || seen.has(t)) {
+      continue
+    }
+    seen.add(t)
+    out.push(t)
+  }
+  return out
+}
+
+/** 把选项文本数组合成一行可编辑文本（编辑器输入框回显用，与上面的分隔符口径一致） */
+export function optionTextsToText (list?: string[]): string {
+  return (list ?? []).join('，')
 }
 
 /** 流程节点：普通审批环节 */
@@ -456,6 +654,12 @@ export interface ApprovalFlowApprovalNode {
   type: 'approval'
   /** 该环节的审批人，多人时为会签 */
   nodes: ApprovalChainItem[]
+  /**
+   * 本环节**共用的办理选项树**（画布上配在审批节点上，见 ApprovalNodeData.optionGroups）。
+   * 配了它：办理时整个环节就呈现这一棵树（不再先选"处理方式"），每个一级的「实际链路」决定走哪条线。
+   * 线级的 `ApprovalBranch.optionGroups` 是老口径，两者同时存在时**以本字段为准**。
+   */
+  optionGroups?: ApprovalOptionGroup[]
 }
 
 /** 流程节点：分支组 */
@@ -533,7 +737,34 @@ export interface ApprovalFlowProbeNode {
   branches: ApprovalBranch[]
 }
 
-export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode
+/**
+ * 流程节点：「组间轮询」卡片 —— **一段"每个组各走一遍"的子流程**。
+ *
+ * 与「成员级轮询」（`ApprovalChainItem.rotation`）的分工：
+ *   · 成员级轮询：只把**一个环节**的审批人换成各组负责人，那一环**没有子流程**；
+ *   · 卡片：卡片内部可以放**审批节点 / 条件分支 / 提醒**，按组各走一遍 ——
+ *     于是"每个组各自的流程"（如 A 组走财务、B 组走仓库）才表达得出来。
+ *     ⚠️ 成员级轮询做不到这一点：它后面那条下游分支，运行时在**所有环办完之后**只判一次
+ *     （实测确认），拿不到"这一环是哪个组"。
+ *
+ * 怎么进流程：仍然是**建单期展开**（见 utils/approvalRotation 的 stampRing）——
+ * 对每个组复制一份卡片内部子流程，id 加 `#环号`、`loop_leader` 填成该组组名。
+ * 展开产物是**普通节点 / 普通步骤**，所以 `rebuildChain` / 时间线 / 催办 / 驳回重审全都不用改。
+ *
+ * 卡片内部环节的默认审批人是**本环的组负责人**（`role.kind = 'loop_leader'`），可改成固定人或其它角色。
+ */
+export interface ApprovalFlowLoopNode {
+  id: string
+  type: 'loop'
+  /** 卡片名（时间线与报错里显示，如「各组自审」） */
+  name?: string
+  /** 轮询配置：按哪些组、按什么排序（与成员级轮询共用同一个 RotationSpec） */
+  rotation: RotationSpec
+  /** 卡片内部的子流程：每个组各走一遍（审批 / 分支 / 提醒；数据查询在建单期更早展开） */
+  steps: ApprovalFlowStep[]
+}
+
+export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode
 
 /** 完整审批流：顺序节点，支持分支 */
 export type ApprovalFlow = ApprovalFlowNode[]
@@ -543,6 +774,27 @@ export interface ProbeNodeData {
   /** 环节名（时间线上显示） */
   title: string
   probe: ProbeSpec
+}
+
+/**
+ * 画布上「组间轮询」卡片节点的 data。
+ *
+ * `graph` 是卡片内部那张**小画布的快照**（含开始 / 结束节点，与模板的 graph 同一形状）——
+ * 保存时由 utils/loopCardGraph 转成 `ApprovalFlowLoopNode.steps`。
+ * 为什么存图而不是存 steps：编辑时要能原样还原（节点坐标、连线），steps 丢掉了这些；
+ * 而且内部图复用同一个 `graphToFlowFrom` 转换与校验，不必再写一套。
+ */
+export interface LoopNodeData {
+  /** 卡片名（时间线 / 报错里显示） */
+  title: string
+  /** 轮询配置：按哪些组、什么顺序（与成员级轮询同一个 RotationSpec） */
+  rotation: RotationSpec
+  /** 卡片内部的画布快照 */
+  graph: {
+    nodes: any[]
+    edges: any[]
+    viewport?: { x: number, y: number, zoom: number }
+  }
 }
 
 // ===== Vue Flow 画布节点 data =====
@@ -555,6 +807,14 @@ export interface ApprovalNodeData {
   members: ApprovalChainItem[]
   /** 仅 notify 节点用：提醒的补充文案 */
   content?: string
+  /**
+   * 仅 approval 节点用：本环节**共用的办理选项树**（类别 → 一级 → 二级，见 ApprovalOptionGroup）。
+   *
+   * 为什么挂在**节点**上而不是连线上：树里每个一级选项自带「实际链路」，
+   * 能指到本节点任意一条出线 —— 一棵树本来就覆盖整个环节，所以它是"一个环节一份"，
+   * 由该环节的各条结果分支共用（配置入口见 createStream / LoopCardCanvas 的「配置选项」）。
+   */
+  optionGroups?: ApprovalOptionGroup[]
 }
 
 /** 生成节点 / 分支的本地 id */
@@ -570,6 +830,28 @@ export function findBranch (node: ApprovalFlowBranchNode, name: string): Approva
 }
 
 // ===== 条件求值（运行时自动选路） =====
+
+/**
+ * 求值上下文里的「**当前环节对应的组**」字段名（分支条件里可选）。
+ *
+ * 为什么需要它：按组轮询展开出来的每一环，判条件时上下文里只有
+ * 「建单快照 + 该环结论 + 该环办理人填的值」（见 rebuildChain 的 formOf），
+ * 于是「A 组走这条、其它组走那条」这类条件写不出来 —— 快照里的「组别」是**单据自己的**
+ * 组别，不是正轮到的那一环的组。
+ *
+ * 取值来源：展开后的成员带 `role.dept = 组名`（见 utils/approvalRotation 的 splitMembers），
+ * 求值时读它 —— 与轮询的筛选/排序同一个来源，不会出现"两边算的组不是同一个"。
+ *
+ * ⚠️ 只对**分支条件**有意义（求值走 rebuildChain）。「按组轮询」自己的筛选条件是拿
+ *    BI 行数据求值的（见 utils/rotationData），那里没有这个字段，写了不会命中。
+ *
+ * ⚠️ 它只能做「**整体分流**」，做不了「每个组各自分流」：轮询节点后面那个分支节点，
+ *    运行时是在**所有环都办完之后**才被求值**一次**的（walkFlow 顺序推进；展开只是把一个
+ *    环节换成 N 个连续环节，分支节点并没有跟着复制），所以那时上下文里是**最后一环**的组
+ *    与结论（实测：三环 A/B/C 全通过，条件「当前组别 = A组」不命中，走的是兜底分支）。
+ *    要按组逐个分流，得在展开时把分支也按环复制（本次未做）。
+ */
+export const CURRENT_GROUP_FIELD = 'current_group'
 
 /** 分支的全部命中条件：优先用多条件 conditions，兼容旧的单条件 condition */
 export function branchConditions (b: ApprovalBranch): ConditionExpr[] {
@@ -815,51 +1097,213 @@ export function matchBranch (branches: ApprovalBranch[], form: Record<string, un
  * @returns stepId → 结论标识数组（去重），如 { '财务初审': ['reject', 'pass'] }
  */
 export function collectStepResultOptions (flow: ApprovalFlow): Record<string, string[]> {
+  const items = collectStepOptionItems(flow)
   const map: Record<string, string[]> = {}
-  /** 主线（无条件分支）对应的结论 */
-  const MAIN_RESULT = 'pass'
+  for (const [stepId, list] of Object.entries(items)) {
+    map[stepId] = list.map(i => i.result)
+  }
+  return map
+}
 
-  /** 从分支组提取结论列表 */
-  function optionsOf (branches: ApprovalBranch[]): string[] {
-    const list: string[] = []
-    for (const b of branches) {
-      // 顶层结果条件 = 该分支对应的审批结论；只靠条件组命中的分支不贡献结论
-      const v = firstResultValueOf(b)
-      if (v) {
-        list.push(v)
-      } else if (branchConditions(b).length === 0) {
-        list.push(MAIN_RESULT)
-      } // 无条件 = 主线兜底走向
+/**
+ * 每个审批环节的**选项数组** —— 办理下拉框直接拿它渲染，前端不再自己造词。
+ *
+ * `result` = 提交上去的结论码（决定后面走哪条线）；`text` = **模板里给那条线起的名字**。
+ *
+ * 为什么要有它（与上面 collectStepResultOptions 的分工）：
+ *   · 旧的做法只回传"有哪些结论码"，前端再拿 `APPROVAL_RESULTS` 去翻译文案 ——
+ *     于是下拉里显示的是**目录里写死的词**（"产品质量类"），而不是你在画布上给这条线
+ *     起的名字（"产品质量"）。模板怎么配，前端都不该有第二套词。
+ *   · 这里把**名字一起带回来**：谁配的线谁起名，前端只负责渲染。
+ *
+ * 无条件主线同样算一个选项（`result` 固定为 pass —— 它是"其余结论都没命中"的兜底走向），
+ * 文案同样取那条线自己的名字（如「其他原因」）。
+ */
+export function collectStepOptionItems (
+  flow: ApprovalFlow,
+): Record<string, ApprovalNodeOption[]> {
+  const map: Record<string, ApprovalNodeOption[]> = {}
+  /** 主线（无条件分支）对应的结论码 */
+  const MAIN_RESULT = 'pass'
+  /** 驳回的结论码（保存期注入的「驳回 → 回退上一环」分支绑的就是它） */
+  const REJECT_RESULT = 'reject'
+
+  /**
+   * 从分支组提取选项：**每条出线就是一个走动方向**。
+   * 绑了结论的取结论码；无条件的算主线（pass）。
+   *
+   * 下拉里显示什么由这条线决定：
+   *   · 配了 `options`（选项文本数组，见 ApprovalNodeOption）→ 每个文本一个选项，
+   *     它们的 result **统一是这条线的结论码** → 选哪个都走这条线；
+   *   · 没配 → 退回用分支名当一个选项；分支名也空（老模板）则退回结论码，交给前端按目录显示。
+   */
+  function optionsOf (branches: ApprovalBranch[]): ApprovalNodeOption[] {
+    /*
+     * 环节里配了**选项树**时：这一环就是"树驱动"的 —— 把树的一级（按类别分组）直接当选项，
+     * 每个一级的「实际链路」自己决定走哪条线，**不再套一层"处理方式"**。
+     *
+     * 为什么必须这样（实测反馈）：树的一级本来就能指到多条线（如「运营 / 市场需求分析不足」
+     * 指向"其他原因"那条线、「产品侵权 / 版权」指向"产品侵权"那条线），此时上面再摆一个
+     * 「产品侵权 / 产品质量 / 其他原因」的下拉，等于**同一件事问两遍**，用户看到的却是
+     * "多了一栏"，而且那层下拉里的选项还不是模板里配的分项。
+     *
+     * 没被树覆盖的结果分支**照样保留**（否则那条线成了死路）：见 leftoverGroups。
+     */
+    const trees = branches
+      .map(b => normalizeOptionGroups(b.optionGroups))
+      .filter(g => g.length > 0)
+    if (trees.length > 0) {
+      return nodeLevelOptionsOf([...mergeGroups(trees), ...leftoverGroups(trees, branches)], branches)
     }
-    return Array.from(new Set(list))
+
+    const list: ApprovalNodeOption[] = []
+    for (const b of branches) {
+      // 顶层结果条件 = 该分支对应的审批结论；只靠条件组命中的分支不贡献选项
+      const v = firstResultValueOf(b)
+      const name = String(b.name ?? '').trim()
+      const isMain = !v && branchConditions(b).length === 0
+      if (!v && !isMain) {
+        continue
+      }
+      const result = v || MAIN_RESULT
+      /*
+       * 配了**选项树**就以它为准：办理时把整棵树挂在这个选项上（类别 → 一级 → 二级），
+       * 而每个一级选项的 `link` 才是真正提交的链路码 —— 见 ApprovalNodeOption。
+       */
+      const groups = normalizeOptionGroups(b.optionGroups)
+      if (groups.length > 0) {
+        list.push({ result, text: name || result, groups })
+        continue
+      }
+      const texts = normalizeOptionTexts(b.options)
+      if (texts.length > 0) {
+        for (const t of texts) {
+          list.push({ result, text: t })
+        }
+      } else {
+        list.push({ result, text: name || result })
+      }
+    }
+    // 去重按「文案 + 结论码」：不按结论码合并 —— 同一条线的多个选项本来就共用一个码，
+    // 合并会把"多个选项"压成一个；不同线用了同一个文案时也只是各自保留（先到先得，不静默改码）。
+    const seen = new Set<string>()
+    return list.filter(i => (seen.has(`${i.text}|${i.result}`) ? false : (seen.add(`${i.text}|${i.result}`), true)))
+  }
+
+  /** 多棵树合并成一棵：同名的类别合并 items（按「文案 + 链路」去重），顺序按先出现的来 */
+  function mergeGroups (trees: ApprovalOptionGroup[][]): ApprovalOptionGroup[] {
+    const out: ApprovalOptionGroup[] = []
+    for (const tree of trees) {
+      for (const g of tree) {
+        const hit = out.find(x => x.title === g.title)
+        if (!hit) {
+          out.push({ title: g.title, items: g.items.map(it => ({ ...it })) })
+          continue
+        }
+        for (const it of g.items) {
+          if (!hit.items.some(x => x.text === it.text && x.link === it.link)) {
+            hit.items.push({ ...it })
+          }
+        }
+      }
+    }
+    return out
+  }
+
+  /**
+   * **树没覆盖到的结果分支**：保留成选项，挂在树后面（用分支名当分组标题）。
+   *
+   * 为什么不能不管：树是"树驱动"的唯一入口，树里没有某个结论码时，那条线就**没人能选到**了
+   * （原来的「处理方式」下拉里它是有的）。例如某环有「产品侵权(带树) / 产品质量 / 其他原因」，
+   * 而树的一级只指到 产品侵权 + 其他原因 两条线 —— 这里的「产品质量」就得补回来。
+   *
+   * 「驳回」出口不在这儿补：办理端会按 `canReject` 在末尾放一个统一的「驳回」（见 ApprovalNode）。
+   */
+  function leftoverGroups (trees: ApprovalOptionGroup[][], branches: ApprovalBranch[]): ApprovalOptionGroup[] {
+    const covered = new Set(trees.flatMap(t => t.flatMap(g => g.items.map(i => i.link))))
+    const out: ApprovalOptionGroup[] = []
+    for (const b of branches) {
+      const name = String(b.name ?? '').trim()
+      const code = firstResultValueOf(b) || MAIN_RESULT
+      if (code === REJECT_RESULT || covered.has(code)) {
+        continue
+      }
+      // 配了选项文本就逐条给（"多个说法走同一条线"），没配就用分支名
+      const texts = normalizeOptionTexts(b.options)
+      const items = (texts.length > 0 ? texts : [name])
+        .filter(Boolean)
+        .map(t => ({ text: t, link: code }))
+      if (items.length > 0) {
+        out.push({ title: name || code, items })
+      }
+    }
+    return out
+  }
+
+  /**
+   * 环节级选项树 → **唯一一个**"选项"。
+   *
+   * 为什么只给一项：树里每个一级自带「实际链路」，本身就是一次完整的选择
+   * （"走哪条线"已由它决定），所以办理时不必先选"处理方式" —— 见 ApprovalNodeOption.nodeLevel。
+   * `result` / `text` 留空：这一层的文案与结论都不再有意义，谁也不会读它。
+   *
+   * `canReject`：本环节有没有「驳回 → 回退上一环」这个出口。**必须从 branches 上算**，
+   * 不能只看树 —— 那条分支是保存期 `ensureRejectLoopBack` 自动注入的，模板的树里通常没有它；
+   * 老口径下它作为一条普通分支出现在下拉里，换成环节级树后就会丢掉（办理人无路可驳回）。
+   */
+  function nodeLevelOptionsOf (groups: ApprovalOptionGroup[], branches: ApprovalBranch[]): ApprovalNodeOption[] {
+    return [{
+      result: '',
+      text: '',
+      groups,
+      nodeLevel: true,
+      ...(branches.some(b => firstResultValueOf(b) === REJECT_RESULT) ? { canReject: true } : {}),
+    }]
+  }
+
+  /**
+   * 一个审批环节（顶层节点或分支内的审批步骤）的选项数组。
+   *
+   * **环节级树优先**：配了它整个环节就呈现这一棵树，各条结果分支不再是"处理方式"；
+   * 没配才按老口径逐条出线推导（`options` 文本 / 分支名）。
+   */
+  function optionsOfApproval (
+    step: ApprovalFlowStep | ApprovalFlowApprovalNode,
+    branches: ApprovalBranch[],
+  ): ApprovalNodeOption[] {
+    const shared = normalizeOptionGroups(step.optionGroups)
+    // 树没覆盖到的结果分支同样补回来，保证每条画出来的线都有人能选到（见 leftoverGroups）
+    return shared.length > 0
+      ? nodeLevelOptionsOf([...shared, ...leftoverGroups([shared], branches)], branches)
+      : optionsOf(branches)
   }
 
   /** 分支内的步骤序列：branch 步骤归属于它前面那个审批步骤 */
   function collectSteps (steps: ApprovalFlowStep[] | undefined) {
-    let prev: string | undefined
+    let prev: ApprovalFlowStep | undefined
     for (const s of steps ?? []) {
       if (s.type === 'branch' && s.branches?.length) {
         if (prev) {
-          map[prev] = optionsOf(s.branches)
+          map[prev.id] = optionsOfApproval(prev, s.branches)
         }
         for (const b of s.branches) {
           collectSteps(b.steps)
         }
         continue
       }
-      prev = s.id
+      prev = s
     }
   }
 
-  let prevTop: string | undefined
+  let prevTop: ApprovalFlowApprovalNode | undefined
   for (const node of flow) {
     if (node.type === 'approval') {
-      prevTop = node.id
+      prevTop = node
       continue
     }
     if (node.type === 'branch') {
       if (prevTop) {
-        map[prevTop] = optionsOf(node.branches)
+        map[prevTop.id] = optionsOfApproval(prevTop, node.branches)
       }
       for (const b of node.branches) {
         collectSteps(b.steps)
@@ -1018,6 +1462,16 @@ export function rebuildChain (
     if (n.type === 'approval') {
       membersById.set(n.id, n.nodes)
       flowIndexById.set(n.id, i)
+      continue
+    }
+    /*
+     * 「飞书提醒」也是「跳出循环」的合法落点：它是"到达即穿过"（会真发一条通知），
+     * 跳过去再从它往下走是有意义的 —— 所以它也必须能按 id 定位到在 flow 里的下标。
+     * 只收审批节点的话，exitTo 会走到最后那句「跳出循环目标环节不存在」直接抛错（踩过）。
+     * 它没有成员，因此不进 membersById（pushNotify 不需要成员）。
+     */
+    if (n.type === 'notify') {
+      flowIndexById.set(n.id, i)
     }
   }
   /** 递归收集嵌套分支内的步骤：成员 + 所在容器 */
@@ -1094,14 +1548,51 @@ export function rebuildChain (
   }
 
   /**
-     * 结论 → 选路表单：result 是保留字段，extra 里的业务字段一并参与条件求值。
-     *
-     * 业务上下文（关联数据行的快照）垫在最底层 —— 分支条件里写的业务字段
-     * （如「总库存金额 > 5000」）就是从这里取的；审批结论与办理人填的 extra 覆盖它，
-     * 因为那是本次办理的即时事实，比建档时的快照更权威。
-     */
-  function formOf (d: NodeDecision): Record<string, unknown> {
-    return { ...context, result: d.result, ...d.extra }
+   * 该环节对应的**组**（条件是「当前组别 = XX」时的取值来源，见 CURRENT_GROUP_FIELD）。
+   *
+   * 取 `role.dept` 优先：轮询展开时写进去的就是**组名**（approvalRotation 的 splitMembers）。
+   * `department` 只作兜底 —— 它是解析后的组织架构部门名，该组没设负责人时会往上级找，
+   * 那时它变成上级部门名，就不再是条件里写的那个组了。
+   *
+   * 只认**带 role 的成员**：固定审批人也有 `department`（他自己的部门），
+   * 但那不是"这一环对应的组"，混进来会让条件莫名命中。
+   */
+  function groupOf (stepId: string): string {
+    for (const m of membersById.get(stepId) ?? []) {
+      if (!m.role) {
+        continue
+      }
+      const byRole = m.role.dept?.trim()
+      if (byRole) {
+        return byRole
+      }
+      const byDept = m.department?.trim()
+      if (byDept) {
+        return byDept
+      }
+    }
+    return ''
+  }
+
+  /**
+    * 结论 → 选路表单：result 是保留字段，extra 里的业务字段一并参与条件求值。
+    *
+    * 业务上下文（关联数据行的快照）垫在最底层 —— 分支条件里写的业务字段
+    * （如「总库存金额 > 5000」）就是从这里取的；审批结论与办理人填的 extra 覆盖它，
+    * 因为那是本次办理的即时事实，比建档时的快照更权威。
+    *
+    * `stepId` 用来补上「当前环节对应的组」：按组轮询下每一环轮到的组不同，
+    * 不带上它就没法按组分流（见 CURRENT_GROUP_FIELD）。它排在 extra **之前** ——
+    * 办理人填的值才是本次的即时事实，保持最高优先级。
+    */
+  function formOf (d: NodeDecision, stepId: string): Record<string, unknown> {
+    const group = groupOf(stepId)
+    return {
+      ...context,
+      result: d.result,
+      ...(group ? { [CURRENT_GROUP_FIELD]: group } : {}),
+      ...d.extra,
+    }
   }
 
   /**
@@ -1151,7 +1642,7 @@ export function rebuildChain (
       terminalBranch = null
       return false
     }
-    const form = formOf(d)
+    const form = formOf(d, stepId)
     const idx = flowIndexById.get(stepId)
     if (idx !== undefined) {
       return walkFlow(idx + 1, form)
@@ -1161,6 +1652,31 @@ export function rebuildChain (
       return walkSteps(c.steps.slice(c.index + 1), form)
     }
     return true
+  }
+
+  /**
+   * 跳出循环：跳到目标环节，并**从它本身开始**继续走（目标环节要办）。
+   *
+   * 与 loopBackTo 是同一套"跳过去"的机制，只差 idx 与 idx + 1：
+   *   · loopBackTo → walkFlow(idx + 1)  ：目标已办过，从它**后面**续走（回退重办）
+   *   · exitTo     → walkFlow(idx)      ：目标还没办，从它**本身**开始（跳过中间环节）
+   * 这也是这个原语能做到"引擎几乎零改动"的原因 —— 不需要新概念，只是换个起点。
+   */
+  function exitTo (stepId: string, form: Record<string, unknown>): boolean {
+    const idx = flowIndexById.get(stepId)
+    if (idx !== undefined) {
+      return walkFlow(idx, form)
+    }
+    const c = containerById.get(stepId)
+    if (c) {
+      return walkSteps(c.steps.slice(c.index), form)
+    }
+    /*
+     * 目标不存在（模板被改过 / 数据不完整）：**不静默穿过**。
+     * 静默的表现是"这一环莫名其妙被跳过、单据直接往下走"，那种失败最难查 ——
+     * 与 probe 步骤的处理口径一致（见上面 walkSteps / walkFlow 里的抛错）。
+     */
+    throw new Error(`流程里的「跳出循环」目标环节不存在：${stepId}（模板可能被改过，请重新保存模板）`)
   }
 
   /** 展开分支内的步骤序列；返回 false 表示已停在待办或流程终止 */
@@ -1177,10 +1693,22 @@ export function rebuildChain (
       if (s.type === 'probe') {
         throw new Error('流程里的「数据查询」步骤没有在建单时展开，单据数据不完整（见 utils/approvalProbe）')
       }
+      /*
+       * 组间轮询卡片（分支链里的步骤形态）同理：必须在**建单期**按组展开成 N 段步骤
+       * （见 utils/approvalRotation）。静默跳过的表现是"某条分支上的一整段轮询凭空消失"，
+       * 单子却继续往下走 —— 最难查，所以直接抛错。
+       */
+      if (s.type === 'loop') {
+        throw new Error('流程里的「组间轮询」卡片没有在建单时展开，单据数据不完整（见 utils/approvalRotation）')
+      }
       if (s.type === 'branch' && s.branches?.length) {
         const b = matchBranch(s.branches, form)
         if (!b) {
           return false
+        }
+        // 跳出循环优先于回退：两者都是"跳转"，但 exitTo 表示向前跳出本段循环
+        if (b.exitTo) {
+          return exitTo(b.exitTo.stepId, form)
         }
         if (b.loopBackTo) {
           return loopBackTo(b.loopBackTo.stepId)
@@ -1212,7 +1740,7 @@ export function rebuildChain (
         terminalBranch = null
         return false
       }
-      form = formOf(d)
+      form = formOf(d, s.id)
     }
     return true
   }
@@ -1235,6 +1763,14 @@ export function rebuildChain (
       if (node.type === 'probe') {
         throw new Error('流程里的「数据查询」节点没有在建单时展开，单据数据不完整（见 utils/approvalProbe）')
       }
+      /*
+       * 「组间轮询」卡片同理：必须在**建单期**按组展开（见 utils/approvalRotation）。
+       * 走到这里说明单据数据不完整 —— 直接抛错，因为"静默跳过"的表现是
+       * 卡片内部那一整段子流程凭空消失（没人有权限办、单子却继续往下走），最难查。
+       */
+      if (node.type === 'loop') {
+        throw new Error('流程里的「组间轮询」卡片没有在建单时展开，单据数据不完整（见 utils/approvalRotation）')
+      }
 
       // 飞书提醒：只记一环、不停留；后续走向不受它影响
       // （出线唯一性由 graphToFlowFrom 保证 —— 它没有结论也没有条件，多条出线无从选择）
@@ -1255,16 +1791,29 @@ export function rebuildChain (
           terminalBranch = null
           return false
         }
-        form = formOf(d)
+        form = formOf(d, node.id)
         i++
         continue
       }
       if (node.type === 'branch') {
         const b = matchBranch(node.branches, form)
         if (!b) {
-          done = true
-          terminalBranch = null
+          /*
+           * 一条分支都没命中，且这个分支组**没有兜底主线**（模板允许不配主线：
+           * 每条出线各自绑结论 / 条件，见 utils/approvalFlow 的 collectBranchesRaw）。
+           *
+           * 以前这里是 `done = true`：单子会被静默判成「已通过」—— 而真实原因是
+           * "某个结论没绑到任何一条线"，属于配置问题，判成通过会让错误无声地流下去。
+           * 现在改为**停在当前环节**：不推进、也不结束，一眼就能看出异常。
+           * （与分支步骤里的口径一致，见 walkSteps 的 `if (!b) return false`。）
+           */
+          console.warn('[rebuildChain] 没有分支命中且无兜底主线，单据停在当前环节而非判为通过')
+          currentStep = chain.length - 1
           return false
+        }
+        // 跳出循环优先于回退：两者都是"跳转"，但 exitTo 表示向前跳出本段循环
+        if (b.exitTo) {
+          return exitTo(b.exitTo.stepId, form)
         }
         if (b.loopBackTo) {
           return loopBackTo(b.loopBackTo.stepId)
@@ -1397,6 +1946,19 @@ export function flowToChain (flow: ApprovalFlow): ApprovalChain {
     }
     // 提醒节点不进线性链，理由同上
     if (node.type === 'notify') {
+      continue
+    }
+    /*
+     * 「组间轮询」卡片：保存预览用的线性链走它内部的子流程。
+     *
+     * 运行时它会被 expandRotations 按组**复制 N 份**（每环各走一遍内部子流程）；
+     * 保存时还不知道会有几个组（要建单那一刻才查数据），所以这里只是"看得出卡片里有什么"
+     * 的近似 —— 与 flowToChain 处理嵌套分支同一个态度。
+     */
+    if (node.type === 'loop') {
+      for (const step of node.steps) {
+        walkStep(step)
+      }
       continue
     }
     const first = node.branches.find(isDefaultBranch) ?? node.branches[0]

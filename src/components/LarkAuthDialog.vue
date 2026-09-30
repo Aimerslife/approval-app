@@ -17,7 +17,7 @@
         <v-progress-circular
           v-if="!loaded && !returned"
           class="frame-loading"
-          color="primary"
+          color="#3378FF"
           indeterminate
           size="28"
         />
@@ -37,21 +37,21 @@
         <iframe
           v-show="!returned"
           ref="frameEl"
-          allow="local-network-access *"
           class="frame"
           :src="authUrl ?? undefined"
           title="飞书授权"
+          allow="local-network-access *"
           @load="onFrameLoad"
         />
 
         <div v-if="returned" class="frame-done">
-          <v-progress-circular class="mb-3" color="primary" indeterminate size="22" />
-          <span class="text-[13px]" style="color: rgb(var(--v-theme-on-surface) / 60%)">已授权，正在进入首页…</span>
+          <v-progress-circular class="mb-3" color="#3378FF" indeterminate size="22" />
+          <span class="text-[13px] text-[#8B8B8B]">已授权，正在进入首页…</span>
         </div>
       </div>
 
       <v-card-actions class="px-4 pb-3">
-        <span class="text-[12px]" style="color: rgb(var(--v-theme-on-surface) / 60%)">用飞书扫码，授权后自动进入首页</span>
+        <span class="text-[12px] text-[#8B8B8B]">用飞书扫码，授权后自动进入首页</span>
         <v-spacer />
         <v-btn variant="text" @click="close()">取消</v-btn>
       </v-card-actions>
@@ -71,7 +71,7 @@
 
   const emit = defineEmits<{
     /** 请求关闭（用户取消 / 点右上角）；授权结果由调用方的 promise 决定，不在这里处理 */
-    close: []
+    'close': []
   }>()
 
   const frameEl = ref<HTMLIFrameElement>()
@@ -175,8 +175,7 @@
 .frame-wrap {
   position: relative;
   height: 520px;
-  /* 飞书授权页是白底 iframe，外框跟主题走（原来写死白，深色下是一块白板） */
-  background: rgb(var(--v-theme-surface));
+  background: #fff;
 }
 
 .frame {

@@ -101,6 +101,11 @@
         out.push({ id: n.id, name: n.name, members: n.members })
         continue
       }
+      // 「组间轮询」卡片：主线里展开它内部的子流程（与 flowToChain 同一口径）
+      if (n.type === 'loop') {
+        for (const s of n.steps) walkStep(s)
+        continue
+      }
       const def = n.branches.find(b => !b.conditions?.length && !b.condition) ?? n.branches[0]
       if (def) walkBranch(def)
     }

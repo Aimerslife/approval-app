@@ -5,22 +5,29 @@ import type {
   ApprovalFlowBranchNode,
   ApprovalFlowStep,
   ApprovalNodeData,
+  ApprovalOptionGroup,
   BranchCondition,
   ConditionExpr,
-  FlowContext,
+  FlowContext, LoopNodeData, ProbeNodeData, ProbeSpec, RotationSpec,
 } from '../types/approval'
-import { branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, uid } from '../types/approval'
+import { branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, normalizeOptionGroups, normalizeOptionTexts, uid } from '../types/approval'
 import { findBadProbe } from './approvalProbe'
 import { collectRotations, findBadRotation } from './approvalRotation'
-import type { ProbeNodeData, ProbeSpec } from '../types/approval'
 import { deriveFlowFields } from './biRowFields'
+/*
+ * 卡片内部那张小画布 → 子流程（见 loopCardGraph 的说明）。
+ * 这里与 loopCardGraph 是**互相 import** 的（它要调本文件的 graphToFlowFrom 转换内部图），
+ * 但两处都只在函数体里调用，ESM 的循环依赖完全没问题（模块初始化时谁都不碰对方的值）。
+ */
+import { cardGraphToSteps } from './loopCardGraph'
 
 /**
  * 把画布图转换为 ApprovalFlow 结构（保存时调用）。
  *
  * 结构要点：
  * - approval 单出边 → 顺序审批环节；多出边 → 先产出审批环节，紧跟一个「审批结果分支组」：
- *   无条件出线为主线（审批通过 / 其余结论兜底走这里），其余出线各绑定一个审批结论；
+ *   每条出线绑定一个审批结论；**可以**留一条无条件出线当主线兜底（审批通过 / 其余结论走它），
+ *   也**允许一条兜底都不留**（每条线各绑自己的结论 —— 见 collectBranchesRaw 的说明）；
  * - condition 节点 → 条件分支组：每条出边是一个分支（label 为分支名，data.condition/conditions 为命中条件）；
  * - 每条分支沿出边走，直到结束节点或「与兄弟分支合流」的汇聚点，中间审批节点拍成该分支 steps；
  * - 分支内允许再出现分支（条件节点 / 出线 > 1 的审批节点）：walkBranch 会递归收集成
@@ -40,6 +47,18 @@ export function graphToFlowFrom (
          * ② 停用状态的模板。生成脚本走的就是这条。
          */
     allowEmptyMembers?: boolean
+    /**
+     * 「跳出循环」的**外部目标白名单**（节点 id）。
+     *
+     * 正常保存时这一项是空的：分支的「跳出循环」目标必须是**本图内**的审批环节，
+     * 找不到就报「目标环节已不存在」（下面那段校验）。
+     *
+     * 唯一需要它的地方是**「组间轮询」卡片的内部图**（见 utils/loopCardGraph）：
+     * 卡片内部的分支可以「提前结束轮询 → 跳到卡片外的环节」，那个环节当然不在内部图里。
+     * 只对卡片内部图开这个口子 —— 卡片内部图走的是**同一个** graphToFlowFrom，
+     * 语义上确实允许"引用外层"，所以在校验处放行、而不是另写一套转换器。
+     */
+    externalApprovalIds?: Set<string>
   } = {},
 ): {
   flow: ApprovalFlow
@@ -54,6 +73,18 @@ export function graphToFlowFrom (
   errorEdgeId?: string
 } {
   const nodesById = new Map(nodes.map(n => [n.id, n]))
+  /**
+   * 本图内**可以当「跳出循环」目标**的环节 id：审批环节 + 飞书提醒。
+   *
+   * 传给卡片内部图当「外部目标白名单」（卡片内部的分支可「提前结束轮询 → 跳到卡片外的环节」，
+   * 见 opts.externalApprovalIds）。
+   *
+   * ⚠️ 这份口径必须与下面的**类型校验**一致：白名单先拦，拦下来报的是"目标环节已不存在" ——
+   * 两边不一致时（比如这里只放审批、校验却允许提醒）就会出现"明明选了却报不存在"的假错。踩过。
+   */
+  const outerExitIds = new Set(
+    nodes.filter(n => n.type === 'approval' || n.type === 'notify').map(n => String(n.id)),
+  )
   const out = new Map<string, any[]>()
   const inMap = new Map<string, string[]>()
   for (const e of edges) {
@@ -123,8 +154,21 @@ export function graphToFlowFrom (
   }
 
   /**
+   * 审批节点上配的**环节级选项树**（见 ApprovalNodeData.optionGroups）→ 编译产物的字段。
+   *
+   * 挂在审批环节本身（`ApprovalFlowApprovalNode.optionGroups` / 分支内 `ApprovalFlowStep.optionGroups`），
+   * 不再挂到各条结果分支上 —— 办事时整个环节就呈现这一棵树（见 collectStepOptionItems）。
+   * **没配就不写字段**，flow 形状与老模板保持一致。
+   */
+  function optionGroupsField (d?: ApprovalNodeData): { optionGroups?: ApprovalOptionGroup[] } {
+    const groups = normalizeOptionGroups(d?.optionGroups)
+    return groups.length > 0 ? { optionGroups: groups } : {}
+  }
+
+  /**
      * 收集某节点的全部出边为「分支组」：
-     * - kind 'approval'：审批结果分支，恰好一条无条件主线 + 其余绑定审批结论（field=result）；
+     * - kind 'approval'：审批结果分支，每条绑定一个审批结论（field=result）；
+     *   无条件主线**可选**、至多一条；
      * - kind 'condition'：条件分支，默认分支与表单命中条件可混排；
    * - kind 'probe'：数据查询，两条出边（「存在」/「不存在」），无分支条件 —— 走向由建单期的
    *   查询结果决定（见 utils/approvalProbe），所以这里只收出边、不校验条件。
@@ -165,9 +209,9 @@ export function graphToFlowFrom (
         error:
                     kind === 'approval'
                       ? '审批结果分支至少需要两条出线（一条主线 + 结果分支），请从节点下方拖出连线'
-                      : kind === 'probe'
-                        ? '数据查询至少需要两条出边（「存在」与「不存在」），请从节点下方拖出连线'
-                        : '条件分支至少需要两条出边（分支），请从节点下方拖出连线',
+                      : (kind === 'probe'
+                          ? '数据查询至少需要两条出边（「存在」与「不存在」），请从节点下方拖出连线'
+                          : '条件分支至少需要两条出边（分支），请从节点下方拖出连线'),
       }
     }
     const sourceName = String(nodesById.get(sourceId)?.data?.title ?? '')
@@ -194,6 +238,19 @@ export function graphToFlowFrom (
             ? [be.data.condition]
             : [])
       const logic = be.data?.logic === 'or' ? 'or' : 'and'
+
+      /*
+       * 这条线上配的「选项文本」（结果分支专用，见 types/approval 的 ApprovalNodeOption）：
+       * 办理下拉里按它们逐条渲染，**选哪个都走这条线绑定的那个审批结论**。
+       * 没配就**不写这个字段** —— flow 形状与老模板保持一致。
+       */
+      const optionTexts = normalizeOptionTexts(be.data?.options)
+
+      /*
+       * 这条线配的**选项树**（类别 → 一级 → 二级，一级自带"实际链路"）—— 见 types/approval 的 ApprovalOptionGroup。
+       * 与选项文本一样，没配就**不写这个字段**，flow 形状与老模板保持一致。
+       */
+      const optionGroups = normalizeOptionGroups(be.data?.optionGroups)
 
       /** 递归校验：条件组里的条件也要填全（组可任意嵌套，所以必须递归） */
       const findBad = (items: ConditionExpr[], where: string): string | null => {
@@ -244,7 +301,9 @@ export function graphToFlowFrom (
             return {
               branches,
               territory,
-              error: `「${name}」不是有效的审批结果分支，请点击该线在上方面板选择对应审批结论`,
+              // 带上出错的那条线：编辑器据此把它标红（只说"哪条线"不够，得让人一眼看到）
+              error: `「${name}」不是有效的审批结果分支，请点击该线，在连页面板里选择对应审批结论`,
+              errorEdgeId: be.id,
             }
           }
           const err = findBad(list.filter(x => !isResultCondition(x)), `「${name}」的`)
@@ -290,6 +349,8 @@ export function graphToFlowFrom (
           logic,
           conditions: list.length > 0 ? list : undefined,
           steps: walk.steps,
+          ...(optionTexts.length > 0 ? { options: optionTexts } : {}),
+          ...(optionGroups.length > 0 ? { optionGroups } : {}),
           loopBackTo: { stepId: walk.loopBackTo },
           // 回退目标是已办环节，通常不是出口；仍按终点如实记录
           isEnd: isEndNode(walk.terminal),
@@ -316,6 +377,59 @@ export function graphToFlowFrom (
       } else {
         converge = walk.terminal
       }
+
+      /*
+       * 「跳出循环」的目标环节由画布面板写在连线 data 上（见 pages/createStream.vue 的分支面板）。
+       * 校验放在**保存期**：目标缺失 / 指向自己 / 指向非审批节点都当场报错并指出是哪条线，
+       * 否则只能等运行期 rebuildChain 抛错或静默跳过 —— 那时最难查（单据已经建出来了）。
+       */
+      const exitMode = be.data?.exitMode === 'jump' ? 'jump' : 'end'
+      const exitToId = exitMode === 'jump' && be.data?.exitTo ? String(be.data.exitTo) : ''
+      if (exitMode === 'jump' && !exitToId) {
+        return {
+          branches,
+          territory,
+          error: `「${name}」选了「跳出循环」但没选目标环节，请在上面板里选择要跳到哪个环节`,
+          errorEdgeId: be.id,
+        }
+      }
+      if (exitToId) {
+        const target = nodesById.get(exitToId)
+        // 卡片内部图引用的"卡片外环节"：本图里当然找不到（见 opts.externalApprovalIds）
+        const external = !!opts.externalApprovalIds?.has(exitToId)
+        if (!target && !external) {
+          return {
+            branches,
+            territory,
+            error: `「${name}」的「跳出循环」目标环节已不存在（连线可能被删过），请重新选择`,
+            errorEdgeId: be.id,
+          }
+        }
+        if (exitToId === sourceId) {
+          return {
+            branches,
+            territory,
+            error: `「${name}」的「跳出循环」目标不能是本分支所在的那个环节自己`,
+            errorEdgeId: be.id,
+          }
+        }
+        /*
+         * 目标可以是**审批环节**（跳过去接着办），也可以是**飞书提醒**：
+         * 提醒节点本身就是"到达即穿过"（不记结论、不停留，但会真的发一条通知），
+         * 所以"某个组做完先通知一下、再继续往下走"是有意义的跳法。
+         * 开始 / 结束 / 分支 / 数据查询都没有"到达"这一步，仍然不允许。
+         * 外部目标（卡片内部图引用的卡片外环节）的类型由外层图自己保证 —— 白名单就是照它们建的。
+         */
+        if (target && !['approval', 'notify'].includes(String(target.type))) {
+          return {
+            branches,
+            territory,
+            error: `「${name}」的「跳出循环」目标必须是审批环节或飞书提醒`,
+            errorEdgeId: be.id,
+          }
+        }
+      }
+
       branches.push({
         id: be.id,
         name,
@@ -324,18 +438,31 @@ export function graphToFlowFrom (
         logic,
         conditions: list.length > 0 ? list : undefined,
         steps: walk.steps,
+        // 这条线配的选项文本（办理下拉按它渲染，选哪个都走本分支的结论码）
+        ...(optionTexts.length > 0 ? { options: optionTexts } : {}),
+        // 这条线配的选项树（办理时展开成「类别 → 一级 → 二级」，一级的 link 决定实际链路）
+        ...(optionGroups.length > 0 ? { optionGroups } : {}),
         // 出口标记在此写死：分支汇到后续节点时 steps 同样为空，
-        // 运行时靠它区分「终止」与「汇聚后继续」，不必回查画布
-        isEnd: isEndNode(walk.terminal),
+        // 运行时靠它区分「终止」与「汇聚后继续」，不必回查画布。
+        // ⚠️ 「跳出循环」的分支连线仍指向「结束」节点（画布是树，画不出"汇回主干"的合并线），
+        //    但它**不是**出口 —— 运行时要跳到目标环节继续办，所以这里必须写死 false。
+        isEnd: exitToId ? false : isEndNode(walk.terminal),
+        ...(exitToId ? { exitTo: { stepId: exitToId } } : {}),
       })
     }
-    if (kind === 'approval' && !defaultSeen) {
-      return {
-        branches,
-        territory,
-        error: `「${sourceName || '未命名审批'}」需要保留一条主线（无条件出线，审批通过 / 其余结论未命中时走这条）`,
-      }
-    }
+    /*
+     * 这里**不再**强制"必须有一条主线"。
+     *
+     * 原规则：审批结果分支组里必须留一条无条件出线当兜底（其余出线各自绑结论）。
+     * 现在允许**每条出线都绑自己的结论 / 条件**，一条兜底都不留 —— 业务上更精确：
+     * 想走哪条就走哪条，不再有"悄悄落到兜底线上"的余地。
+     *
+     * 代价与配套（三处口径必须一致，改这里时一并想清楚）：
+     *   · "最多一条主线"仍然保留（上面 defaultSeen 那段）—— 两条无条件出线无法确定走哪条；
+     *   · 运行期"一条都没命中"的情况变多了，types/approval.ts 里对它的处理已改为
+     *     **停在当前环节**（不再是静默 done=true 判成已通过）；
+     *   · 真要"其它结论都走这条"时，仍然可以留一条无条件主线（语义不变）。
+     */
     // 所有分支都返回上层 → 主干没有继续推进的走向
     if (branches.length > 0 && branches.every(b => b.loopBackTo)) {
       return {
@@ -428,6 +555,8 @@ export function graphToFlowFrom (
             id: pn.id,
             name: d.title,
             members: d.members.map((m: ApprovalChainItem) => ({ ...m })),
+            // 环节级选项树（画布上配在审批节点上）：办理时整个环节呈现这一棵树
+            ...optionGroupsField(d),
           })
         } else if (!visit(p)) {
           return { steps, territory, error: '流程中检测到环（节点被重复经过），请检查连线' }
@@ -499,6 +628,7 @@ export function graphToFlowFrom (
           id: pn.id,
           name: d.title,
           members: d.members.map((m: ApprovalChainItem) => ({ ...m })),
+          ...optionGroupsField(d),
         })
         p = outs[0].target
         continue
@@ -539,6 +669,57 @@ export function graphToFlowFrom (
         continue
       }
 
+      /*
+       * 「组间轮询」卡片（落在分支链里的形态）：转成 `type='loop'` 的**步骤**。
+       *
+       * 它与"顶层卡片"唯一的不同只是产物形态（顶层展开成节点、分支里展开成步骤），
+       * 展开逻辑与全部校验都共用一份（见 utils/approvalRotation）。
+       * 这就是「先按条件分流、只有某条分支里才轮询各组」—— 把卡片画在条件/结果分支后面即可。
+       */
+      if (pn.type === 'loop') {
+        const d = pn.data as LoopNodeData
+        const title = String(d?.title ?? '').trim() || '组间轮询'
+        if (outs.length === 0) {
+          return {
+            steps,
+            territory,
+            error: `卡片「${title}」没有出线，请从卡片下方拖出连线接回本分支后续或结束节点`,
+            errorNodeId: p,
+          }
+        }
+        /*
+         * 卡片不接受多条出线：它的每一条出线都要按组复制一份，"第几环走哪条"说不清。
+         * 要按结论分流就把条件分支画进卡片内部（那里是按组各判一次的）。
+         */
+        if (outs.length > 1) {
+          return {
+            steps,
+            territory,
+            error: `卡片「${title}」只能有一条出线；要按审批结论分流，请把条件分支画在卡片内部`,
+            errorNodeId: p,
+          }
+        }
+        if (!visit(p)) {
+          return { steps, territory, error: '流程中检测到环（节点被重复经过），请检查连线' }
+        }
+        // 卡片内部图允许「提前结束轮询」跳到**卡片外**的环节 → 把本图的审批环节当白名单传进去
+        const inner = cardGraphToSteps(d?.graph, { externalApprovalIds: outerExitIds })
+        if (inner.error) {
+          return { steps, territory, error: `卡片「${title}」内部：${inner.error}`, errorNodeId: p }
+        }
+        if (!d?.rotation) {
+          return { steps, territory, error: `卡片「${title}」还没有轮询配置，请点卡片填写「组字段」`, errorNodeId: p }
+        }
+        steps.push({
+          id: pn.id,
+          type: 'loop',
+          name: title,
+          rotation: d.rotation,
+          steps: inner.steps,
+        })
+        p = outs[0].target
+        continue
+      }
       return { steps, territory, error: '流程中存在不支持的节点类型，请检查画布' }
     }
     return { steps, territory, error: '流程中检测到环，请检查画布' }
@@ -590,7 +771,12 @@ export function graphToFlowFrom (
        *
        * 判"画布上有没有审批节点"就够：走到这里时所有审批节点都已被 orphans 检查确认接入流程。
        */
-      if (!nodes.some(n => n.type === 'approval')) {
+      /*
+       * 「组间轮询」卡片也算：卡片内部**必须**至少有一个审批节点
+       * （见 utils/loopCardGraph 的校验），所以它一定含"有人办"的环节。
+       * 只放一张卡片、没有别的审批节点的模板是合法的（开始 → 卡片 → 结束）。
+       */
+      if (!nodes.some(n => n.type === 'approval' || n.type === 'loop')) {
         return {
           flow: [],
           error: '流程里至少要有一个审批环节：飞书提醒只通知、不办理，没法单独构成流程',
@@ -632,7 +818,13 @@ export function graphToFlowFrom (
       if (d.members.length > 0) {
         hasMember = true
       }
-      flow.push({ id: node.id, type: 'approval', nodes: d.members.map((m: ApprovalChainItem) => ({ ...m })) })
+      flow.push({
+        id: node.id,
+        type: 'approval',
+        nodes: d.members.map((m: ApprovalChainItem) => ({ ...m })),
+        // 环节级选项树（画布上配在审批节点上）：办理时整个环节呈现这一棵树
+        ...optionGroupsField(d),
+      })
       const nexts = out.get(cur) ?? []
       if (nexts.length === 0) {
         return {
@@ -656,6 +848,58 @@ export function graphToFlowFrom (
       }
       flow.push({ id: `${node.id}:result`, type: 'branch', branches: result.branches! })
       cur = result.converge
+      continue
+    }
+
+    if (node.type === 'loop') {
+      /*
+       * 「组间轮询」卡片：把卡片内部那张小画布转成子流程（steps），交给建单期按组复制
+       * （见 utils/approvalRotation 的 stampRing）。
+       *
+       * 内部图走**同一个** graphToFlowFrom（分支命名、条件填全、汇聚、成环检测全部继承），
+       * 转换失败就把原因归到卡片这个节点上 —— 保存时能直接标红定位。
+       */
+      visited.add(cur)
+      mainVisited.add(cur)
+      const d = node.data as LoopNodeData
+      const name = d?.title || '组间轮询'
+      // 同上：卡片内部图可以用「提前结束轮询」跳到卡片外的环节
+      const inner = cardGraphToSteps(d?.graph, { externalApprovalIds: outerExitIds })
+      if (inner.error) {
+        return {
+          flow: [],
+          error: `卡片「${name}」内部：${inner.error}`,
+          errorNodeId: cur,
+        }
+      }
+      flow.push({
+        id: node.id,
+        type: 'loop',
+        name,
+        rotation: d?.rotation as RotationSpec,
+        steps: inner.steps,
+      })
+      const nexts = out.get(cur) ?? []
+      if (nexts.length === 0) {
+        return {
+          flow: [],
+          error: `卡片「${name}」没有出线，请从卡片下方拖出连线到下一步或结束`,
+          errorNodeId: cur,
+        }
+      }
+      /*
+       * 卡片是"一段子流程"，**不支持**多条出线（审批结果分流）：
+       * 它的每一条出线都要按组复制一份，语义上说不清"第几环走哪条"。
+       * 要按结论分流，请把分支画在卡片**内部**（那才是"每个组各自分流"）。
+       */
+      if (nexts.length > 1) {
+        return {
+          flow: [],
+          error: `卡片「${name}」只能有一条出线；要按审批结论分流，请把条件分支画在卡片内部`,
+          errorNodeId: cur,
+        }
+      }
+      cur = nexts[0].target
       continue
     }
 
@@ -915,6 +1159,19 @@ export function ensureRejectLoopBack (flow: ApprovalFlow): ApprovalFlow {
       continue
     }
 
+    /*
+     * 「组间轮询」卡片：内部子流程同样要补「驳回 → 回退上一级」。
+     *
+     * 卡片内部**首个**环节的"上一级"是卡片**之前**那个环节（incomingPrev）—— 与分支组内的
+     * 首个步骤同一口径；卡片作为整体只占一个 prevId（下一节点的驳回目标是卡片本身，
+     * 而卡片在展开后会被重映射到第一环的第一个环节，于是"整张卡片重走"）。
+     */
+    if (node.type === 'loop') {
+      out.push({ ...node, steps: ensureRejectLoopBackInSteps(node.steps, prevId) })
+      prevId = node.id
+      continue
+    }
+
     out.push(node)
     const next = flow[i + 1]
     if (prevId) {
@@ -951,6 +1208,17 @@ function ensureRejectLoopBackInSteps (
       for (const b of s.branches) {
         b.steps = ensureRejectLoopBackInSteps(b.steps, prevId)
       }
+      continue
+    }
+
+    /*
+     * 「组间轮询」卡片（分支链里的步骤形态）：内部子流程同样要补「驳回 → 回退上一级」。
+     * 卡片作为整体只占一个 prevId：卡片内部首个环节的"上一级"就是卡片**之前**那个环节
+     * （incomingPrev 一路传下去），与分支组内首个步骤同一口径。
+     */
+    if (s.type === 'loop') {
+      out.push({ ...s, steps: ensureRejectLoopBackInSteps(s.steps ?? [], prevId) })
+      prevId = s.id
       continue
     }
 

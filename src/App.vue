@@ -17,6 +17,9 @@
         <v-spacer />
         <!-- 右侧：设置 / 主题 + 窗口控制 -->
         <div class="d-flex align-center ga-1">
+           <v-icon-btn size="24" title="提醒设置" variant="text" @click="routerGo('/alarmSetting')">
+            <v-icon size="15">mdi-alarm-check</v-icon>
+          </v-icon-btn>
           <v-icon-btn size="24" title="审批说明" variant="text" @click="routerGo('/logic')">
             <v-icon size="15">mdi-book-open-variant</v-icon>
           </v-icon-btn>

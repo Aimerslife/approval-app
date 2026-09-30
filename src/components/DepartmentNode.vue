@@ -48,7 +48,7 @@
       </template>
 
       <template #prepend="{ item, isOpen }">
-        <v-icon v-if="item.type === 'dept'" color="primary" size="20">
+        <v-icon v-if="item.type === 'dept'" color="#1055C9" size="20">
           {{ item.has_child ? (isOpen ? 'mdi-layers-outline' : 'mdi-layers') : 'mdi-account-group' }}
         </v-icon>
 

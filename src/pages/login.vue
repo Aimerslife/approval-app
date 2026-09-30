@@ -85,7 +85,6 @@ import { useUserStore } from '@/stores/user'
 import { loginWithLarkEmbedded } from '@/utils/oauth'
 import LarkAuthDialog from '@/components/LarkAuthDialog.vue'
 import { getWord } from '@/api/api'
-import { entryPath, safeRedirectPath } from '@/utils/permissions'
 
 const userStore = useUserStore()
 const word = ref('可能又是愉快的一天')
@@ -93,22 +92,6 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const router = useRouter()
-const route = useRoute()
-
-/**
- * 登录成功后的落地页。
- *
- * 优先回到「被守卫拦下的那个地址」（route.query.redirect，见 router/index.ts）——
- * 飞书卡片是深链进 `/approvalPage?order_no=…`，丢了参数用户就得自己再找一遍单子。
- * 只接受**站内路径**（以 `/` 开头且不是 `//`），否则一个构造出来的 ?redirect= 就能把人带去外部地址。
- *
- * 没有 redirect 时按角色落到入口页：管理员 `/home`、员工 `/mine` ——
- * 直接打开域名（`/`）属于"没表达具体意图"，落到工作台比落在快速导航页更省一步。
- */
-function afterLoginPath(): string {
-  // safeRedirectPath 只放行站内路径（挡掉 //evil.com 这类协议相对地址），判定见 utils/permissions
-  return safeRedirectPath(route.query.redirect) || entryPath(userStore.appRole)
-}
 const emailRules = [
   (value: string) => {
     if (!value) return '邮箱不能为空'
@@ -150,8 +133,9 @@ async function submit(event: Event) {
   if (valid) {
     try {
       await userStore.login(email.value, password.value)
-      // 落点：被拦下的原地址 → 没有就按角色落到入口页（见 afterLoginPath）
-      router.push(afterLoginPath())
+      // 登录后落到 index.vue（路由 `/`）。⚠️ 该页当前渲染的是脚手架欢迎页（HelloWorld），
+      // 若这里要的是"进主界面"，应改成 '/home'。
+      router.push('/')
     } catch (error: any) {
       console.error('登录失败:', error.response?.data ?? error.data ?? error)
       showMsg('邮箱或密码错误，请重试', 'error')
@@ -171,6 +155,18 @@ function goResetPassword() {
 const authUrl = ref<string | null>(null)
 const authDialog = ref(false)
 
+/**
+ * 飞书登录（授权页嵌在应用内，成功后**顶层**跳转 /home）。
+ *
+ * 为什么不用 PB 默认的方式：`authWithOAuth2` 默认走 `window.open` 弹一个独立窗口 ✗。
+ * 这里用它的 `urlCallback` 把"打开方式"换成对话框里的 iframe ——
+ * 取 code、换登录态仍由 SDK 负责（它靠 realtime 把 code 收回来，见 utils/oauth.ts 的注释）。
+ *
+ * 对话框只负责显示授权页：PB 回调后会把 iframe 307 到同源地址，那一刻对话框会把 iframe
+ * 藏掉，所以**不会**把 PB 的界面或我们自己的站点显示在框里。
+ *
+ * 注意：不能再读 res.meta.rawUser.msg —— 失败时它返回 undefined，取属性会直接抛 TypeError。
+ */
 async function loginWithLarks() {
   loading.value = true
   try {
@@ -178,8 +174,12 @@ async function loginWithLarks() {
       authUrl.value = url
       authDialog.value = true
     })
+    // 走到这里说明 SDK 已换到登录态（授权码是它通过 realtime 收回来的）：
+    // 刷新 Pinia（企业 / 部门字段立刻可用），然后**顶层**跳 index.vue（路由 `/`）——
+    // 跳转必须在这里发生，对话框只负责显示授权页。
+    // ⚠️ index.vue 当前渲染的是脚手架欢迎页（HelloWorld），若这里要的是"进主界面"，改成 '/home'。
     await userStore.init()
-    await router.push(afterLoginPath())
+    await router.push('/')
   } catch (error: any) {
     console.error('飞书登录失败:', error)
     showMsg(error?.message ?? '飞书登录失败，请重试', 'error')
@@ -193,6 +193,12 @@ async function loginWithLarks() {
 onMounted(async () => {
   try {
     const res = await getWord()
+    /*
+     * `?? word.value` 不能省：
+     *   · 类型上：`res?.data?.hitokoto` 是 `string | undefined`，而 word 是 Ref<string>
+     *     —— 直接赋值会报 TS2322（不能把 undefined 赋给 string）；
+     *   · 行为上：一言接口失败 / 字段缺失时保留默认文案，否则卡片会变成空白。
+     */
     word.value = res?.data?.hitokoto ?? word.value
   } catch (error) {
     // 接口异常不能让 onMounted 里出现未捕获的 promise rejection（那会打断页面后续初始化）
@@ -202,6 +208,21 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/*
+ * 左下角「爱心评分 + 今日鸡汤」这一块。
+ *
+ * 布局口径（就这么简单，不再跟 Vuetify 的定位打架）：
+ *   · 外层 .word-badge 是**纵向 flex**：rating 在上、鸡汤卡片在下 —— 顺序由文档流保证；
+ *   · 卡片 width: fit-content：**宽度随内容变化**（短文案就窄），上限由外层 max-width 兜住
+ *     （长文案到这个宽度才换行，不会冲出容器）。
+ *
+ * ⚠️ 两个踩过的坑，别再改回去：
+ *   1) 原来用 `<v-snackbar contained>` 承载鸡汤 —— 它的 --contained 是 position: absolute，
+ *      **不占文档流**，会压住上面的爱心评分（评分甚至看不见），宽度也不随内容走。
+ *      它本质是"会自己消失的提示条"，而鸡汤是常驻装饰，本就不该用 toast 组件。
+ *   2) 宽度别写 `width: auto` + `min-width: 0`：那等于让它收缩到 min-content，
+ *      而**中文的 min-content 就是一个字** —— 会变成"一字一行"的细长条。
+ */
 .word-badge {
   display: flex;
   flex-direction: column;

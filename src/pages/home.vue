@@ -116,6 +116,7 @@
       <div class="px-2 py-4 bg-[#EEF1F6] rounded bg-app">
         <v-timeline density="compact" side="end" truncate-line="both" width="100%">
           <ApprovalNode v-for="(step, index) in selectedChain" :key="`${selectedOrder?.id}-${index}`"
+            :allowed-options="selectedOptionItems[selectedStepIds[index]]"
             :allowed-results="selectedResultOptions[selectedStepIds[index]]" :can-handle="index === selectedCurrentStep"
             :data="step" :index="index" :length="selectedChain.length" :prev-time="selectedStartTimes[index]"
             :start-time="selectedOrder?.created" @submit="onDrawerSubmit" />
@@ -178,7 +179,7 @@ import { drawerSet } from '@/composables/useEditorFullscreen'
 import { useNodeSubmit } from '@/composables/useNodeSubmit'
 // 取数 / 组装行 / 筛选：与 mine.vue 共用（原先两页各写一份，加一列要改两处）
 import { useApprovalTable } from '@/composables/useApprovalTable'
-import { collectStepResultOptions } from '@/types/approval'
+import { collectStepOptionItems, collectStepResultOptions } from '@/types/approval'
 import { approvalStatusMeta } from '@/utils/approvalFilters'
 import { APPROVAL_TABLE_HEADERS, toApprovalRow, type ApprovalRow } from '@/utils/approvalRows'
 import { runtimeOf, stepStartTimesOf } from '@/utils/approvalRuntime'
@@ -246,6 +247,11 @@ const selectedStartTimes = computed(() =>
 const selectedResultOptions = computed(() => {
   const flow = selectedOrder.value?.chain?.flow
   return flow?.length ? collectStepResultOptions(flow) : {}
+})
+/** 各环节的**选项数组**：模板里在审批节点上配的 options，办理下拉框直接用它渲染 */
+const selectedOptionItems = computed(() => {
+  const flow = selectedOrder.value?.chain?.flow
+  return flow?.length ? collectStepOptionItems(flow) : {}
 })
 /** 当前待办环节的下标（-1 = 流程已走完）。只有这一环允许在抽屉里办理 */
 const selectedCurrentStep = computed(() =>

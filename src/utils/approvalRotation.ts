@@ -2,6 +2,7 @@ import type {
   ApprovalBranch,
   ApprovalChainItem,
   ApprovalFlow,
+  ApprovalFlowLoopNode,
   ApprovalFlowNode,
   ApprovalFlowStep,
   RotationSpec,
@@ -78,6 +79,14 @@ export function rotationLabel (spec: RotationSpec): string {
  */
 export function collectRotations (flow: ApprovalFlow): Array<{ id: string, label: string, spec: RotationSpec }> {
   const out: Array<{ id: string, label: string, spec: RotationSpec }> = []
+  /**
+   * 成员级的「按组轮询」——**只为旧数据保留**。
+   *
+   * 2026-09 起组间流转整体搬到画布上的「组间轮询」卡片（见 ApprovalFlowLoopNode），
+   * 编辑器入口已移除，新模板不会再产生这个字段；但旧模板与在途单还有，
+   * 所以这里照旧收集并展开（删掉会让它们静默地不再按组流转，最难发现）。
+   * 详见 types/approval 里 `ApprovalChainItem.rotation` 的废弃说明。
+   */
   const note = (id: string, members?: ApprovalChainItem[]) => {
     for (const m of members ?? []) {
       if (m.rotation) {
@@ -94,6 +103,16 @@ export function collectRotations (flow: ApprovalFlow): Array<{ id: string, label
         }
         continue
       }
+      /*
+       * 组间轮询卡片（落在分支链里的步骤形态）：它自己就是一处轮询配置。
+       * 卡片**内部**不允许再配成员级轮询（展开时会报错），所以不必往里收集。
+       */
+      if (s.type === 'loop') {
+        if (s.rotation) {
+          out.push({ id: s.id, label: rotationLabel(s.rotation), spec: s.rotation })
+        }
+        continue
+      }
       note(s.id, s.members)
       walkSteps(s.steps)
     }
@@ -101,6 +120,18 @@ export function collectRotations (flow: ApprovalFlow): Array<{ id: string, label
   for (const node of flow) {
     if (node.type === 'approval') {
       note(node.id, node.nodes)
+      continue
+    }
+    /*
+     * 「组间轮询」卡片：它自己的轮询配置，必须在这里露脸 ——
+     * 建单期取数就是照这份清单去查"哪些组、怎么排序"的
+     * （见 utils/rotationData 的 resolveAllRotationGroups，它按 id 回填 groups）。
+     *
+     * 卡片**内部**不允许再配成员级轮询（等于在一个环里再套一层轮询，语义没定义），
+     * 所以这里不走进内部去收集；真配了会在展开时报错（见 expandRotations 的卡片分支）。
+     */
+    if (node.type === 'loop') {
+      out.push({ id: node.id, label: rotationLabel(node.rotation), spec: node.rotation })
       continue
     }
     if (node.type === 'notify') {
@@ -229,9 +260,22 @@ export function expandRotations (
   const firstOf: Record<string, string> = {}
 
   /**
+   * 该环节是否配了轮询。
+   *
+   * ⚠️ 调用方**不能**拿"切出来只有 1 段"当作"没配轮询"：只命中一个组时切出来也是 1 段，
+   *    但那一段的成员是**换过的**「该组负责人（role.dept = 组名）」，与原成员不同。
+   *    踩过：单组命中的环节被当成"没配轮询"原样留下，而原成员只有 `rotation`、没有 `role` ——
+   *    角色解析器只解析带 role 的成员（见 utils/approvalRoles 的 membersOf），
+   *    于是这一环**没人可办**（既不报错、也不进"待解析"告警），条件里的「当前组别」也取不到值。
+   */
+  function hasRotation (members?: ApprovalChainItem[]): boolean {
+    return (members ?? []).some(m => m.rotation)
+  }
+
+  /**
    * 把一段成员列表按轮询切成 N 段。
    * 返回值三种：
-   *  · `[members]`（长度 1 且内容不变）—— 没有轮询，原样；
+   *  · `[members]`（长度 1 且内容不变）—— 没有轮询，原样（**用 hasRotation 才算得准**，见上）；
    *  · `[]` —— 一个组都没命中且允许跳过：**整环丢弃**；
    *  · `null` —— 展开不了（已在 issues 里写明原因）：调用方原样保留，让建单失败。
    */
@@ -281,6 +325,223 @@ export function expandRotations (
     ])
   }
 
+  /**
+   * 卡片内部有没有配「成员级轮询」。
+   *
+   * 卡片内部再套一层轮询 = 一个环里还有 N 环，语义与展示都没定义（时间线上会出现
+   * 「A组 · B组 …」这种读不懂的名字）→ 直接判建单失败并指出来，而不是悄悄按某个意思展开。
+   */
+  function hasInnerRotation (steps?: ApprovalFlowStep[]): boolean {
+    for (const s of steps ?? []) {
+      if ((s.members ?? []).some(m => m.rotation)) {
+        return true
+      }
+      if (s.type === 'branch') {
+        for (const b of s.branches ?? []) {
+          if ((b.members ?? []).some(m => m.rotation) || hasInnerRotation(b.steps)) {
+            return true
+          }
+        }
+      }
+      if (hasInnerRotation(s.steps)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * 卡片内部的**一步** → **顶层节点**。
+   *
+   * 为什么需要这层转换：卡片内部是 `ApprovalFlowStep[]`（步骤形态），而顶层 flow 只认
+   * 节点形态（见 ApprovalFlowNode）。两者字段几乎一一对应，所以这里只"改名"不做语义加工。
+   * 返回 null 表示这一步展开不了（数据查询步骤本该在 expandProbes 阶段就展开掉）。
+   */
+  function stepToNode (s: ApprovalFlowStep): ApprovalFlowNode | null {
+    if (s.type === 'branch') {
+      return { id: s.id, type: 'branch', branches: s.branches ?? [] }
+    }
+    if (s.type === 'notify') {
+      return {
+        id: s.id,
+        type: 'notify',
+        name: s.name ?? '',
+        members: s.members ?? [],
+        ...(s.content ? { content: s.content } : {}),
+      }
+    }
+    if (s.type === 'probe') {
+      return null
+    }
+    return {
+      id: s.id,
+      type: 'approval',
+      nodes: s.members ?? [],
+      // 环节级选项树（画布上配在审批节点上）：卡片内部环节也可能配了，展开成顶层节点时要带上
+      ...(s.optionGroups?.length ? { optionGroups: s.optionGroups } : {}),
+    }
+  }
+
+  /**
+   * 把卡片内部的子流程复制给第 `ring` 环。四件事，一件都不能漏：
+   *
+   *  1. **id 全部加 `#ring`**：办理结论是按 stepId 记录的（`decisions[].stepId`），
+   *     不加后缀的话 N 环共用同一个 id，第 2 环的结论会把第 1 环的顶掉；
+   *  2. **`loop_leader` → 该环的组**：填成 `role.dept = 组名`，交给同一个角色解析器找真人
+   *     （含"该组没设负责人就往上级找"那套口径，见 utils/approvalRoles）；
+   *  3. **分支的跳转目标跟着改名**（见下面 rename 的三条口径）；
+   *  4. 嵌套的分支 / 步骤 / 提醒成员一律递归处理。
+   */
+  function stampRing (
+    steps: ApprovalFlowStep[],
+    /** 卡片本体：顶层卡片是节点、分支链里是步骤 —— 这里只用它的 `id`（跳转目标要用） */
+    card: ApprovalFlowLoopNode | ApprovalFlowStep,
+    group: RotationGroup,
+    ring: number,
+  ): ApprovalFlowStep[] {
+    const suffix = (id: string) => `${id}#${ring}`
+
+    /** 卡片内部的全部 id（步骤 + 分支），用来判断"跳转目标在不在卡片里" */
+    const innerIds = new Set<string>()
+    const collectIds = (list?: ApprovalFlowStep[]) => {
+      for (const s of list ?? []) {
+        innerIds.add(s.id)
+        for (const b of s.branches ?? []) {
+          innerIds.add(b.id)
+          collectIds(b.steps)
+        }
+        collectIds(s.steps)
+      }
+    }
+    collectIds(steps)
+
+    /**
+     * 跳转目标改名，三种情况：
+     *  · 卡片**内部**的步骤 → 同环那一份（加 `#ring`）；
+     *  · **卡片自己** → 第一环的第一个环节（`firstOf[card.id]`，即"整张卡片重走"，
+     *    与"驳回回退整段轮询"同一口径）；
+     *  · 卡片**外部**的环节 → 原样（外层 id 没变）。这正是"某个组决定提前跳出轮询、
+     *    直接去后面某个环节"的表达方式；卡片内部首个环节的「驳回 → 上一级」
+     *    也属于这一类（它的上一级在卡片外面）。
+     */
+    const rename = (target: { stepId: string }): { stepId: string } => {
+      const id = target.stepId
+      if (id === card.id) {
+        return { stepId: firstOf[card.id] ?? id }
+      }
+      return innerIds.has(id) ? { stepId: suffix(id) } : target
+    }
+
+    const membersWithGroup = (members?: ApprovalChainItem[]): ApprovalChainItem[] =>
+      (members ?? []).map(m => (m.role?.kind === 'loop_leader'
+        ? { ...m, role: { kind: 'dept_leader' as const, dept: group.name } }
+        : { ...m }))
+
+    function mapRingSteps (list: ApprovalFlowStep[]): ApprovalFlowStep[] {
+      return list.map(s => ({
+        ...s,
+        id: suffix(s.id),
+        ...(s.members ? { members: membersWithGroup(s.members) } : {}),
+        ...(s.type === 'branch' ? { branches: mapRingBranches(s.branches ?? []) } : {}),
+        ...(s.steps ? { steps: mapRingSteps(s.steps) } : {}),
+      }))
+    }
+
+    function mapRingBranches (branches: ApprovalBranch[]): ApprovalBranch[] {
+      return (branches ?? []).map(b => ({
+        ...b,
+        id: suffix(b.id),
+        ...(b.members ? { members: membersWithGroup(b.members) } : {}),
+        ...(b.loopBackTo ? { loopBackTo: rename(b.loopBackTo) } : {}),
+        ...(b.exitTo ? { exitTo: rename(b.exitTo) } : {}),
+        steps: mapRingSteps(b.steps ?? []),
+      }))
+    }
+
+    return mapRingSteps(steps)
+  }
+
+  /* ==================== 卡片展开的三个共用助手 ====================
+   * 顶层卡片（节点）与分支里的卡片（步骤）走的是**同一套**展开：校验、取组、按环改名。
+   * 两份实现迟早会在某处不一致（那种不一致只在建单时才暴露），所以抽在这里共用。
+   */
+
+  /** 卡片的展开前校验：返回错误文案；null = 没问题。`label` 用来点明是哪张卡片 */
+  function cardProblem (
+    id: string,
+    rotation: RotationSpec | undefined,
+    steps: ApprovalFlowStep[] | undefined,
+    label: string,
+  ): string | null {
+    if (!rotation) {
+      return `${label}：还没有轮询配置，请点卡片填写「组字段」`
+    }
+    if (!steps?.length) {
+      return `${label}：卡片内部没有任何环节，请先在卡片里加一个审批节点`
+    }
+    if (hasInnerRotation(steps)) {
+      return `${label}：卡片内部的环节不允许再配「按组轮询」`
+        + '（一个环里再套一层轮询没有确定的含义），请把它挪到卡片外'
+    }
+    return null
+  }
+
+  /**
+   * 卡片要轮询到的组。
+   * 返回 `null` = 展开不了（issues 里已写明）；返回 `[]` = 一个组都没命中但允许跳过（整卡跳过）。
+   */
+  function cardGroups (id: string, rotation: RotationSpec, label: string): RotationGroup[] | null {
+    const list = groups[id] ?? []
+    const limit = rotation.limit ?? ROTATION_DEFAULTS.limit
+    if (list.length === 0) {
+      if ((rotation.whenEmpty ?? ROTATION_DEFAULTS.whenEmpty) === 'fail') {
+        issues.push(`${label}：没有符合条件的组（该卡片设的是"没有匹配组就让建单失败"）`)
+        return null
+      }
+      expanded[id] = 0
+      return []
+    }
+    if (list.length > limit) {
+      issues.push(
+        `${label}：符合条件的组有 ${list.length} 个，超过上限 ${limit}`
+        + '（不静默截断，否则会漏掉几个组；请收窄条件或调大上限）',
+      )
+      return null
+    }
+    expanded[id] = list.length
+    return list
+  }
+
+  /**
+   * 环内有没有"没人办"的审批步骤：有就返回那一步（报错用），否则 null。
+   *
+   * 卡片内部是按组**复制**的，一个空环节会变成 N 个没人办的环 —— 单据会永远停在那儿。
+   * 保存期拦不住这类问题（编辑器允许存"人后配"的草稿模板，见 utils/loopCardGraph），
+   * 所以放在**建单期**当场报出来。
+   */
+  function unstaffedStep (steps: ApprovalFlowStep[]): ApprovalFlowStep | null {
+    for (const s of steps ?? []) {
+      if ((!s.type || s.type === 'approval') && (s.members ?? []).length === 0) {
+        return s
+      }
+      if (s.type === 'branch' || s.type === 'probe') {
+        for (const b of s.branches ?? []) {
+          const hit = unstaffedStep(b.steps ?? [])
+          if (hit) {
+            return hit
+          }
+        }
+      }
+      if (s.type === 'loop') {
+        const hit = unstaffedStep(s.steps ?? [])
+        if (hit) {
+          return hit
+        }
+      }
+    }
+    return null
+  }
+
   /** 展开一段"步骤链"，并把每个轮询步骤切成 N 个步骤 */
   function mapSteps (steps: ApprovalFlowStep[] | undefined): ApprovalFlowStep[] {
     const out: ApprovalFlowStep[] = []
@@ -289,16 +550,58 @@ export function expandRotations (
         out.push({ ...s, branches: mapBranches(s.branches ?? []) })
         continue
       }
-      const parts = splitMembers(s.id, s.members ?? [])
+      /*
+       * 「组间轮询」卡片（分支链里的步骤形态）：按组把**卡片内部子流程**复制 N 份，
+       * 铺成 N 段**步骤**（步骤本身是顺序的，所以 N 环就是 N 段首尾相接）。
+       *
+       * 这就是「先按条件分流、只有某条分支里才轮询各组」—— 卡片画在条件/结果分支后面即可。
+       */
+      if (s.type === 'loop') {
+        const label = rotationLabel(s.rotation ?? { groupFrom: '' })
+        const problem = cardProblem(s.id, s.rotation, s.steps, label)
+        if (problem) {
+          issues.push(problem)
+          out.push(s) // 原样保留：issues 非空即这条建单失败（不静默走别的意思）
+          continue
+        }
+        const list = cardGroups(s.id, s.rotation!, label)
+        if (list === null) {
+          out.push(s)
+          continue
+        }
+        if (list.length === 0) {
+          continue // 整卡跳过（一个组都没命中）
+        }
+        // 卡片被"驳回回退 / 跳出循环"指向时，落到**第一环的第一个步骤**
+        firstOf[s.id] = `${s.steps![0].id}#1`
+        for (const [i, group] of list.entries()) {
+          const ring = i + 1
+          const ringSteps = stampRing(s.steps!, s, group, ring)
+          const bad = unstaffedStep(ringSteps)
+          if (bad) {
+            issues.push(`${label}：卡片内部的「${bad.name || '未命名环节'}」没有审批人（第 ${ring} 环），这一环没人能办`)
+          }
+          out.push(...ringSteps)
+        }
+        continue
+      }
+      const members = s.members ?? []
+      const parts = splitMembers(s.id, members)
       if (parts === null) {
         out.push(s)
+        continue
+      }
+      if (!hasRotation(members)) {
+        out.push(s) // 没配轮询：原样（保证既有模板零改动）
         continue
       }
       if (parts.length === 0) {
         continue // 整环跳过（一个组都没命中）
       }
       if (parts.length === 1) {
-        out.push(s) // 没配轮询：原样（保证既有模板零改动）
+        // 只命中一个组：**只换成员**（该组负责人 + role.dept = 组名），id 与名字都不动 ——
+        // id 不变，跳转目标（驳回回退 / 跳出循环）就仍指向它，不必重映射。
+        out.push({ ...s, members: parts[0] })
         continue
       }
       firstOf[s.id] = `${s.id}#1`
@@ -315,16 +618,30 @@ export function expandRotations (
     return out
   }
 
-  /** 展开分支列表：步骤展开 + **驳回回退目标重映射** */
+  /** 展开分支列表：步骤展开 + **两种「跳转目标」的重映射**（驳回回退 / 跳出循环） */
   function mapBranches (branches: ApprovalBranch[]): ApprovalBranch[] {
     return (branches ?? []).map(b => {
-      const target = b.loopBackTo?.stepId
-      const retarget = target ? firstOf[target] : undefined
+      /*
+       * 跳转目标指向被展开的环节时，改指它的**第一环**。
+       *
+       * 两种跳转都必须映射，漏一个都是运行期故障：
+       *   · loopBackTo（驳回回退）：回到该环节重新办理 → 从第一环起、整段轮询重走一遍；
+       *   · exitTo（跳出循环）：跳到该环节 → 同样落在第一环。语义上"跳到循环本身"
+       *     本来就只有"重走"一种解释（类型注释也说目标该是循环**之后**的环节）。
+       *
+       * ⚠️ 漏映射的表现（踩过 exitTo 这个）：
+       *   · loopBackTo：目标 id 不存在 → 驳回走向一个没有落点的分支，流程卡住且**不报错**；
+       *   · exitTo：目标 id 不存在 → 运行期直接抛「跳出循环目标环节不存在」（见 types/approval.ts）。
+       * 而模板在编辑器里看着完全正常 —— 保存期那句"目标必须是已存在的环节"校验的是**展开前**
+       * 的 id，拦不住这种"展开后才对不上"的情况，所以只能在这里补。
+       */
+      const retargetOf = (stepId?: string) => (stepId ? firstOf[stepId] : undefined)
+      const loopBack = retargetOf(b.loopBackTo?.stepId)
+      const exit = retargetOf(b.exitTo?.stepId)
       return {
         ...b,
-        // 回退目标指向被展开的环节时，改指它的**第一环**：整个轮询重走一遍。
-        // 不重映射的话目标 id 不存在了，驳回会走向一个没有落点的分支（流程卡住且不报错）。
-        ...(retarget ? { loopBackTo: { stepId: retarget } } : {}),
+        ...(loopBack ? { loopBackTo: { stepId: loopBack } } : {}),
+        ...(exit ? { exitTo: { stepId: exit } } : {}),
         steps: mapSteps(b.steps),
       }
     })
@@ -333,8 +650,13 @@ export function expandRotations (
   const nodes: ApprovalFlowNode[] = []
   for (const node of flow) {
     if (node.type === 'approval') {
-      const parts = splitMembers(node.id, node.nodes ?? [])
+      const members = node.nodes ?? []
+      const parts = splitMembers(node.id, members)
       if (parts === null) {
+        nodes.push(node)
+        continue
+      }
+      if (!hasRotation(members)) {
         nodes.push(node)
         continue
       }
@@ -342,7 +664,8 @@ export function expandRotations (
         continue
       }
       if (parts.length === 1) {
-        nodes.push(node)
+        // 同 mapSteps：只命中一个组时只换成员，id 不变（跳转目标无需重映射）
+        nodes.push({ ...node, nodes: parts[0] })
         continue
       }
       firstOf[node.id] = `${node.id}#1`
@@ -352,8 +675,64 @@ export function expandRotations (
          * 只能靠成员体现：展开出来的成员是「该组负责人 + role.dept = 组名」，
          * 解析成真人后 `department` 会填成组名，时间线上就是「张三 / 华东组」。
          */
-        nodes.push({ id: `${node.id}#${i + 1}`, type: 'approval', nodes: members })
+        nodes.push({
+          id: `${node.id}#${i + 1}`,
+          type: 'approval',
+          nodes: members,
+          // 环节级选项树跟着复制：树里存的是**结论码**（不是节点 id），换环号不受影响
+          ...(node.optionGroups?.length ? { optionGroups: node.optionGroups } : {}),
+        })
       })
+      continue
+    }
+    /*
+     * 「组间轮询」卡片：按组把**卡片内部子流程**复制 N 份，摊平成顶层节点。
+     *
+     * 与成员级轮询的三点不同，都是有意的：
+     *   · 成员级把"一个环节"换成 N 个环节；卡片把"**一段子流程**"换成 N 段
+     *     （内部可以有自己的分支，所以"每个组各自分流"才成立）；
+     *   · 展开后**卡片这个 id 就没了**（内部环节直接成为顶层节点），所以 `firstOf[card.id]`
+     *     指向**第一环的第一个环节** —— 外层分支的驳回回退 / 跳出循环指向卡片时，
+     *     落点就是"整张卡片重走"；
+     *   · 单组命中时**也加 `#1` 后缀**（不像成员级那样保持原 id）：卡片整体消失，
+     *     内部环节的 id 变了，时间线与排查时才知道"这是卡片里的环节"。
+     */
+    if (node.type === 'loop') {
+      const label = rotationLabel(node.rotation)
+      const problem = cardProblem(node.id, node.rotation, node.steps, label)
+      if (problem) {
+        issues.push(problem)
+        continue
+      }
+      const list = cardGroups(node.id, node.rotation, label)
+      if (list === null) {
+        continue
+      }
+      if (list.length === 0) {
+        continue // 整卡跳过（一个组都没命中）
+      }
+      // 先登记"卡片 → 第一环的第一个环节"：stampRing 里"跳回卡片自己"要用到它
+      firstOf[node.id] = `${node.steps[0].id}#1`
+
+      for (const [i, group] of list.entries()) {
+        const ring = i + 1
+        const ringSteps = stampRing(node.steps, node, group, ring)
+        // 环内有没有人办：与分支里的卡片共用同一个检查（见 unstaffedStep 的说明）
+        const bad = unstaffedStep(ringSteps)
+        if (bad) {
+          issues.push(`${label}：卡片内部的「${bad.name || '未命名环节'}」没有审批人（第 ${ring} 环），这一环没人能办`)
+        }
+        for (const s of ringSteps) {
+          const n = stepToNode(s)
+          if (!n) {
+            issues.push(
+              `${label}：卡片内部的「数据查询」步骤没有在建单时展开（第 ${ring} 环），单据数据不完整`,
+            )
+            continue
+          }
+          nodes.push(n)
+        }
+      }
       continue
     }
     if (node.type === 'notify') {

@@ -7,7 +7,7 @@ import https from 'node:https'
 import * as lark from '@larksuiteoapi/node-sdk'
 import Database from 'better-sqlite3'
 import { runBiSync, uploadRows } from './biSync'
-import { purgeBiData } from './purgeData'
+import { purgeBiData as runPurgeBiData } from './purgeData'
 import { runReminders } from './reminders'
 
 /*
@@ -699,8 +699,26 @@ http.createServer(async (req, res) => {
       return
     }
 
-
-    if (pathname === '/api/word' && req.method === 'GET') {
+    // ─── 头像代理 ──────────────────────────────
+    // ─── 随机一言（第三方接口代理）──────────────
+    // POST /api/word         ← 我们自己的接口故意用 POST（前端 getWord 就是 POST，两边对齐）
+    //
+    // ⚠️ 为什么不用 GET：内容是**随机**的，GET 可能被浏览器 / 中间代理缓存，那就永远同一句。
+    //    POST 天然不可缓存。**别把它和上游的方法混起来看** —— 上游用什么方法由对方文档决定。
+    //
+    // 上游：毒鸡汤（夏柔 API）
+    //      https://v.api.aa1.cn/api/api-wenan-dujitang/index.php
+    //      · 方式 GET（文档声明）
+    //      · **参数 aa1 必填**：?aa1=json 回 JSON、?aa1=text 回纯文本；
+    //        一个都不带会直接返回「缺少参数或参数错误」（实测过）
+    //      · 我们取 aa1=text 拿纯文本 —— 比解析上游的 [{"dujitang":"…"}] 更不容易被改结构搞坏
+    //      · 拿回来**统一成前端已认的形状**（data.hitokoto）→ 以后再换供应商，前端不用动
+    //
+    // 为什么放服务端而不是浏览器直连：
+    //   1) 第三方接口基本不带 CORS 头，浏览器直连会被拦（登录页那句装饰文案就永远出不来）；
+    //   2) 第三方抖动挡在服务端：5 秒超时 + 兜底文案，登录页不该被一串文案拖住；
+    //   3) 以后想换供应商 / 加缓存，只改这一处，前端不用动。
+    if (pathname === '/api/word' && req.method === 'POST') {
       try {
         const upstream = await fetch('https://v.api.aa1.cn/api/api-wenan-dujitang/index.php?aa1=text', {
           method: 'GET',
@@ -944,26 +962,26 @@ http.createServer(async (req, res) => {
       return
     }
 
-    // ─── 清空 BI 数据（仅超级管理员，只清 bi_rows） ─────
-    // POST /api/admin/purge?dryRun=1   只统计条数、不删（确认框先用它把数量摆出来）
-    // POST /api/admin/purge            真删（bi_rows 可再用 /api/bi/sync 拉回来）
+    // ─── 清空 BI 数据（仅超级管理员） ───────────
+    // POST /api/bi/purge            真正清空（**只清 bi_rows**，它是 BI 的镜像，能再同步回来）
+    // POST /api/bi/purge?dryRun=1   只统计条数、不删（确认框先用它把"要删多少"摆出来）
+    //   请求头：Authorization: <调用者的 PB token>
     //
-    // 权限校验在 server/purgeData.ts 里做：用调用者自己的 token 调 PB 的 auth-refresh，
-    // 由 PocketBase 判定这个 token 是谁、role 是不是 superAdmin —— 不信前端传来的任何字段。
-    if (pathname === '/api/admin/purge' && req.method === 'POST') {
+    // 为什么权限判定在服务端：bi_rows 的 deleteRule 是空的（只有管理员能删），浏览器直删会被 PB 拒；
+    // 这里用管理员凭据绕过规则执行，所以"调用者是不是 superAdmin"必须拿**他的 token** 去问 PB，
+    // 前端隐藏按钮只是界面礼貌（见 server/purgeData.ts 的说明）。
+    if (pathname === '/api/bi/purge' && req.method === 'POST') {
       try {
-        const token = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+        const token = String(req.headers.authorization ?? '')
         const dryRun = url.searchParams.get('dryRun') === '1' || url.searchParams.get('dryRun') === 'true'
-        const summary = await purgeBiData({ token, dryRun })
-        console.log(
-          `[purge] ${summary.by.email ?? summary.by.id} ${dryRun ? '统计' : '清空'}：`
-          + `共 ${summary.totalCount} 条，删除 ${summary.totalDeleted} 条`,
-        )
+        const summary = await runPurgeBiData({ token, dryRun })
+        if (!dryRun) {
+          console.log(`[biPurge] ${summary.by.email ?? summary.by.id} 清空 ${summary.totalDeleted} 条`)
+        }
         json(res, 200, { code: 0, data: summary })
       } catch (error: any) {
-        console.error('[purge] 失败:', error?.message ?? error)
-        // 400：身份/权限/集合问题都是调用方能修的，不要混进 500
-        json(res, 400, { code: -1, msg: error?.message || String(error) })
+        console.error('[biPurge] 清空失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || String(error) })
       }
       return
     }

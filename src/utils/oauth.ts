@@ -50,7 +50,7 @@ export async function loginWithLarkEmbedded (onAuthUrl: (url: string) => void) {
     authData = await pb.collection('users').authWithOAuth2({
       provider: 'lark',
       // 只替换"打开方式"，其余（state、PKCE、redirect_uri、取 code、换 token）全交给 SDK
-      urlCallback: url => {
+      urlCallback: (url) => {
         onAuthUrl(url)
       },
     })

@@ -36,13 +36,13 @@
  *      这是 graphToFlowFrom 的硬校验。
  */
 import fs from 'node:fs'
-import { APPROVAL_RESULTS, type ApprovalChainItem, type ApprovalFlow, type ConditionExpr, flowToChain } from '../src/types/approval'
-import { ensureRejectLoopBack, graphToFlowFrom } from '../src/utils/approvalFlow'
-import { DERIVED_KEYS } from '../src/utils/biRowFields'
 import {
-  argOf, type BoardNode, fetchBoardNodes, labelOf, loadEnv, resolveBoard, tenantAuth,
-  WIKI_TOKEN,
+  argOf, fetchBoardNodes, labelOf, loadEnv, resolveBoard, tenantAuth, WIKI_TOKEN,
+  type BoardNode,
 } from './feishuBoard'
+import { DERIVED_KEYS } from '../src/utils/biRowFields'
+import { ensureRejectLoopBack, graphToFlowFrom } from '../src/utils/approvalFlow'
+import { flowToChain, APPROVAL_RESULTS, type ApprovalChainItem, type ApprovalFlow, type ConditionExpr } from '../src/types/approval'
 
 /* ==================== 参数与凭据 ==================== */
 
@@ -164,32 +164,28 @@ const VALID_RESULTS = new Set(APPROVAL_RESULTS.map(r => r.value))
 
 /* ==================== 白板 → 画布 ==================== */
 
-interface CanvasNode { id: string, type: string, position: { x: number, y: number }, data: Record<string, unknown> }
+interface CanvasNode { id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }
 interface CanvasEdge {
   id: string; source: string; target: string; label?: string
-  data?: { conditions?: BranchCondition[], logic?: 'and' | 'or' }
+  data?: { conditions?: BranchCondition[]; logic?: 'and' | 'or' }
 }
 
 /** 大框（分区，内含 >= 2 个形状） */
-function findZones (shapes: BoardNode[]): Set<string> {
+function findZones(shapes: BoardNode[]): Set<string> {
   const zones = new Set<string>()
   for (const s of shapes) {
-    if ((s.width ?? 0) < 260 || (s.height ?? 0) < 160) {
-      continue
-    }
+    if ((s.width ?? 0) < 260 || (s.height ?? 0) < 160) continue
     const inside = shapes.filter(o => o.id !== s.id
       && (o.x ?? 0) + (o.width ?? 0) / 2 > (s.x ?? 0)
       && (o.x ?? 0) + (o.width ?? 0) / 2 < (s.x ?? 0) + (s.width ?? 0)
       && (o.y ?? 0) + (o.height ?? 0) / 2 > (s.y ?? 0)
       && (o.y ?? 0) + (o.height ?? 0) / 2 < (s.y ?? 0) + (s.height ?? 0))
-    if (inside.length >= 2) {
-      zones.add(s.id)
-    }
+    if (inside.length >= 2) zones.add(s.id)
   }
   return zones
 }
 
-function build (all: BoardNode[]) {
+function build(all: BoardNode[]) {
   const shapes = all.filter(n => n.type === 'composite_shape')
   const notes = all.filter(n => n.type === 'sticky_note' || n.type === 'text_shape')
   const connectors = all.filter(n => n.type === 'connector')
@@ -203,9 +199,7 @@ function build (all: BoardNode[]) {
   const outCount = new Map<string, number>()
   for (const c of connectors) {
     const s = c.connector?.start_object?.id
-    if (s) {
-      outCount.set(s, (outCount.get(s) ?? 0) + 1)
-    }
+    if (s) outCount.set(s, (outCount.get(s) ?? 0) + 1)
   }
 
   const nodes: CanvasNode[] = []
@@ -216,22 +210,16 @@ function build (all: BoardNode[]) {
 
   const kindOf = (n: BoardNode): 'condition' | 'approval' => {
     // 菱形里"能由数据回答"的作条件节点，其余作审批环节（人判定）
-    if (n.composite_shape?.type === 'diamond' && CONDITION_RULES[n.id]) {
-      return 'condition'
-    }
+    if (n.composite_shape?.type === 'diamond' && CONDITION_RULES[n.id]) return 'condition'
     return 'approval'
   }
 
   for (const n of shapes) {
-    if (SKIP_NODE_IDS.has(n.id)) {
-      skippedIds.add(n.id); skipped.push(`${n.id}(虚拟流程，不走审批)`); continue
-    }
+    if (SKIP_NODE_IDS.has(n.id)) { skippedIds.add(n.id); skipped.push(`${n.id}(虚拟流程，不走审批)`); continue }
     const position = { x: Math.round(n.x ?? 0), y: Math.round(n.y ?? 0) }
     // 分区（判责流程/团队间流转…）本身也带连线，删掉会让后续环节接不上 —— 保留成环节，
     // 不想要的话在编辑器里删掉即可
-    if (zoneIds.has(n.id)) {
-      zones.push(n.id)
-    }
+    if (zoneIds.has(n.id)) zones.push(n.id)
     const kind = zoneIds.has(n.id) ? 'approval' : kindOf(n)
     if (kind === 'condition') {
       nodes.push({ id: n.id, type: 'condition', position, data: { title: labelOf(n) } })
@@ -243,9 +231,7 @@ function build (all: BoardNode[]) {
   //    而且它们各自孤立、反而容易成为最大可达块、把主入口抢走。
   //    白板上的 a*/w* 文本框就是这类（如「需要转交审批功能」「超时提醒」）。
   for (const n of notes) {
-    if (n.x === undefined || n.y === undefined) {
-      continue
-    }
+    if (n.x === undefined || n.y === undefined) continue
     skipped.push(`${n.id}(批注块，不是审批环节)`)
   }
 
@@ -253,15 +239,13 @@ function build (all: BoardNode[]) {
 
   // 出线数 & 入线数（用于挑主线、找入口、判定死胡同）
   const inCount = new Map<string, number>()
-  const rawEdges: { id: string, source: string, target: string, label: string }[] = []
+  const rawEdges: { id: string; source: string; target: string; label: string }[] = []
   for (const c of connectors) {
     const s = c.connector?.start_object?.id
     const t = c.connector?.end_object?.id
-    if (!s || !t || s === t) {
-      skipped.push(`${c.id}(空端点/自环)`); continue
-    }
+    if (!s || !t || s === t) { skipped.push(`${c.id}(空端点/自环)`); continue }
     if (!nodeById.has(s) || !nodeById.has(t)) {
-      const why = [s, t].some(id => skippedIds.has(id)) ? '端点已排除' : '端点不在图上'
+      const why = [s, t].filter(id => skippedIds.has(id)).length ? '端点已排除' : '端点不在图上'
       skipped.push(`${c.id}(${why})`)
       continue
     }
@@ -274,9 +258,7 @@ function build (all: BoardNode[]) {
 
   // 死胡同（没有出线）→ 作出口，否则分支的终点会被判成"非结束"、运行时停不对地方
   for (const n of nodes) {
-    if (!outCount.get(n.id)) {
-      n.type = 'end'
-    }
+    if (!outCount.get(n.id)) n.type = 'end'
   }
 
   // ⚠️ 条件节点必须有**至少两条**出边：graphToFlowFrom 对 condition 节点直接调 collectBranches，
@@ -310,7 +292,7 @@ function build (all: BoardNode[]) {
      * 这张白板大量分支是靠"箭头的落点"表意的（如「筛选一级原因/二级原因 → 运营类 / 产品侵权类 …」，
      * 线上一个字都没有），目标标题才是真正的分支语义。
      */
-    const nameOf = (e: { target: string, label: string }) =>
+    const nameOf = (e: { target: string; label: string }) =>
       e.label || String(nodeById.get(e.target)?.data.title ?? '').slice(0, 20) || `分支${e.id}`
 
     if (srcNode.type === 'condition') {
@@ -318,16 +300,13 @@ function build (all: BoardNode[]) {
       for (const e of outs) {
         const name = nameOf(e)
         const rule = rules.find(r => r.match.test(name))
-        if (rule) {
-          conditioned.push({
-            id: e.id, source: e.source, target: e.target, label: name,
-            data: { conditions: rule.conditions, ...(rule.logic ? { logic: rule.logic } : {}) },
-          })
-        } else {
-          main = main ?? { id: e.id, source: e.source, target: e.target, label: name }
-        }
+        if (rule) conditioned.push({
+          id: e.id, source: e.source, target: e.target, label: name,
+          data: { conditions: rule.conditions, ...(rule.logic ? { logic: rule.logic } : {}) },
+        })
+        else main = main ?? { id: e.id, source: e.source, target: e.target, label: name }
       }
-      if (conditioned.length === 0) {
+      if (!conditioned.length) {
         manual.push(`${src}「${title}」未登记数据条件 → 已作审批判定（由人在办理时选走向）`)
       }
     } else {
@@ -354,15 +333,13 @@ function build (all: BoardNode[]) {
           data: { conditions: [{ field: 'result', op: 'eq', value }] },
         })
       }
-      if (dropped.length > 0) {
+      if (dropped.length) {
         manual.push(`${src}「${title}」有 ${dropped.length} 条出线对不上审批结论（${dropped.slice(0, 4).join('/')}${dropped.length > 4 ? '…' : ''}）→ 已暂不生成该分支，需人工补结论或条件`)
       }
     }
 
     edgeList.push(...conditioned)
-    if (main) {
-      edgeList.push(main)
-    }
+    if (main) edgeList.push(main)
   }
 
   return { nodes, edges: edgeList, zoneIds: zones, zoneOf, skipped, manual, inCount }
@@ -384,16 +361,14 @@ function build (all: BoardNode[]) {
  *   - 补出来的每条都会打印出来，**请人工核对**（顺序不对就在白板上补真箭头，或加 --no-fill）；
  *   - 结束框不给补入线（它没出线是正常的），批注块（a 或 w 开头、text_shape / sticky_note）不参与。
  */
-function inferConnectorsByLayout (
+function inferConnectorsByLayout(
   shapes: BoardNode[], connectors: BoardNode[], zoneIds: Set<string>,
-): { synthetic: BoardNode[], inferred: string[] } {
+): { synthetic: BoardNode[]; inferred: string[] } {
   const meta = new Map(shapes.map(s => [s.id, { x: s.x ?? 0, y: s.y ?? 0, type: s.type, title: labelOf(s).replace(/\s+/g, ' ').slice(0, 24) }]))
   const hasIn = new Set<string>()
   for (const c of connectors) {
     const t = c.connector?.end_object?.id
-    if (t && meta.has(t)) {
-      hasIn.add(t)
-    }
+    if (t && meta.has(t)) hasIn.add(t)
   }
 
   const isNote = (id: string, type: string) => /^[aw]\d/.test(id) || type === 'text_shape' || type === 'sticky_note'
@@ -403,9 +378,7 @@ function inferConnectorsByLayout (
   const zoneSet = new Set(zoneIds)
   const groups = new Map<string, string[]>()
   for (const s of shapes) {
-    if (isNote(s.id, s.type)) {
-      continue
-    }
+    if (isNote(s.id, s.type)) continue
     // 分区节点归进**它自己的分区**（zoneMembership 会跳过分区自身）。
     // 归到"分区外"的话，链永远接不进分区内部，每个分区都变成没入口的孤岛。
     const key = zoneSet.has(s.id) ? s.id : (member.get(s.id) ?? '__outside__')
@@ -420,9 +393,7 @@ function inferConnectorsByLayout (
     let prev = ''
     for (const id of ordered) {
       const m = meta.get(id)!
-      if (isNote(id, m.type)) {
-        continue
-      }
+      if (isNote(id, m.type)) continue
       // 缺入线、且不是结束框 → 从阅读顺序上的前一个框接一条
       if (!hasIn.has(id) && prev && !isEndTitle(id)) {
         synthetic.push({
@@ -452,7 +423,7 @@ function inferConnectorsByLayout (
  * 这里改成试探：逐个多出线节点，试着删掉它的非主线分支，**能转换通过**才保留这个删法。
  * 累积进行，所以"需要同时删两处"的情况也能收敛。删掉的分支逐条报出，人工可在编辑器里补回。
  */
-function repairConvergence (nodes: CanvasNode[], edges: CanvasEdge[]) {
+function repairConvergence(nodes: CanvasNode[], edges: CanvasEdge[]) {
   const titleOf = (id: string) => String(nodes.find(n => n.id === id)?.data.title ?? id)
   let kept = edges
   const repaired: string[] = []
@@ -472,35 +443,25 @@ function repairConvergence (nodes: CanvasNode[], edges: CanvasEdge[]) {
    * 因此：每轮先看整体是否已通过，通过就立刻停；否则一次只删一条，第一条见效即收手。
    */
   for (let pass = 0; pass < 8; pass++) {
-    if (!graphToFlowFrom(nodes, kept, FIX_OPTS).error) {
-      break
-    }
+    if (!graphToFlowFrom(nodes, kept, FIX_OPTS).error) break
     let changed = false
     for (const { src } of multiSources) {
-      if (!graphToFlowFrom(nodes, kept, FIX_OPTS).error) {
-        break
-      }
+      if (!graphToFlowFrom(nodes, kept, FIX_OPTS).error) break
       const now = kept.filter(e => e.source === src)
-      if (now.length < 2) {
-        continue
-      }
+      if (now.length < 2) continue
       const mainEdge = now.find(e => !e.data?.conditions) ?? now[0]
       for (const extra of now.filter(e => e.id !== mainEdge.id)) {
         const trial = kept.filter(e => e.id !== extra.id)
-        if (graphToFlowFrom(nodes, trial, FIX_OPTS).error) {
-          continue
-        }
+        if (graphToFlowFrom(nodes, trial, FIX_OPTS).error) continue
         kept = trial
         changed = true
         repaired.push(
           `${src}「${titleOf(src).slice(0, 16)}」的分支「${String(extra.label)}」走向无法与主线汇聚 → 暂不生成`,
         )
-        break // 这一条修好就够了，别再动这个环节的其它分支
+        break   // 这一条修好就够了，别再动这个环节的其它分支
       }
     }
-    if (!changed) {
-      break
-    }
+    if (!changed) break
   }
   return { edges: kept, repaired }
 }
@@ -529,31 +490,25 @@ interface Segment {
  * 入口走不到的分区也各自成段（它自己就是一条完整业务流）。
  * 分区节点**保留为段内第一个环节**（它带出线，删掉会丢分支），不想要可在编辑器里删。
  */
-function splitSegments (
+function splitSegments(
   nodes: CanvasNode[], edges: CanvasEdge[], zoneIds: string[], entry: string, whole: boolean,
   zoneOf: Map<string, string>,
 ): Segment[] {
   const titleOf = (id: string) => String(nodes.find(n => n.id === id)?.data.title ?? id)
   const out = new Map<string, string[]>()
-  for (const e of edges) {
-    out.set(e.source, [...(out.get(e.source) ?? []), e.target])
-  }
+  for (const e of edges) out.set(e.source, [...(out.get(e.source) ?? []), e.target])
 
   /** 归属：node → 段 key */
   const segOf = new Map<string, string>()
   if (whole) {
     const seen = new Set([entry])
     const queue = [entry]
-    while (queue.length > 0) {
+    while (queue.length) {
       for (const next of out.get(queue.shift()!) ?? []) {
-        if (!seen.has(next)) {
-          seen.add(next); queue.push(next)
-        }
+        if (!seen.has(next)) { seen.add(next); queue.push(next) }
       }
     }
-    for (const id of seen) {
-      segOf.set(id, 'entry')
-    }
+    for (const id of seen) segOf.set(id, 'entry')
   } else {
     /*
      * 段归属**按几何**（这个框落在哪个分区里），不按箭头可达性走。
@@ -565,22 +520,18 @@ function splitSegments (
      */
     for (const n of nodes) {
       const z = zoneOf.get(n.id)
-      if (z) {
-        segOf.set(n.id, `zone:${z}`)
-      }
+      if (z) segOf.set(n.id, `zone:${z}`)
     }
   }
 
   const groups = new Map<string, CanvasNode[]>()
   for (const n of nodes) {
     const key = segOf.get(n.id)
-    if (key) {
-      groups.set(key, [...(groups.get(key) ?? []), n])
-    }
+    if (key) groups.set(key, [...(groups.get(key) ?? []), n])
   }
 
   const keys = [...groups.keys()].sort((a, b) => (a === 'entry' ? -1 : b === 'entry' ? 1 : a < b ? -1 : 1))
-  return keys.map(key => {
+  return keys.map((key) => {
     const segNodes = groups.get(key)!
     const segIds = new Set(segNodes.map(n => n.id))
     const handoff = edges
@@ -599,22 +550,18 @@ function splitSegments (
 /* ==================== 白板体检：待补连线清单 ==================== */
 
 /** 形状 → 所属分区（取**最小**的包含它的分区，兼容分区嵌套）；不在任何分区则为空 */
-function zoneMembership (shapes: BoardNode[], zoneIds: Set<string>): Map<string, string> {
+function zoneMembership(shapes: BoardNode[], zoneIds: Set<string>): Map<string, string> {
   const zones = shapes.filter(s => zoneIds.has(s.id))
   const of = new Map<string, string>()
   for (const s of shapes) {
-    if (zoneIds.has(s.id)) {
-      continue
-    }
+    if (zoneIds.has(s.id)) continue
     const cx = (s.x ?? 0) + (s.width ?? 0) / 2
     const cy = (s.y ?? 0) + (s.height ?? 0) / 2
     const hits = zones
       .filter(z => cx > (z.x ?? 0) && cx < (z.x ?? 0) + (z.width ?? 0)
         && cy > (z.y ?? 0) && cy < (z.y ?? 0) + (z.height ?? 0))
       .sort((a, b) => (a.width ?? 0) * (a.height ?? 0) - (b.width ?? 0) * (b.height ?? 0))
-    if (hits[0]) {
-      of.set(s.id, hits[0].id)
-    }
+    if (hits[0]) of.set(s.id, hits[0].id)
   }
   return of
 }
@@ -624,16 +571,14 @@ function zoneMembership (shapes: BoardNode[], zoneIds: Set<string>): Map<string,
  * 缺箭头的地方人和机器看到的东西完全不同（人看到顺序，机器看到孤岛）。
  * 这里按分区、按阅读顺序（y 再 x）列出来，照着一处处补就行。
  */
-function reportGaps (shapes: BoardNode[], connectors: BoardNode[], skippedIds: Set<string>) {
+function reportGaps(shapes: BoardNode[], connectors: BoardNode[], skippedIds: Set<string>) {
   const shapeIds = new Set(shapes.filter(s => !skippedIds.has(s.id)).map(s => s.id))
   const inDeg = new Map<string, number>()
   const outDeg = new Map<string, number>()
   for (const c of connectors) {
     const s = c.connector?.start_object?.id
     const t = c.connector?.end_object?.id
-    if (!s || !t || s === t || !shapeIds.has(s) || !shapeIds.has(t)) {
-      continue
-    }
+    if (!s || !t || s === t || !shapeIds.has(s) || !shapeIds.has(t)) continue
     outDeg.set(s, (outDeg.get(s) ?? 0) + 1)
     inDeg.set(t, (inDeg.get(t) ?? 0) + 1)
   }
@@ -646,19 +591,13 @@ function reportGaps (shapes: BoardNode[], connectors: BoardNode[], skippedIds: S
   const groups = new Map<string, BoardNode[]>()
   const push = (key: string, n: BoardNode) => groups.set(key, [...(groups.get(key) ?? []), n])
   for (const n of shapes) {
-    if (skippedIds.has(n.id)) {
-      continue
-    }
+    if (skippedIds.has(n.id)) continue
     push(member.get(n.id) ?? '__outside__', n)
   }
 
   const order = [...groups.keys()].sort((a, b) => {
-    if (a === '__outside__') {
-      return 1
-    }
-    if (b === '__outside__') {
-      return -1
-    }
+    if (a === '__outside__') return 1
+    if (b === '__outside__') return -1
     const za = shapes.find(s => s.id === a)!, zb = shapes.find(s => s.id === b)!
     return (za.y ?? 0) - (zb.y ?? 0) || (za.x ?? 0) - (zb.x ?? 0)
   })
@@ -673,9 +612,7 @@ function reportGaps (shapes: BoardNode[], connectors: BoardNode[], skippedIds: S
     const bad = items.filter(n => {
       const i = inDeg.get(n.id) ?? 0
       const o = outDeg.get(n.id) ?? 0
-      if (isEndTitle(n)) {
-        return false
-      } // 「流程结束」本来就没有出线，不算缺口
+      if (isEndTitle(n)) return false          // 「流程结束」本来就没有出线，不算缺口
       return i === 0 || o === 0
     })
     console.log('')
@@ -683,14 +620,10 @@ function reportGaps (shapes: BoardNode[], connectors: BoardNode[], skippedIds: S
     for (const n of items.sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0))) {
       const i = inDeg.get(n.id) ?? 0
       const o = outDeg.get(n.id) ?? 0
-      if (isEndTitle(n)) {
-        continue
-      }
-      if (i && o) {
-        continue
-      }
+      if (isEndTitle(n)) continue
+      if (i && o) continue
       gaps++
-      const why = !i && !o ? '❌ 孤立：无进无出' : (i ? '⚠️ 缺出线' : '⚠️ 缺入线')
+      const why = !i && !o ? '❌ 孤立：无进无出' : !i ? '⚠️ 缺入线' : '⚠️ 缺出线'
       console.log(`   ${why}  ${n.id}  ${titleOf(n)}`)
     }
   }
@@ -713,27 +646,17 @@ interface Finalized {
 }
 
 /** 递归数 flow 里的审批步骤数（空审批人时 flowToChain 会拍出空 chain，不能拿 chain 判） */
-function countFlowSteps (nodes: ApprovalFlow): number {
+function countFlowSteps(nodes: ApprovalFlow): number {
   let n = 0
-  const walkSteps = (steps: { type?: string, branches?: { steps: any[] }[] }[] | undefined) => {
+  const walkSteps = (steps: { type?: string; branches?: { steps: any[] }[] }[] | undefined) => {
     for (const s of steps ?? []) {
-      if (s.type === 'branch') {
-        for (const b of s.branches ?? []) {
-          walkSteps(b.steps)
-        }
-      } else {
-        n++
-      }
+      if (s.type === 'branch') for (const b of s.branches ?? []) walkSteps(b.steps)
+      else n++
     }
   }
   for (const node of nodes) {
-    if (node.type === 'approval') {
-      n++
-    } else {
-      for (const b of node.branches) {
-        walkSteps(b.steps)
-      }
-    }
+    if (node.type === 'approval') n++
+    else for (const b of node.branches) walkSteps(b.steps)
   }
   return n
 }
@@ -743,7 +666,7 @@ function countFlowSteps (nodes: ApprovalFlow): number {
  * 与编辑器保存走**同一套**转换（graphToFlowFrom → ensureRejectLoopBack → flowToChain），
  * 所以产物和手工在编辑器里保存出来的完全同构。
  */
-function finalizeSegment (seg: Segment): Finalized {
+function finalizeSegment(seg: Segment): Finalized {
   const expected = seg.nodes.length
   const manual: string[] = []
   const nodes = seg.nodes.map(n => ({ ...n, data: { ...n.data } }))
@@ -752,9 +675,7 @@ function finalizeSegment (seg: Segment): Finalized {
   // 段内出度：没出线的作出口；条件节点出度 <2 退回审批
   // （graphToFlowFrom 对 condition 节点直接调 collectBranches，出度 <2 会整体报错）
   const outDeg = new Map<string, number>()
-  for (const e of edges) {
-    outDeg.set(e.source, (outDeg.get(e.source) ?? 0) + 1)
-  }
+  for (const e of edges) outDeg.set(e.source, (outDeg.get(e.source) ?? 0) + 1)
   for (const n of nodes) {
     const deg = outDeg.get(n.id) ?? 0
     if (n.type === 'condition' && deg < 2) {
@@ -779,20 +700,14 @@ function finalizeSegment (seg: Segment): Finalized {
     const keep = endNodes[0].id
     const dropIds = new Set(endNodes.slice(1).map(n => n.id))
     edges = edges.map(e => (dropIds.has(e.target) ? { ...e, target: keep } : e))
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      if (dropIds.has(nodes[i].id)) {
-        nodes.splice(i, 1)
-      }
-    }
+    for (let i = nodes.length - 1; i >= 0; i--) if (dropIds.has(nodes[i].id)) nodes.splice(i, 1)
     manual.push(`段内 ${endNodes.length} 个结束节点合并为 1 个（各分支汇聚到同一终点）`)
   }
 
   // start → 段内没有入线的第一个节点
   const hasIn = new Set(edges.map(e => e.target))
   const roots = nodes.filter(n => n.type !== 'end' && !hasIn.has(n.id)).map(n => n.id)
-  if (roots.length === 0) {
-    return { ok: false, reason: '段内找不到入口节点（可能全是环）', nodes, edges, manual }
-  }
+  if (!roots.length) return { ok: false, reason: '段内找不到入口节点（可能全是环）', nodes, edges, manual }
   if (roots.length > 1) {
     manual.push(`段内有 ${roots.length} 个起点，只从「${String(nodes.find(n => n.id === roots[0])?.data.title).slice(0, 14)}」接入`)
   }
@@ -809,33 +724,23 @@ function finalizeSegment (seg: Segment): Finalized {
 
   // 只保留从 start 可达的部分（段内也可能有接不上的小块）
   const outMap = new Map<string, string[]>()
-  for (const e of edges) {
-    outMap.set(e.source, [...(outMap.get(e.source) ?? []), e.target])
-  }
+  for (const e of edges) outMap.set(e.source, [...(outMap.get(e.source) ?? []), e.target])
   const seen = new Set([startId])
   const queue = [startId]
-  while (queue.length > 0) {
-    for (const t of outMap.get(queue.shift()!) ?? []) {
-      if (!seen.has(t)) {
-        seen.add(t); queue.push(t)
-      }
-    }
+  while (queue.length) {
+    for (const t of outMap.get(queue.shift()!) ?? []) if (!seen.has(t)) { seen.add(t); queue.push(t) }
   }
   const keptNodes = nodes.filter(n => seen.has(n.id))
   const keptEdges = edges.filter(e => seen.has(e.source) && seen.has(e.target))
   const missing = nodes.length - keptNodes.length
-  if (missing) {
-    manual.push(`段内有 ${missing} 个节点接不到主线 → 未纳入`)
-  }
+  if (missing) manual.push(`段内有 ${missing} 个节点接不到主线 → 未纳入`)
 
   const fixed = repairConvergence(keptNodes, keptEdges)
   manual.push(...fixed.repaired)
 
   // 草稿豁免：生成的模板审批人为空（人后配），不豁免的话这里一律卡在「请至少添加一个审批人」
   const { flow: rawFlow, error } = graphToFlowFrom(keptNodes, fixed.edges, { allowEmptyMembers: true })
-  if (error) {
-    return { ok: false, reason: error, nodes: keptNodes, edges: fixed.edges, manual }
-  }
+  if (error) return { ok: false, reason: error, nodes: keptNodes, edges: fixed.edges, manual }
 
   const flow = ensureRejectLoopBack(rawFlow)
   const chain = flowToChain(flow)
@@ -860,7 +765,7 @@ function finalizeSegment (seg: Segment): Finalized {
   return { ok: true, nodes: keptNodes, edges: fixed.edges, flow, chain, manual }
 }
 
-interface WriteResult { id: string, action: 'created' | 'replaced' | 'skipped' }
+interface WriteResult { id: string; action: 'created' | 'replaced' | 'skipped' }
 
 /**
  * 写模板。
@@ -869,13 +774,11 @@ interface WriteResult { id: string, action: 'created' | 'replaced' | 'skipped' }
  *    重跑时把改动冲掉是最糟的。要拿新版就先删旧模板，或加 --replace。
  *    （白板补箭头后一定会重跑，所以这一步必须挡重名，否则每跑一次多一张同名模板。）
  */
-async function writeTemplate (name: string, payload: unknown): Promise<WriteResult> {
+async function writeTemplate(name: string, payload: unknown): Promise<WriteResult> {
   const q = `${PB_URL}/api/collections/app_chain/records?perPage=1&filter=${encodeURIComponent(`name="${name}"`)}`
   const found = await (await fetch(q)).json().catch(() => null) as any
   const existing = found?.items?.[0]
-  if (existing && !REPLACE) {
-    return { id: existing.id, action: 'skipped' }
-  }
+  if (existing && !REPLACE) return { id: existing.id, action: 'skipped' }
 
   const res = await fetch(
     existing
@@ -888,15 +791,13 @@ async function writeTemplate (name: string, payload: unknown): Promise<WriteResu
     },
   )
   const saved = await res.json().catch(() => null) as any
-  if (!res.ok) {
-    throw new Error(`写入 app_chain 失败：HTTP ${res.status} ${saved?.message ?? ''}`)
-  }
+  if (!res.ok) throw new Error(`写入 app_chain 失败：HTTP ${res.status} ${saved?.message ?? ''}`)
   return { id: saved?.id, action: existing ? 'replaced' : 'created' }
 }
 
 /* ==================== 主流程 ==================== */
 
-async function main () {
+async function main() {
   const auth = await tenantAuth(APP_ID, APP_SECRET)
   const { board, from } = await resolveBoard(auth, WIKI, EXPLICIT_BOARD)
   console.log(`[gen] 白板 ${board}（${from}）`)
@@ -908,7 +809,7 @@ async function main () {
    * 按 z_index、再按 id，保证"同一份白板 → 同一份产物"。
    */
   const all = [...(await fetchBoardNodes(auth, board))].sort(
-    (a, b) => (a.z_index ?? 0) - (b.z_index ?? 0) || (a.id < b.id ? -1 : (a.id > b.id ? 1 : 0)),
+    (a, b) => (a.z_index ?? 0) - (b.z_index ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   )
   const shapes = all.filter(n => n.type === 'composite_shape' || n.type === 'sticky_note' || n.type === 'text_shape')
   const connectors = all.filter(n => n.type === 'connector')
@@ -919,43 +820,31 @@ async function main () {
   const filled = args.includes('--no-fill')
     ? { synthetic: [] as BoardNode[], inferred: [] as string[] }
     : inferConnectorsByLayout(shapes, connectors, findZones(shapes))
-  if (filled.inferred.length > 0) {
+  if (filled.inferred.length) {
     console.log(`[gen] 按版面推断补了 ${filled.inferred.length} 条连线（**需人工核对**）：`)
-    for (const s of filled.inferred) {
-      console.log(`     + ${s}`)
-    }
+    for (const s of filled.inferred) console.log(`     + ${s}`)
     console.log('')
   }
 
   const { nodes, edges, zoneIds, zoneOf, skipped, manual } = build([...all, ...filled.synthetic])
   const titleOf = (id: string) => String(nodes.find(n => n.id === id)?.data.title ?? id).replace(/\s+/g, ' ')
   const inCount = new Map<string, number>()
-  for (const e of edges) {
-    inCount.set(e.target, (inCount.get(e.target) ?? 0) + 1)
-  }
+  for (const e of edges) inCount.set(e.target, (inCount.get(e.target) ?? 0) + 1)
   console.log(`[gen] 画布 ${nodes.length} 节点 / ${edges.length} 连线（白板原始 ${connectors.length} 条箭头 + 推断 ${filled.synthetic.length} 条）`)
 
   // 入口：没有入线、可达节点最多的那个（白板上有多个独立起点）
   const out = new Map<string, string[]>()
-  for (const e of edges) {
-    out.set(e.source, [...(out.get(e.source) ?? []), e.target])
-  }
+  for (const e of edges) out.set(e.source, [...(out.get(e.source) ?? []), e.target])
   const bfs = (root: string) => {
     const seen = new Set([root])
     const queue = [root]
-    while (queue.length > 0) {
-      for (const t of out.get(queue.shift()!) ?? []) {
-        if (!seen.has(t)) {
-          seen.add(t); queue.push(t)
-        }
-      }
+    while (queue.length) {
+      for (const t of out.get(queue.shift()!) ?? []) if (!seen.has(t)) { seen.add(t); queue.push(t) }
     }
     return seen
   }
   const rootIds = nodes.filter(n => n.type !== 'end' && !(inCount.get(n.id) ?? 0)).map(n => n.id)
-  if (rootIds.length === 0) {
-    throw new Error('找不到入口节点（所有节点都有入线，疑似有环）')
-  }
+  if (!rootIds.length) throw new Error('找不到入口节点（所有节点都有入线，疑似有环）')
   const comps = rootIds.map(id => ({ id, size: bfs(id).size }))
     .sort((a, b) => b.size - a.size || (a.id < b.id ? -1 : 1))
 
@@ -988,10 +877,8 @@ async function main () {
 
   const only = argOf('segment', args) || ''
   let segments = splitSegments(nodes, edges, zoneIds, entry, args.includes('--whole'), zoneOf)
-  if (only) {
-    segments = segments.filter(s => s.key === only || s.key === `zone:${only}`)
-  }
-  if (segments.length === 0) {
+  if (only) segments = segments.filter(s => s.key === only || s.key === `zone:${only}`)
+  if (!segments.length) {
     const available = splitSegments(nodes, edges, zoneIds, entry, false, zoneOf).map(s => s.key)
     throw new Error(`没匹配到分段「${only}」；可用：${available.join(', ')}`)
   }
@@ -1005,15 +892,11 @@ async function main () {
     // 环节数按 flow 数（chain 会跳过空审批人的环节，生成的模板里它恒为空）
     const steps = r.ok ? countFlowSteps((r.flow ?? []) as ApprovalFlow) : 0
     console.log(`${r.ok ? '✅' : '❌'} ${seg.title}：纳入 ${r.nodes.length - 1} 节点 → ${steps} 个环节${r.ok ? '' : `，${r.reason}`}`)
-    if (seg.handoff.length > 0) {
+    if (seg.handoff.length) {
       console.log(`     段末交接：${seg.handoff.slice(0, 4).join('、')}${seg.handoff.length > 4 ? ` …（共 ${seg.handoff.length} 条）` : ''}`)
     }
-    for (const m of r.manual) {
-      console.log(`     ⚠️ ${m}`)
-    }
-    if (!r.ok) {
-      failed.push(seg.title); console.log(''); continue
-    }
+    for (const m of r.manual) console.log(`     ⚠️ ${m}`)
+    if (!r.ok) { failed.push(seg.title); console.log(''); continue }
 
     const name = `${NAME} · ${seg.title}`
     if (DRY_RUN) {
@@ -1035,34 +918,28 @@ async function main () {
     console.log('')
   }
 
-  if (skipped.length > 0) {
+  if (skipped.length) {
     console.log(`[gen] 跳过连线 ${skipped.length} 条：${skipped.slice(0, 8).join('、')}${skipped.length > 8 ? ' …' : ''}`)
   }
-  if (manual.length > 0) {
+  if (manual.length) {
     console.log(`[gen] ⚠️ 白板层面待确认 ${manual.length} 条：`)
-    for (const m of manual) {
-      console.log(`     - ${m}`)
-    }
+    for (const m of manual) console.log(`     - ${m}`)
   }
   console.log('')
   const okCount = segments.length - failed.length
   if (DRY_RUN) {
     console.log(`✅ dry-run 结束：${okCount}/${segments.length} 段可生成（去掉 --dry-run 才会写库）`)
   } else {
-    console.log(`✅ 完成：写入 ${created} 张模板；未通过 ${failed.length} 段${failed.length > 0 ? '：' + failed.join('、') : '（无）'}`)
+    console.log(`✅ 完成：写入 ${created} 张模板；未通过 ${failed.length} 段${failed.length ? '：' + failed.join('、') : '（无）'}`)
   }
-  if (!okCount) {
-    process.exit(1)
-  }
-  if (failed.length > 0) {
-    process.exit(2)
-  }
+  if (!okCount) process.exit(1)
+  if (failed.length) process.exit(2)
 }
 
 try {
   await main()
-} catch (error: any) {
+} catch (err: any) {
   console.error('')
-  console.error('❌ 生成失败: ' + (error?.message ?? error))
+  console.error('❌ 生成失败: ' + (err?.message ?? err))
   process.exit(1)
 }

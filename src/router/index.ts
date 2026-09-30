@@ -98,30 +98,16 @@ const router = createRouter({
       path: '/workStream',
       component: () => import('@/pages/workStream.vue'),
     },
+    {
+      path: '/alarmSetting',
+      component: () => import('@/pages/alarmSetting.vue'),
+    },
   ],
   scrollBehavior () {
     return { top: 0 }
   },
 })
 
-/**
- * 动态导入失败时自动重载一次。
- *
- * 报错形态：
- *   Failed to fetch dynamically imported module: http://localhost:3000/src/pages/xxx.vue?t=...
- *
- * 两类成因，**都不是"代码写错了"**：
- *   1. 开发时 Vite 重新预构建依赖（optimizeDeps，见 vite.config.mts 的说明）——
- *      旧的模块 URL 批量失效，此时点菜单就会报这个；
- *   2. 生产发版后，用户手里的 index.html 还是旧的，它引用的 chunk 已被新版本替换。
- *
- * 两种都只需**重新加载页面**即可恢复。不做的话表现就是"点了菜单没反应"，
- * 而用户不知道要刷新 —— 所以这里替他们做掉。
- *
- * 只自动重载一次（sessionStorage 记时间戳，60 秒内不重复）：
- * 万一真有一个模块永远拉不到（文件被删之类），不能把用户锁进
- * "重载 → 报错 → 重载"的死循环；那种情况让错误照常抛出，便于排查。
- */
 router.onError(error => {
   const message = String((error as Error)?.message ?? error)
   const isChunkError = /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(message)
