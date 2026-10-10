@@ -30,14 +30,14 @@
         />
 
         <v-select
-          v-model="deptFilter"
+          v-model="modelFilter"
+          class="filter-select"
           clearable
           density="compact"
           flat
-          class="filter-select"
           hide-details
-          :items="deptOptions"
-          label="部门选择"
+          :items="modelOptions"
+          label="主MODEL"
           :menu-props="{ contentClass: 'filter-menu' }"
           single-line
           variant="outlined"
@@ -57,21 +57,7 @@
           variant="outlined"
         />
 
-        <v-select
-          v-model="deptFilter"
-          clearable
-          density="compact"
-          flat
-          class="filter-select"
-          hide-details
-          :items="deptOptions"
-          label="状态"
-          :menu-props="{ contentClass: 'filter-menu' }"
-          single-line
-          variant="outlined"
-        />
-
-        <v-btn color="surface-variant" size="small" variant="flat" @click="resetHistoryFilters">
+        <v-btn color="surface-variant" size="small" variant="flat" @click="resetFilters">
           <span>重置</span>
         </v-btn>
 
@@ -89,7 +75,7 @@
         :headers="headers"
         fixed-footer
         hover
-        :items="pendingRows"
+        :items="filteredRows"
         :items-per-page="itemsPerPage"
         striped="odd"
         @click:row="handleRowClick"
@@ -116,6 +102,9 @@
           <v-btn color="primary" variant="text" @click.stop="goApproval(item)">
             <span class="text-[13px]">审批</span>
           </v-btn>
+
+          <!-- 删除审批单：按钮里自带权限判断（只有超级管理员看得见）与确认框 -->
+          <DeleteOrderButton :row="item" @deleted="onOrderDeleted" @error="onDeleteFailed" />
         </template>
       </v-data-table>
     </v-sheet>
@@ -166,19 +155,34 @@
 
       <div class="px-2 py-4  rounded bg-app">
         <v-timeline density="compact" side="end" truncate-line="both" width="100%">
+          <!--
+            时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 selectedStepGroups），
+            弹窗里把这一串动作连着办（办完自动接下一环）。
+          -->
           <ApprovalNode
-            v-for="(step, index) in selectedChain"
-            :key="`${selectedOrder?.id}-${index}`"
-            :allowed-options="selectedOptionItems[selectedStepIds[index]]"
-            :allowed-results="selectedResultOptions[selectedStepIds[index]]"
-            :can-handle="index === selectedCurrentStep"
-            :data="step"
-            :index="index"
+            v-for="(g, gi) in selectedStepGroups"
+            :key="`${selectedOrder?.id}-${g.stepIds[0] || gi}`"
+            :allowed-options="selectedOptionItems[g.stepIds[0]]"
+            :allowed-results="selectedResultOptions[g.stepIds[0]]"
+            :can-handle="g.indexes.includes(selectedCurrentStep)"
+            :data="g.steps[0]"
+            :index="g.indexes[0]"
+            :in-discard-segment="discardIndexOf(g)"
+            :discard-segment-size="discardNodeCount"
             :length="selectedChain.length"
-            :prev-time="selectedStartTimes[index]"
+            :next-steps="nextStepsOf(g, selectedOptionItems, selectedResultOptions)"
+            :option-context="optionContextOf(selectedOrder, selectedChain, g.indexes[0])"
+            :prev-time="g.startTimes[0]"
+            :receiver-team="selectedReceiverTeam"
             :start-time="selectedOrder?.created"
+            :remaining-qty="selectedRemainingQty"
+            :stock-amount="selectedStockAmount"
+            :stock-qty="selectedStockQty"
             @submit="onDrawerSubmit"
           />
+
+          <!-- 时间线最后一条：流转为什么停下（与审批页同一口径） -->
+          <FlowEndNote :end="selectedFlowEnd" />
         </v-timeline>
       </div>
     </v-container>
@@ -197,20 +201,39 @@
 
 <script setup lang="ts">
   import type { ApprovalChainItem, ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
-  import { sendFeishuCard } from '@/api/api'
+  import { sendFeishuCard, type DeleteOrderSummary } from '@/api/api'
   import ApprovalNode from '@/components/ApprovalNode.vue'
+  // 操作栏的「删除审批单」：按钮内置权限判断与确认框（与 home.vue 共用同一个组件）
+  import DeleteOrderButton from '@/components/DeleteOrderButton.vue'
+  // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
+  import FlowEndNote from '@/components/FlowEndNote.vue'
   import GoodsInfo from '@/components/GoodsInfo.vue'
   import { drawerSet } from '@/composables/useEditorFullscreen'
   // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
   import { useNodeSubmit } from '@/composables/useNodeSubmit'
   import {
     APPROVAL_STATUS,
-    buildBranchTerminalMap,
     collectStepOptionItems,
     collectStepResultOptions,
-    mergeExtraMembers,
-    rebuildChain,
+    receivedQuantities,
   } from '@/types/approval'
+  // 条件求值上下文（建单快照优先）：算剩余接收数量要用它，与流程引擎同源
+  import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
+  /*
+   * 重算链路 / 每步起始时间 / 连续同人环节合并：全部用共享模块，别在本页再抄一份。
+   * 本页原来自己抄了一份 runtimeOf —— **漏传了业务上下文**（flowContextOfOrder），
+   * 有业务条件分支的单会把当前环节算偏（表格的「当前审批人」跟着错），
+   * 与首页/审批页的口径就此漂开。见 utils/approvalRuntime 的说明。
+   */
+  import {
+    discardSegmentStart,
+    groupApproverSteps,
+    mainOf,
+    nextStepsOf,
+    runtimeOf,
+    stepStartTimesOf,
+    type ApproverStepGroup,
+  } from '@/utils/approvalRuntime'
   // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
   import { toProductView } from '@/utils/biRowFields'
   import { getApprovalOrder } from '@/utils/collection'
@@ -247,35 +270,6 @@
   const statusMeta = (v: unknown) => STATUS_META[Number(v)] ?? STATUS_META[APPROVAL_STATUS.PENDING]
 
   /** 与审批页同一套口径：有 flow 就按 flow + decisions 重算，旧单（只有 chain、没有 flow）原样沿用 */
-  function runtimeOf (order: ApprovalOrder) {
-    const snapshot = order.chain
-    const flow = snapshot?.flow
-    if (!flow?.length) {
-      const legacy = snapshot?.chain ?? []
-      return { chain: legacy, stepIds: legacy.map((_, i) => `legacy-${i}`), currentStep: -1, done: false }
-    }
-    const r = rebuildChain(flow, snapshot?.decisions ?? [], buildBranchTerminalMap(snapshot?.graph))
-    // 合并运行期追加的抄送/转办（转办会把被接替者标成「已转办」，实现见 mergeExtraMembers）
-    mergeExtraMembers(r.chain, r.stepIds, snapshot?.extraMembers)
-    return { ...r, done: r.done }
-  }
-
-  /** 环节的负责人：优先 manager（办理信息记在它上面，与 ApprovalNode 口径一致） */
-  function mainOf (step?: ApprovalChainItem[]) {
-    return step?.find(i => i.type === 'manager') ?? step?.[0]
-  }
-
-  /** 各环节起始时间：首环节 = 建单时间，其余 = 上一环节的办理时间（与审批页 stepStartTimes 一致） */
-  function stepStartTimesOf (order: ApprovalOrder, chain: ApprovalChainItem[][]) {
-    let prev: string | undefined = order.created
-    return chain.map(step => {
-      const from = prev ?? ''
-      const m = mainOf(step)
-      if (m?.handled_at) prev = m.handled_at // 已办理才推进基线
-      return from
-    })
-  }
-
   function toRow (order: ApprovalOrder): ApprovalRow {
     const p = toProductView(order.expand?.relation)
     const rt = runtimeOf(order)
@@ -306,26 +300,38 @@
   /** 当前审批单 = 未结束；历史审批单 = 已结束 */
   const pendingRows = computed(() => rows.value.filter(r => r.status === APPROVAL_STATUS.PENDING))
   // const currentProduct=computed(()=> pendingRows.value.filter(r=>r.order_no==selectedNode.value.order_no))
-  const historyRows = computed(() => rows.value.filter(r => r.status !== APPROVAL_STATUS.PENDING))
 
   const search = ref('')
 
   const typeFilter = ref<string | null>(null)
-  const deptFilter = ref<string | null>(null)
+  const modelFilter = ref<string | null>(null)
 
   const dateRange = ref<(Date | string)[]>([])
-  const deptOptions = computed(() =>
-    [...new Set(historyRows.value.map(r => r.部门))].filter(v => v && v !== '—'),
+  /**
+   * 下拉选项：从**本页展示的那批行**（待办）推导，不是从全部单据。
+   *
+   * 两条口径：
+   *  · 用"全部待办"而不是"筛过之后的行" —— 否则选了主MODEL=A 之后别的选项就没了；
+   *  · 不用已办结的单 —— 它们在本页（只列待办）筛不出东西，列出来只会让人选中后得到空表。
+   *    这里原来是从已办结的单推的，所以选项经常是空的。
+   */
+  const modelOptions = computed(() =>
+    [...new Set(pendingRows.value.map(r => r.主MODEL))].filter(v => v && v !== '—'),
   )
 
   function isoDay (v: Date | string) {
     return typeof v === 'string' ? v.slice(0, 10) : `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
   }
 
-  const historyList = computed(() =>
-    historyRows.value.filter(r => {
+  /**
+   * 本页实际展示的行 = 待办单据 ∩ 筛选条件（各条件之间是 **and**）。
+   *
+   * 这张表绑的就是它 —— 之前表格绑 `pendingRows`（未过滤），筛选条点了不会有任何反应。
+   */
+  const filteredRows = computed(() =>
+    pendingRows.value.filter(r => {
       if (typeFilter.value && statusMeta(r.status).text !== typeFilter.value) return false
-      if (deptFilter.value && r.部门 !== deptFilter.value) return false
+      if (modelFilter.value && r.主MODEL !== modelFilter.value) return false
       if (dateRange.value.length > 0) {
         // created 是 '2026-09-17 02:05:41.542Z'，前 10 位就是日期，可直接按字典序比
         const day = r.created.slice(0, 10)
@@ -342,22 +348,21 @@
       return true
     }),
   )
-  function resetHistoryFilters () {
+  function resetFilters () {
     search.value = ''
     typeFilter.value = null
-    deptFilter.value = null
+    modelFilter.value = null
     dateRange.value = []
   }
 
-  /** 当前 tab 实际渲染的行；分页器要按它算页数（两个 tab 的数据不同） */
-  const visibleRows = computed(() => (tab.value === 'history' ? historyList.value : pendingRows.value))
-  const pageCount = computed(() => Math.max(1, Math.ceil(visibleRows.value.length / itemsPerPage.value)))
+  /** 分页器按筛过的行数算页数（否则筛完还停在不存在的页上） */
+  const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / itemsPerPage.value)))
 
   const headers = ref([
     { title: '审批单号', key: 'order_no', align: 'start' },
     { title: 'SKU', key: 'sku' },
     { title: '主MODEL', key: '主MODEL' },
-    { title: '部门', key: '部门' },
+    // 「部门」按需求整套去掉：列不显示、也不再有部门筛选下拉（仅在关键字搜索里还能命中它）
     { title: '当前审批人', key: 'approver' },
     { title: '状态', key: 'status', align: 'center' },
     { title: '创建时间', key: 'created' },
@@ -368,6 +373,33 @@
   /** 右侧抽屉里展开的那一单 */
   const selectedNode = ref<ApprovalRow | null>(null)
   const selectedOrder = computed(() => orders.value.find(o => o.id === selectedNode.value?.id) ?? null)
+  /**
+   * 抽屉里那一单产品的「总库存数量」/「总库存金额」→ 下发给办理弹窗。
+   * 前者：选中**全部接收**时接收数量就是它（不可修改），也是接收/回收数量的上限；
+   * 后者：回收金额的上界（必须小于，见 ApprovalNode 的 lessThan）。
+   */
+  /**
+   * 接收数量的账：总库存数量 / 已接收 / 剩余（口径与流程引擎共用，见 types/approval 的 receivedQuantities）。
+   * 总库存数量优先取**建单快照**（与条件取值同源），快照里没有才退回关联产品。
+   */
+  const selectedQtyLedger = computed(() =>
+    receivedQuantities(selectedOrder.value?.chain?.decisions ?? [], flowContextOfOrder(selectedOrder.value)),
+  )
+  const selectedStockQty = computed(() =>
+    String(selectedQtyLedger.value.total ?? toProductView(selectedOrder.value?.expand?.relation)['总库存数量'] ?? ''),
+  )
+  /** 本环节还能接多少件（剩余）；算不出来就留空，办理端退回按总库存数量 */
+  const selectedRemainingQty = computed(() =>
+    (selectedQtyLedger.value.remaining === undefined ? '' : selectedQtyLedger.value.remaining),
+  )
+  const selectedStockAmount = computed(() =>
+    String(toProductView(selectedOrder.value?.expand?.relation)['总库存金额'] ?? ''),
+  )
+  /**
+   * 本单所属团队（按快照里的「组别」反查团队表）：
+   * 「选择接收组别」的候选限定在它之内（业务口径：不涉及其他团队）。
+   */
+  const selectedReceiverTeam = computed(() => receiverTeamOf(selectedOrder.value))
   const selectedChain = computed<ApprovalChainItem[][]>(() => {
     const order = selectedOrder.value
     return order ? runtimeOf(order).chain : []
@@ -393,17 +425,53 @@
   const selectedCurrentStep = computed(() =>
     selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1,
   )
+  /** 流转**为什么**停下（办完 / 走到结束节点 / 命中终结结论 / 卡住）：时间线最后一条展示它 */
+  const selectedFlowEnd = computed(() =>
+    selectedOrder.value ? runtimeOf(selectedOrder.value).end : undefined,
+  )
+  /**
+   * 时间线上的节点：同一审批人**连续**办理的相邻环节合成一条（见 utils/approvalRuntime）。
+   * 与审批页 / 首页同一口径 —— 两处不一致时，同一条单在不同页面看到的节点数会不一样。
+   */
+  const selectedStepGroups = computed(() =>
+    groupApproverSteps(selectedChain.value, selectedStepIds.value, selectedStartTimes.value),
+  )
 
+  /**
+   * 弃置审批段起点（-1 = 这一单没进入弃置）。
+   * 与审批页同一口径，判定集中在 utils/approvalRuntime 的 discardSegmentStart（别在本页另写一套）。
+   */
+  const selectedDiscardStart = computed(() => discardSegmentStart(selectedChain.value))
+
+  /**
+   * 这一组落在弃置段里吗 —— 落在就返回**段内序号**（0 起），否则 undefined。
+   * 时间线据此把圆点从这一段起逐渐缩小、并整段包上独立背景（见 ApprovalNode 的 inDiscardSegment）。
+   */
+  function discardIndexOf (group: ApproverStepGroup): number | undefined {
+    const start = selectedDiscardStart.value
+    const i = group.indexes[0]
+    return start >= 0 && i >= start ? i - start : undefined
+  }
+
+  /**
+   * 弃置段一共几条节点（**合并后**的节点数，与 discardIndexOf 同一口径）。
+   *
+   * 交给 ApprovalNode 认出"哪条是这一段的最后一条"：整段背景只有首/尾两条留圆角、
+   * 只有它们不往缝里撑，中间的直角首尾相接才拼成**一整块**背景（见其 discardSegmentSize）。
+   */
+  const discardNodeCount = computed(() => selectedStepGroups.value.filter(g => discardIndexOf(g) !== undefined).length)
+
+  // 上/下一条按**筛过之后**的顺序走 —— 与表格里看到的一致（否则会跳到一个被筛掉的行上）
   const selectedIndex = computed(() =>
-    selectedNode.value ? visibleRows.value.findIndex(r => r.id === selectedNode.value?.id) : -1,
+    selectedNode.value ? filteredRows.value.findIndex(r => r.id === selectedNode.value?.id) : -1,
   )
   const hasPrevStep = computed(() => selectedIndex.value > 0)
   const hasNextStep = computed(() =>
-    selectedIndex.value >= 0 && selectedIndex.value < visibleRows.value.length - 1,
+    selectedIndex.value >= 0 && selectedIndex.value < filteredRows.value.length - 1,
   )
 
   function selectStep (index: number) {
-    const row = visibleRows.value[index]
+    const row = filteredRows.value[index]
     if (!row) return
     selectedNode.value = row
     open.value = true
@@ -439,6 +507,28 @@
     snackbar.value = { show: true, text, color }
   }
 
+  /**
+   * 删掉一条单之后重新取数（本页的 pendingRows / 筛选选项都由 orders 派生，一处刷新即可）。
+   *
+   * 抽屉正开着这一条时一并关掉：指向"已删除记录"的抽屉会一直显示旧时间线，
+   * 点办理还会写到不存在的单上。
+   */
+  async function onOrderDeleted (summary: DeleteOrderSummary) {
+    if (selectedNode.value?.id === summary.id) {
+      selectedNode.value = null
+      // 关抽屉要动 open（setOpen 是 computed，写它会报"只读"）
+      open.value = false
+    }
+    await getDatas()
+    // deleted = false 表示它之前就已经不在了（服务端按幂等处理）——提示如实说
+    showMsg(summary.deleted ? '审批单已删除' : '该审批单已经不在了，列表已刷新', summary.deleted ? 'success' : 'warning')
+  }
+
+  /** 删除失败（多为权限或网络）：把服务端给的原因原样弹出来 */
+  function onDeleteFailed (message: string) {
+    showMsg(message, 'error')
+  }
+
   const { submitNode } = useNodeSubmit({
     order: selectedOrder,
     onMessage: showMsg,
@@ -465,44 +555,6 @@
 </script>
 
 <style lang="scss" scoped>
-.filter-input {
-  :deep(.v-field) {
-    --v-field-padding-top: 2px;
-    --v-field-padding-bottom: 1px;
-    --v-input-control-height: 25px;
-    font-size: 12px;
-  }
-
-  :deep(.v-field__input) {
-    min-height: 25px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-
-  :deep(.v-label) {
-    font-size: 12px;
-  }
-
-  :deep(.v-field__append-inner) {
-    align-self: center;
-    padding-top: 0;
-  }
-
-  :deep(.v-field__prepend-inner) {
-    margin-top: 0;
-    padding-top: 1px;
-
-    .v-icon {
-      font-size: 14px;
-    }
-  }
-
-  :deep(.v-input__details) {
-    padding-top: 0;
-    min-height: 0;
-  }
-}
-
 .tabs-shadow {
   transition: box-shadow 0.2s ease;
   box-shadow: 0 0 0 rgba(15, 23, 42, 0);

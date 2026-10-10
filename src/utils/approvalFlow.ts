@@ -8,9 +8,9 @@ import type {
   ApprovalOptionGroup,
   BranchCondition,
   ConditionExpr,
-  FlowContext, LoopNodeData, ProbeNodeData, ProbeSpec, RotationSpec,
+  FlowContext, LoopNodeData, ProbeNodeData, ProbeSpec, RefNodeData, RotationSpec,
 } from '../types/approval'
-import { branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, normalizeOptionGroups, normalizeOptionTexts, uid } from '../types/approval'
+import { APPROVAL_RESULTS, branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, normalizeOptionGroups, normalizeOptionTexts, uid } from '../types/approval'
 import { findBadProbe } from './approvalProbe'
 import { collectRotations, findBadRotation } from './approvalRotation'
 import { deriveFlowFields } from './biRowFields'
@@ -20,6 +20,12 @@ import { deriveFlowFields } from './biRowFields'
  * 但两处都只在函数体里调用，ESM 的循环依赖完全没问题（模块初始化时谁都不碰对方的值）。
  */
 import { cardGraphToSteps } from './loopCardGraph'
+// 团队表反查：「选择接收组别」的候选限定在本单所属团队内（纯数据模块，不参与成环）
+import { teamOfGroup } from './organazation'
+
+/** 已知的结论码 / 文案 → 码：用来拦住"结论条件写成文案"这种永远不命中的写法（见 graphToFlowFrom） */
+const RESULT_CODES = new Set(APPROVAL_RESULTS.map(r => r.value))
+const RESULT_LABEL_TO_CODE = new Map(APPROVAL_RESULTS.map(r => [r.label, r.value]))
 
 /**
  * 把画布图转换为 ApprovalFlow 结构（保存时调用）。
@@ -85,6 +91,56 @@ export function graphToFlowFrom (
   const outerExitIds = new Set(
     nodes.filter(n => n.type === 'approval' || n.type === 'notify').map(n => String(n.id)),
   )
+
+  /**
+   * 读卡片级「轮完走向」（`LoopNodeData.afterLoop`，存的是目标节点 id）并校验。
+   *
+   * 白名单用的就是上面那份 `outerExitIds` —— 与卡片内部「提前结束轮询」**同一份**：
+   * 两处都是"跳到卡片外的某个能到达的环节"，用两套口径只会让人配出选得下、跑不通的组合。
+   * 返回 `error` 时调用方带上自己的 errorNodeId 返回（保存时能直接标红定位到卡片）。
+   */
+  const readAfterLoop = (raw: unknown, label: string): { value?: { stepId: string }, error?: string } => {
+    const id = String(raw ?? '').trim()
+    if (!id) {
+      return {}
+    }
+    if (!outerExitIds.has(id)) {
+      return { error: `卡片「${label}」的「轮完走向」目标环节已不存在，请重新选择（或清空这一项）` }
+    }
+    return { value: { stepId: id } }
+  }
+
+  /**
+   * 读「引用模板」卡片的配置（节点 data → 流程节点 / 步骤字段），
+   * 顺带把"还没选源模板"拦在**保存期** —— 与 loop 卡片的 `readAfterLoop` 同一个位置职责。
+   *
+   * 注意这里**不校验源模板是否存在**：那要打库，而本函数是同步的（保存期用）。
+   * 源模板被删的情况由**建单期**报出来（见 utils/templateRef 的 issues），
+   * 那时给的是"这张卡片引用的模板已不存在"，同样能定位。
+   */
+  /** 这条连线上绑的结论码（只用于报错文案，如「result = receive」；没有就空数组） */
+  const resultConditionsOf = (edge: any): string[] => {
+    const list: any[] = Array.isArray(edge?.data?.conditions)
+      ? edge.data.conditions
+      : (edge?.data?.condition ? [edge.data.condition] : [])
+    return list
+      .filter(c => !isConditionGroup(c) && c.field === 'result')
+      .map(c => {
+        const v = String(c.value ?? '').trim()
+        return v ? `结论 ${v}` : '结论（空）'
+      })
+  }
+
+  const readTemplateRef = (node: any): { name: string, refTemplateId: string, error?: string } => {
+    const d = node?.data as RefNodeData | undefined
+    const refTemplateId = String(d?.refTemplateId ?? '').trim()
+    // 卡片名优先用用户改过的标题；没改过就用选模板时一起存下来的源模板名
+    const name = String(d?.title ?? '').trim() || String(d?.refTemplateName ?? '').trim() || '引用模板'
+    if (!refTemplateId) {
+      return { name, refTemplateId: '', error: `「${name}」还没有选择要引用的模板，请点卡片选一个` }
+    }
+    return { name, refTemplateId }
+  }
   const out = new Map<string, any[]>()
   const inMap = new Map<string, string[]>()
   for (const e of edges) {
@@ -182,13 +238,13 @@ export function graphToFlowFrom (
      * 这个函数里的错误全出在 sourceId 身上（出线数不够 / 分支没命名 / 重名 / 条件没填全 / 主线不唯一），
      * 所以不需要在每个 return 上手写归属 —— 漏一个就少一处提示。
      */
-  function collectBranches (sourceId: string, kind: 'approval' | 'condition' | 'probe') {
+  function collectBranches (sourceId: string, kind: 'approval' | 'condition' | 'probe' | 'ref') {
     return tagNode(collectBranchesRaw(sourceId, kind), sourceId)
   }
 
   function collectBranchesRaw (
     sourceId: string,
-    kind: 'approval' | 'condition' | 'probe',
+    kind: 'approval' | 'condition' | 'probe' | 'ref',
   ): {
     branches: ApprovalBranch[]
     converge?: string
@@ -211,7 +267,9 @@ export function graphToFlowFrom (
                       ? '审批结果分支至少需要两条出线（一条主线 + 结果分支），请从节点下方拖出连线'
                       : (kind === 'probe'
                           ? '数据查询至少需要两条出边（「存在」与「不存在」），请从节点下方拖出连线'
-                          : '条件分支至少需要两条出边（分支），请从节点下方拖出连线'),
+                          : (kind === 'ref'
+                              ? '「引用模板」要按结论分流，至少需要两条出线（其中一条留作无条件兜底主线），请从卡片下方拖出连线'
+                              : '条件分支至少需要两条出边（分支），请从节点下方拖出连线')),
       }
     }
     const sourceName = String(nodesById.get(sourceId)?.data?.title ?? '')
@@ -293,19 +351,80 @@ export function graphToFlowFrom (
         return null
       }
 
-      if (kind === 'approval') {
+      /*
+       * 这条线配的**办理选项条件**（`offerWhen`，见 types/approval 的 ApprovalBranch.offerWhen）：
+       * 只决定"这一环办理时，这个选项摆不摆出来"，**不参与选路**（选路仍是上面的 conditions）。
+       * 没配就不写这个字段（flow 形状与老模板一致）；配了但没填全 → 当场报错：
+       * 漏填的条件在办理期恒不成立，表现是"选项被静默藏掉"，比保存时报错难查得多。
+       */
+      const offerWhen = Array.isArray(be.data?.offerWhen) ? (be.data.offerWhen as ConditionExpr[]) : []
+      if (offerWhen.length > 0) {
+        const badOffer = findBad(offerWhen, `「${name}」的选项条件`)
+        if (badOffer) {
+          return { branches, territory, error: badOffer, errorEdgeId: be.id }
+        }
+      }
+
+      /*
+       * 「引用模板」的按结论分流与审批结果分支同款（都是"结论 → 走哪条线"）：
+       * 复用同一段校验（结论写成文案、条件填全、最多一条主线），只多一条
+       * "这条线还没选结论" —— 空的结论条件永远不命中，而它在界面上看不出是空的。
+       */
+      if (kind === 'approval' || kind === 'ref') {
         if (list.length > 0) {
-          // 结果分支必须有一个**顶层**结论条件。
-          // 组里的 result 不做硬前提、按组运算（口径见 firstResultValueOf），所以不算数。
-          if (!list.some(isResultCondition)) {
+          /*
+           * 审批环节的出线**允许**只用业务 / 运行时字段写条件（不绑审批结论）。
+           *
+           * 为什么可以：引擎选路拿的是「结论 + 办理人填的值 + 单据快照」整张表单
+           * （见 types/approval 的 formOf / matchBranch），所以 `confirmed = 接收`
+           * （选项文本）、`qty > 100`（本环填的数量）、`剩余接收数量 > 0` 这类条件
+           * 本来就能正确选中那条线。以前这里硬性要求"顶层必须有一条 result 条件"，
+           * 等于把这种写法判死 —— 卡片内部又没有"点击该线选结论"那个面板，用户直接卡住
+           * （实测反馈：环节「美2组」→卡片「组间轮询」内部，条件写的是 confirmed=接收）。
+           *
+           * 现在只保留**能当场判定**的校验：
+           *   ① 结论条件写成了**文案**（如 result = 接收）：引擎按结论码选路，
+           *      这么写永远不命中 —— 报错并给出对应的码；
+           *   ② 各条件的比较值不能为空 / 引用不能只写一个 @（findBad）。
+           *
+           * 注：不绑结论的线不会出现在办理下拉里（口径见 collectStepOptionItems 的 optionsOf），
+           * 它是"按条件自动选中"的那条，不需要办理人去挑。
+           */
+          const labelTypo = list.find((c): c is BranchCondition => {
+            // 类型谓词只约束返回值、不收窄体内参数，所以要先用 isConditionGroup 把 c 收窄成单条件
+            if (isConditionGroup(c) || c.field !== 'result') {
+              return false
+            }
+            const v = String(c.value ?? '').trim()
+            return v !== '' && !RESULT_CODES.has(v) && RESULT_LABEL_TO_CODE.has(v)
+          })
+          if (labelTypo) {
+            const label = String(labelTypo.value).trim()
             return {
               branches,
               territory,
               // 带上出错的那条线：编辑器据此把它标红（只说"哪条线"不够，得让人一眼看到）
-              error: `「${name}」不是有效的审批结果分支，请点击该线，在连页面板里选择对应审批结论`,
+              error: `「${name}」的结论条件写的是文案「${label}」，而引擎按结论码选路（这么写永远不命中）—— 请点这条线，在上方面板里选「${label}」（码是 ${RESULT_LABEL_TO_CODE.get(label)}）`,
               errorEdgeId: be.id,
             }
           }
+          /*
+           * 「引用模板」的按结论分流：这条线必须**已经选好结论**。
+           * 空的结论条件在界面上看不出是空的，而它永远不命中 —— 等于这条线配不上任何单据。
+           * （审批结果分支不查这条：它的出线本来就可以用业务字段写条件，见上面的说明。）
+           */
+          if (kind === 'ref') {
+            const noResult = list.find(c => !isConditionGroup(c) && c.field === 'result' && String(c.value ?? '').trim() === '')
+            if (noResult) {
+              return {
+                branches,
+                territory,
+                error: `「${name}」这条线还没选结论：请点这条线，在上方面板里选一个审批结论`,
+                errorEdgeId: be.id,
+              }
+            }
+          }
+
           const err = findBad(list.filter(x => !isResultCondition(x)), `「${name}」的`)
           if (err) {
             return { branches, territory, error: err }
@@ -351,6 +470,8 @@ export function graphToFlowFrom (
           steps: walk.steps,
           ...(optionTexts.length > 0 ? { options: optionTexts } : {}),
           ...(optionGroups.length > 0 ? { optionGroups } : {}),
+          // 选项条件只影响渲染，回退分支同样可以配（如"上一环结论不是 X 时才给这个回退选项"）
+          ...(offerWhen.length > 0 ? { offerWhen } : {}),
           loopBackTo: { stepId: walk.loopBackTo },
           // 回退目标是已办环节，通常不是出口；仍按终点如实记录
           isEnd: isEndNode(walk.terminal),
@@ -442,6 +563,8 @@ export function graphToFlowFrom (
         ...(optionTexts.length > 0 ? { options: optionTexts } : {}),
         // 这条线配的选项树（办理时展开成「类别 → 一级 → 二级」，一级的 link 决定实际链路）
         ...(optionGroups.length > 0 ? { optionGroups } : {}),
+        // 办理选项条件（只影响"摆不摆这个选项"，不影响走哪条线）
+        ...(offerWhen.length > 0 ? { offerWhen } : {}),
         // 出口标记在此写死：分支汇到后续节点时 steps 同样为空，
         // 运行时靠它区分「终止」与「汇聚后继续」，不必回查画布。
         // ⚠️ 「跳出循环」的分支连线仍指向「结束」节点（画布是树，画不出"汇回主干"的合并线），
@@ -695,7 +818,9 @@ export function graphToFlowFrom (
           return {
             steps,
             territory,
-            error: `卡片「${title}」只能有一条出线；要按审批结论分流，请把条件分支画在卡片内部`,
+            error: `卡片「${title}」只能有一条出线 —— 它本身就是"所有组都轮完"之后的去路；`
+              + '要改这条去路，请用卡片上的「轮完」下拉选目标环节。'
+              + '（"某一组接了 → 提前结束轮询"和"按审批结论分流"都画在卡片内部）',
             errorNodeId: p,
           }
         }
@@ -710,14 +835,88 @@ export function graphToFlowFrom (
         if (!d?.rotation) {
           return { steps, territory, error: `卡片「${title}」还没有轮询配置，请点卡片填写「组字段」`, errorNodeId: p }
         }
+        const afterLoop = readAfterLoop(d?.afterLoop, title)
+        if (afterLoop.error) {
+          return { steps, territory, error: afterLoop.error, errorNodeId: p }
+        }
         steps.push({
           id: pn.id,
           type: 'loop',
           name: title,
           rotation: d.rotation,
           steps: inner.steps,
+          ...(afterLoop.value ? { afterLoop: afterLoop.value } : {}),
         })
         p = outs[0].target
+        continue
+      }
+
+      /*
+       * 「引用模板」卡片（落在分支链里的形态）：转成 `type='ref'` 的**步骤**，
+       * 内容在建单期从源模板搬进来（见 utils/templateRef）——这里只写引用，不复制内容。
+       *
+       * 与 loop 卡片同款：必须有且只有一条出线。多条出线说不清"这段流程走哪条"，
+       * 要分流就去**被引用的那个模板**里画分支。
+       */
+      if (pn.type === 'ref') {
+        const ref = readTemplateRef(pn)
+        if (ref.error) {
+          return { steps, territory, error: ref.error, errorNodeId: p }
+        }
+        if (outs.length === 0) {
+          return {
+            steps,
+            territory,
+            error: `「${ref.name}」没有出线，请从卡片下方拖出连线到下一步或结束`,
+            errorNodeId: p,
+          }
+        }
+        if (!visit(p)) {
+          return { steps, territory, error: '流程中检测到环（节点被重复经过），请检查连线' }
+        }
+        // 单出线：这一段走完继续往下（老语义）。这条线上绑了结论就报错，理由见顶层同款校验。
+        if (outs.length === 1) {
+          const bound = resultConditionsOf(outs[0])
+          if (bound.length > 0) {
+            return {
+              steps,
+              territory,
+              error: `「${ref.name}」只接了一条出线，这条线却又绑了结论（${bound.join('、')}）——`
+                + '单出线的意思是"这一段走完就继续往下"，其它结论没有去处。要按结论分流请**再拖一条出线**（≥2 条）',
+              errorNodeId: p,
+              errorEdgeId: outs[0].id,
+            }
+          }
+          steps.push({ id: pn.id, type: 'ref', name: ref.name, refTemplateId: ref.refTemplateId })
+          p = outs[0].target
+          continue
+        }
+        // ≥2 条出线：按结论分流（与顶层同一套收集器，出线命名 / 出口 / 汇聚口径全继承）
+        const nested = collectBranches(p, 'ref')
+        if (nested.error) {
+          return {
+            steps, territory, error: nested.error,
+            errorNodeId: nested.errorNodeId ?? p, errorEdgeId: nested.errorEdgeId,
+          }
+        }
+        for (const t of nested.territory) {
+          territory.add(t)
+        }
+        steps.push({
+          id: pn.id,
+          type: 'ref',
+          name: ref.name,
+          refTemplateId: ref.refTemplateId,
+          branches: nested.branches,
+        })
+        // 都接到结束 → 本分支随之终止；否则继续走汇聚点（与 probe / 条件节点的口径一致）
+        if (nested.converge === undefined || nested.converge === 'end') {
+          return { steps, territory, terminal: nested.converge ?? p }
+        }
+        if (mergesFromOutside(nested.converge, territory)) {
+          return { steps, territory, terminal: nested.converge }
+        }
+        p = nested.converge
         continue
       }
       return { steps, territory, error: '流程中存在不支持的节点类型，请检查画布' }
@@ -734,7 +933,7 @@ export function graphToFlowFrom (
       return { flow: [], error: '流程中存在悬空连线' }
     }
     // 分支/主线汇聚之后，业务节点只允许被主路径经过一次；重复经过即存在环或反向回连
-    if ((node.type === 'approval' || node.type === 'condition' || node.type === 'notify' || node.type === 'probe') && visited.has(cur)) {
+    if ((node.type === 'approval' || node.type === 'condition' || node.type === 'notify' || node.type === 'probe' || node.type === 'ref') && visited.has(cur)) {
       const t = String((node.data as ApprovalNodeData)?.title || '未命名环节')
       return {
         flow: [],
@@ -746,7 +945,7 @@ export function graphToFlowFrom (
     if (node.type === 'end') {
       // 校验：所有业务节点都必须挂在主路径上
       const orphans = nodes.filter(
-        n => (n.type === 'approval' || n.type === 'condition' || n.type === 'notify' || n.type === 'probe') && !visited.has(n.id),
+        n => (n.type === 'approval' || n.type === 'condition' || n.type === 'notify' || n.type === 'probe' || n.type === 'ref') && !visited.has(n.id),
       )
       if (orphans.length > 0) {
         // 点名说清是哪几个环节 —— 只说「存在未连接的节点」用户在几十个框里找不到
@@ -776,7 +975,12 @@ export function graphToFlowFrom (
        * （见 utils/loopCardGraph 的校验），所以它一定含"有人办"的环节。
        * 只放一张卡片、没有别的审批节点的模板是合法的（开始 → 卡片 → 结束）。
        */
-      if (!nodes.some(n => n.type === 'approval' || n.type === 'loop')) {
+      /*
+       * 「引用模板」卡片也算有人办：它搬进来的是另一张模板的流程，那张模板里
+       * 必须有审批环节 —— 这一条在**建单期**展开时逐段校验（见 utils/templateRef 的 countApprovals），
+       * 这里放开只是"允许只放一张引用卡片"的模板保存（内容不在本图里，同步函数看不到）。
+       */
+      if (!nodes.some(n => n.type === 'approval' || n.type === 'loop' || n.type === 'ref')) {
         return {
           flow: [],
           error: '流程里至少要有一个审批环节：飞书提醒只通知、不办理，没法单独构成流程',
@@ -872,12 +1076,17 @@ export function graphToFlowFrom (
           errorNodeId: cur,
         }
       }
+      const afterLoop = readAfterLoop(d?.afterLoop, name)
+      if (afterLoop.error) {
+        return { flow: [], error: afterLoop.error, errorNodeId: cur }
+      }
       flow.push({
         id: node.id,
         type: 'loop',
         name,
         rotation: d?.rotation as RotationSpec,
         steps: inner.steps,
+        ...(afterLoop.value ? { afterLoop: afterLoop.value } : {}),
       })
       const nexts = out.get(cur) ?? []
       if (nexts.length === 0) {
@@ -895,11 +1104,89 @@ export function graphToFlowFrom (
       if (nexts.length > 1) {
         return {
           flow: [],
-          error: `卡片「${name}」只能有一条出线；要按审批结论分流，请把条件分支画在卡片内部`,
+          error: `卡片「${name}」只能有一条出线 —— 它本身就是"所有组都轮完"之后的去路；`
+            + '要改这条去路，请用卡片上的「轮完」下拉选目标环节。'
+            + '（"某一组接了 → 提前结束轮询"和"按审批结论分流"都画在卡片内部）',
           errorNodeId: cur,
         }
       }
       cur = nexts[0].target
+      continue
+    }
+
+    /*
+     * 「引用模板」卡片：转成 `type='ref'` 的**节点**，内容在建单期从源模板搬进来
+     * （见 utils/templateRef）。这里**只写引用、不复制内容** —— 复制内容就退化成
+     * "一次性的深拷贝"，源模板以后改了，引用它的模板拿不到新版。
+     *
+     * 两种接法，由画布上接了几条出线决定：
+     *
+     *  ① **一条出线** = "这一段走完，继续卡片后面那个环节"（穿过去）。老语义、也是默认。
+     *     这时**不接受**在这条线上配结论条件：那种写法本意是"只在这个结论才往下走"，
+     *     可这条线之外没有"否则"可走（其它结论会一条线都命中不了 → 单据停住）。
+     *
+     *  ② **两条以上出线** = 按结论分流：**这一段最后办出来的那个结论**决定接哪条线。
+     *     引用段落里最后一个被办理的结论会以 `result` 继续传给下游
+     *     （见 types/approval 的 formOf：每办完一环就把它写进求值上下文），
+     *     而源模板里连到「结束」的线在展开时被清掉出口标记（含义变成"这一段走完了"）——
+     *     于是这个结论正好能在这里被"接住"。
+     *
+     *     实现上**完全复用「审批结果分支」那一套**（`collectBranches(cur, 'ref')`）：
+     *     出线命名、条件写法、出口（线连到结束 = 整单结束）、汇聚判定、"最多一条主线"，
+     *     全部继承 —— 不另写一套（两套实现迟早会在某个角落不一致）。
+     *
+     * 等价写法（仍可用，求值口径完全一样）：保留一条出线，在卡片**后面**接一个
+     * 「条件分支」、用「上一环节的审批结论」判断。多出线只是让它更直观、少画一个节点。
+     */
+    if (node.type === 'ref') {
+      visited.add(cur)
+      mainVisited.add(cur)
+      const ref = readTemplateRef(node)
+      if (ref.error) {
+        return { flow: [], error: ref.error, errorNodeId: cur }
+      }
+      const nexts = out.get(cur) ?? []
+      if (nexts.length === 0) {
+        return {
+          flow: [],
+          error: `「${ref.name}」没有出线，请从卡片下方拖出连线到下一步或结束`,
+          errorNodeId: cur,
+        }
+      }
+      if (nexts.length === 1) {
+        const bound = resultConditionsOf(nexts[0])
+        if (bound.length > 0) {
+          return {
+            flow: [],
+            error: `「${ref.name}」只接了一条出线，这条线却又绑了结论（${bound.join('、')}）——`
+              + '单出线的意思是"这一段走完就继续往下"，其它结论没有去处。'
+              + '要按结论分流请**再拖一条出线**（≥2 条）；只是想在结论上做判断，'
+              + '请在卡片**后面**接一个「条件分支」、用「上一环节的审批结论」判断。另外：'
+              + '要按段落**中间**的结论分流，得把下游环节画进**被引用的那个模板**里',
+            errorNodeId: cur,
+            errorEdgeId: nexts[0].id,
+          }
+        }
+        flow.push({ id: node.id, type: 'ref', name: ref.name, refTemplateId: ref.refTemplateId })
+        cur = nexts[0].target
+        continue
+      }
+      const result = collectBranches(cur, 'ref')
+      if (result.error) {
+        return {
+          flow: [],
+          error: result.error,
+          errorNodeId: result.errorNodeId, errorEdgeId: result.errorEdgeId,
+        }
+      }
+      flow.push({
+        id: node.id,
+        type: 'ref',
+        name: ref.name,
+        refTemplateId: ref.refTemplateId,
+        branches: result.branches!,
+      })
+      cur = result.converge
       continue
     }
 
@@ -1063,7 +1350,65 @@ export function flowContextOfOrder (order?: {
   return toFlowContext(order?.expand?.relation ?? null)
 }
 
-export const REJECT_BACK_NAME = '驳回回退上一级'
+/**
+ * 办理**选项**求值用的上下文：业务快照 + `result` = **本环节之前最后一条已办结论**。
+ *
+ * 用途：`offerWhen`（办理选项条件，见 types/approval 的 ApprovalBranch.offerWhen）在办理端
+ * 过滤选项时用它求值 —— 典型就是"上一环节结论是 receive 才给「同意接收」"。
+ *
+ * 为什么单独一个 helper：三处办理入口（审批页 / 首页抽屉 / 我的审批单抽屉）必须**同一口径**，
+ * 各自算一份必然漂（同单在不同页看到的选项不一样 —— 与下面 flowContextOfOrder 的教训同源）。
+ *
+ * ⚠️ `result` 的含义与条件里的「上一环节的审批结论」完全一致（CONDITION_FIELD_OPTIONS 里那个），
+ *    不是"当前这一环将要提交的结论" —— 后者要等提交后重算链路时才存在。
+ *
+ * @param chain 本单重算后的链路（可含未办环节）；index = 本环节在链中的下标
+ */
+export function optionContextOf (
+  order?: { chain?: { context?: FlowContext }, expand?: { relation?: Record<string, unknown> | null } } | null,
+  chain?: Array<Array<{ type?: string, result?: unknown }>> | null,
+  index = 0,
+): Record<string, unknown> {
+  const ctx: Record<string, unknown> = { ...flowContextOfOrder(order) }
+  const prev = prevHandledResultOf(chain, index)
+  if (prev !== undefined) {
+    ctx.result = prev
+  }
+  return ctx
+}
+
+/**
+ * 本单所属的**团队**（团队表里按「组别」反查，见 utils/organazation 的 teamOfGroup）——
+ * 「选择接收组别」的候选要**限定在它之内**（业务口径：不涉及其他团队）。
+ *
+ * 取不到（快照里没有组别 / 表里没登记）返回空串：那时选择器退回"全部团队按团队分组"，
+ * 宁可多列一些，也别让办理人没得选。
+ */
+export function receiverTeamOf (
+  order?: { chain?: { context?: FlowContext }, expand?: { relation?: Record<string, unknown> | null } } | null,
+): string {
+  const group = String(flowContextOfOrder(order)['组别'] ?? '').trim()
+  return group ? (teamOfGroup(group) ?? '') : ''
+}
+
+/** 本环节之前**最后一条已办结论**（没有就 undefined）；口径同 mainOf：取该环节的办理人那条 */
+function prevHandledResultOf (
+  chain: Array<Array<{ type?: string, result?: unknown }>> | undefined | null,
+  index: number,
+): string | undefined {
+  const steps = chain ?? []
+  for (let i = Math.min(index, steps.length) - 1; i >= 0; i--) {
+    const items = steps[i] ?? []
+    const item = items.find(x => x?.type === 'manager') ?? items[0]
+    const result = item?.result
+    if (result) {
+      return String(result)
+    }
+  }
+  return undefined
+}
+
+export const REJECT_BACK_NAME = '回退上一级'
 /** 回退分支组里与驳回并列的主线分支名 */
 const MAIN_LINE_NAME = '主线'
 
@@ -1172,6 +1517,26 @@ export function ensureRejectLoopBack (flow: ApprovalFlow): ApprovalFlow {
       continue
     }
 
+    /*
+     * 「引用模板」：与「组间轮询」**同一口径** —— 卡片作为整体只占一个 prevId
+     * （它本身没有内部步骤可递归，内容在源模板里、建单期才搬进来）。
+     *
+     * ⚠️ 这里的 `prevId = node.id` 是**引用卡片的 id**，展开后它就不存在了 ——
+     * 所以建单期展开时必须把"以它为目标的回退"重映射到搬进来那段的首个环节
+     * （见 utils/templateRef 的 remapRefTargets，与轮询卡片的 rename 是同一件事）。
+     *
+     * ⚠️ `branches`（画布上接了 ≥2 条出线 = 按结论分流）里的 steps 是**本模板自己的下游**，
+     *    这里**故意不进去补回退**：它们第一个环节的"上一级"应当是**被引用那一段的末尾环节**，
+     *    而那个 id 保存期还不知道（要等建单期把源模板搬进来）。
+     *    建单期展开时会带着正确的 prevId 补（见 utils/templateRef 里对
+     *    ensureRejectLoopBackInSteps 的调用；那个函数幂等，所以一并补齐其余环节也不会重复）。
+     */
+    if (node.type === 'ref') {
+      out.push(node)
+      prevId = node.id
+      continue
+    }
+
     out.push(node)
     const next = flow[i + 1]
     if (prevId) {
@@ -1192,8 +1557,15 @@ export function ensureRejectLoopBack (flow: ApprovalFlow): ApprovalFlow {
   return out
 }
 
-/** 分支内的步骤序列同样处理；incomingPrev 是分支组之前最后一个审批环节（作为首个步骤的「上一级」） */
-function ensureRejectLoopBackInSteps (
+/**
+ * 分支内的步骤序列同样处理；incomingPrev 是分支组之前最后一个审批环节（作为首个步骤的「上一级」）。
+ *
+ * **幂等**：已经有了「驳回 → targetId」的分支不会被叠加（见 appendRejectBack / hasRejectBack）。
+ * 所以它可以在**建单期**再跑一遍 —— 「引用模板」把源模板的内容搬进来之后，用它给
+ * "搬进来那一段的**首个环节**"补上指向**本流程**上一环的回退（见 utils/templateRef）。
+ * 源模板内部各环节的回退分支在源模板保存时就已经补好了，这里只会给边界补。
+ */
+export function ensureRejectLoopBackInSteps (
   steps: ApprovalFlowStep[],
   incomingPrev?: string,
 ): ApprovalFlowStep[] {
@@ -1218,6 +1590,18 @@ function ensureRejectLoopBackInSteps (
      */
     if (s.type === 'loop') {
       out.push({ ...s, steps: ensureRejectLoopBackInSteps(s.steps ?? [], prevId) })
+      prevId = s.id
+      continue
+    }
+
+    /*
+     * 「引用模板」步骤：与「组间轮询」步骤**同一口径** —— 整体只占一个 prevId、不注入回退组。
+     * 它这个 id 展开后不存在，所以建单期会把"以它为目标的回退"重映射到搬进来那段的首个环节
+     * （见 utils/templateRef 的 remapRefTargets），否则它后面的步骤一驳回就会报"目标不存在"。
+     * `branches`（按结论分流）里的步骤同样留到建单期补 —— 理由见 ensureRejectLoopBack 里的说明。
+     */
+    if (s.type === 'ref') {
+      out.push(s)
       prevId = s.id
       continue
     }

@@ -117,6 +117,13 @@ export default defineConfig({
         target: 'http://127.0.0.1:3002',
         changeOrigin: true,
       },
+      // 删除审批单（DELETE /api/approval/order）同样在 app server（3002）上 ——
+      // 又是上面那个坑：**必须声明在下面的 '/api' 之前**，否则会被转给 PocketBase(8091)，
+      // 那边没有这个路由，界面上看到的就是"删除失败：HTTP 404"。
+      '/api/approval': {
+        target: 'http://127.0.0.1:3002',
+        changeOrigin: true,
+      },
       '/api': 'http://127.0.0.1:8091',
       'files': 'http://127.0.0.1:8091',
     },

@@ -1,4 +1,7 @@
 import './env'
+// 管理员凭据 + 「调用者是不是超级管理员」的校验：与「删除审批单」等特权操作**共用一份**
+// （见 server/pbAdmin.ts 的说明：这类校验最怕两处各写一遍）
+import { type AdminCaller, adminToken, assertSuperAdmin, PB_URL } from './pbAdmin'
 
 /**
  * 「清空 BI 数据」——**只有超级管理员**能调，且**只清 `bi_rows` 这一张表**。
@@ -37,77 +40,11 @@ export const PURGE_KEPT = [
   'group_approvers',
 ] as const
 
-const PB_URL = process.env.PB_URL || 'http://127.0.0.1:8091'
-
 /**
- * 取管理员 token：PB 0.23+ 是 `/api/collections/_superusers/...`，更早是 `/api/admins/...`
- * （与 server/biSync.ts 同一套兜底）。
+ * 调用者信息（本模块叫「Purge」是因为它诞生在清空数据里；实现已上移到 server/pbAdmin）。
+ * 保留这个名字是为了不惊动既有调用方与响应形状。
  */
-async function adminToken (): Promise<string> {
-  const email = process.env.PB_ADMIN_EMAIL || ''
-  const password = process.env.PB_ADMIN_PASSWORD || ''
-  const errors: string[] = []
-  for (const path of [
-    '/api/collections/_superusers/auth-with-password',
-    '/api/admins/auth-with-password',
-  ]) {
-    try {
-      const res = await fetch(new URL(path, PB_URL).toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identity: email, password }),
-      })
-      if (res.ok) {
-        const body: { token?: string } = await res.json()
-        if (body?.token) {
-          return String(body.token)
-        }
-      }
-      errors.push(`${path}: HTTP ${res.status}`)
-    } catch (e) {
-      errors.push(`${path}: ${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-  throw new Error(`PB 管理员登录失败（检查 .env.local 的 PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD）：${errors.join('; ')}`)
-}
-
-export interface PurgeCaller {
-  id: string
-  role: string
-  name?: string
-  email?: string
-}
-
-/**
- * 校验调用者身份：必须是 `users.role === 'superAdmin'`。
- *
- * 用调用者自己的 token 调 `auth-refresh` —— 让 **PocketBase** 判定这个 token 是真的，
- * 而不是信前端传来的任何字段（前端说自己是谁不作数）。
- */
-export async function assertSuperAdmin (token: string): Promise<PurgeCaller> {
-  if (!token) {
-    throw new Error('缺少登录凭据（请求头里没有 token）')
-  }
-  const res = await fetch(new URL('/api/collections/users/auth-refresh', PB_URL).toString(), {
-    method: 'POST',
-    headers: { Authorization: token },
-  })
-  if (!res.ok) {
-    throw new Error(`登录凭据无效或已过期（HTTP ${res.status}），请重新登录后再试`)
-  }
-  const body: { record?: Record<string, unknown> } = await res.json()
-  const record = body?.record ?? {}
-  const role = String(record.role ?? '')
-  if (role !== 'superAdmin') {
-    throw new Error(`只有超级管理员可以清空数据（当前角色：${role || '未设置'}）`)
-  }
-  return {
-    id: String(record.id ?? ''),
-    role,
-    name: record.name ? String(record.name) : undefined,
-    email: record.email ? String(record.email) : undefined,
-  }
-}
+export type PurgeCaller = AdminCaller
 
 /** 某集合现有多少条 */
 async function countOf (collection: string, token: string): Promise<number> {
@@ -178,7 +115,7 @@ export interface PurgeSummary {
  * `dryRun` 只统计不删 —— 界面用它先展示"将要删掉多少"。
  */
 export async function purgeBiData (opts: { token: string, dryRun: boolean }): Promise<PurgeSummary> {
-  const by = await assertSuperAdmin(opts.token)
+  const by = await assertSuperAdmin(opts.token, '清空数据')
   const admin = await adminToken()
 
   const collections: PurgeSummary['collections'] = []

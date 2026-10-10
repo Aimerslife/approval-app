@@ -51,11 +51,6 @@ const router = createRouter({
       path: '/createStream',
       component: () => import('@/pages/createStream.vue'),
     },
-    // 流程编排 v2（实验）：函数节点 + 运行期构建，与 createStream 完全独立
-    {
-      path: '/createStream2',
-      component: () => import('@/pages/createStream2.vue'),
-    },
     {
       path: '/register',
       component: () => import('@/pages/register.vue'),

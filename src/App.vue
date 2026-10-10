@@ -151,10 +151,6 @@
           >
             <template #prepend>
               <v-icon :icon="item.icon" size="20" />
-
-              <!-- 未审批单数（status === 0）：与「我的审批单」列表同口径，见 stores/pending.ts。
-                   数量为 0 时整块不渲染 —— 否则会留下一个空红点或一个"0"。
-                   判断用 to 而不是文案：文案是给人看的，改文案不该让角标消失 -->
               <v-badge
                 v-if="item.to === '/mine' && pending.count > 0"
                 bordered
@@ -231,7 +227,6 @@
     { icon: 'mdi-creation', text: '任务', to: '/workStream' },
     { icon: 'mdi-file-table-box', text: '数据', to: '/setDatas' },
     { icon: 'mdi-tag-check', text: '审批模板', to: '/approvalModel' },
-    { icon: 'mdi-flask-outline', text: '流程编排 v2', to: '/createStream2' },
     { icon: 'mdi-account-group-outline', text: '角色设置', to: '/roleSetting' },
   ]
   /**

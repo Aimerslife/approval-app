@@ -26,6 +26,8 @@
                 @click="addNotifyNode"><span class="mb-1">飞书提醒</span></v-btn>
               <v-btn color="#7C3AED" prepend-icon="mdi-autorenew" size="small" variant="tonal"
                 @click="addLoopNode"><span class="mb-1">轮询</span></v-btn>
+              <v-btn color="#0D9488" prepend-icon="mdi-puzzle-outline" size="small" variant="tonal"
+                @click="addRefNode"><span class="mb-1">引用模板</span></v-btn>
             </div>
 
             <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-0">
@@ -74,26 +76,22 @@
               <v-btn color="primary" size="small" variant="flat" @click="isActive = true">保存</v-btn>
             </div>
           </div>
-          <div v-if="selectedEdge" class="branch-panel mb-2" :class="{ 'result-panel': isResultEdge }">
+          <div v-if="selectedEdge" class="branch-panel mb-2" :class="{ 'result-panel': isResultEdge || isRefEdge }">
             <div class="panel-head">
               <span class="head-icon">
-                <v-icon :color="isResultEdge ? '#2563eb' : (isBranchEdge ? '#d97706' : '#6b7280')" size="12">
+                <v-icon
+                  :color="isResultEdge ? '#2563eb' : (isRefEdge ? '#0d9488' : (isBranchEdge ? '#d97706' : '#6b7280'))"
+                  size="12"
+                >
                   {{ isResultEdge
                     ? 'mdi-account-check-outline'
-                    : (isBranchEdge ? 'mdi-source-branch' : 'mdi-vector-line') }}
+                    : (isRefEdge ? 'mdi-puzzle-outline' : (isBranchEdge ? 'mdi-source-branch' : 'mdi-vector-line')) }}
                 </v-icon>
               </span>
               <span class="panel-title">{{
-                isResultEdge ? '审批结果分支配置' : (isBranchEdge ? '分支配置' : '连线配置')
+                isResultEdge ? '审批结果分支配置' : (isRefEdge ? '引用分流配置' : (isBranchEdge ? '分支配置' : '连线配置'))
                 }}</span>
 
-              <!--
-                「配置选项」：选项树（类别 → 一级 → 二级）是三层结构，铺在面板里会把面板一路撑长，
-                而配选项是偶尔配一次的事 —— 所以整块搬进弹出框（EdgeOptionTreeDialog），
-                标题旁边只留这个入口按钮，按钮上的「本环节已配 N 个…」保证不打开也知道配没配。
-                ⚠️ 配置是**本审批环节共用的一份**（存在节点上，见 ApprovalNodeData.optionGroups）：
-                本环节各条结果分支点开看到的都是它；办理时整个环节就呈现这一棵树（不再先选"处理方式"）。
-              -->
               <button v-if="isResultEdge" class="panel-btn"
                 title="配置本审批环节的办理选项（类别 → 一级 → 二级；一级的「实际链路」决定实际走哪条线）；同一环节的各条结果分支共用这一份"
                 @click="optionDialog = true">
@@ -166,15 +164,21 @@
               <div v-if="isBranchEdge" class="panel-row">
                  <span class="panel-label">线路名称</span>
                 <input v-model="selectedEdgeLabel" class="panel-input"
-                  :placeholder="isResultEdge ? '如：驳回走复核' : '如：财务审批'" style="width: 148px">
+                  :placeholder="isResultEdge ? '如：驳回走复核' : (isRefEdge ? '如：接收走仓储' : '如：财务审批')"
+                  style="width: 148px">
 
                 <label class="switch-label">
                   <input :checked="selectedEdgeConditions.length === 0" type="checkbox" @change="onMainToggle">
 
-                  <span v-if="selectedEdgeConditions.length === 0" class="mt-1">{{ isResultEdge ?
-                    '主线（审批通过/其他结论未命中时走这条）' : '默认分支（条件都不命中时走这条）' }}</span>
+                  <span v-if="selectedEdgeConditions.length === 0" class="mt-1">{{
+                    isResultEdge ? '主线（审批通过/其他结论未命中时走这条）'
+                      : (isRefEdge ? '兜底主线（这一段最后办出来的结论没绑到别的线时走这条）'
+                        : '默认分支（条件都不命中时走这条）')
+                    }}</span>
                 </label>
-                              <template v-if="isBranchEdge && isResultEdge && selectedEdgeConditions.length > 0">
+                              <template
+                                v-if="isBranchEdge && (isResultEdge || isRefEdge) && selectedEdgeConditions.length > 0"
+                              >
                 <div class="panel-row">
                   <span class="panel-label">审批结论</span>
 
@@ -191,6 +195,26 @@
                   多个原因属于同一走向时把满足方式改成「任一满足」
                 </div>
               </template>
+
+              <!--
+                「办理选项条件」：只在满足时把这条线的选项**摆给办理人**，**不影响走哪条线**。
+                主线（无条件出线）也能配 —— 典型就是"「同意接收」只在前一环节结论是 receive 时才给"。
+              -->
+              <div v-if="isResultEdge" class="panel-row">
+                <span class="panel-label">选项条件</span>
+
+                <select :value="offerRule.op" class="panel-input" style="width: 112px" @change="onOfferOp">
+                  <option value="">不限</option>
+                  <option value="eq">上一环结论是</option>
+                  <option value="ne">上一环结论不是</option>
+                </select>
+
+                <select v-if="offerRule.op" :value="offerRule.value" class="panel-input" style="width: 126px"
+                  @change="onOfferCode">
+                  <option value="">请选择结论</option>
+                  <option v-for="r in APPROVAL_RESULTS" :key="r.value" :value="r.value">{{ r.label }}</option>
+                </select>
+              </div>
               </div>
               <!-- 条件条目：两种分支共用（普通条件 / 条件组混排） -->
               <template v-if="isBranchEdge && selectedEdgeConditions.length > 0">
@@ -229,7 +253,7 @@
 
                         <select v-model="subCondOf(sub).op" class="panel-input" style="width: 88px"
                           @change="onOpChange(subCondOf(sub), $event)">
-                          <option v-for="op in OPS" :key="op.value" :value="op.value">
+                          <option v-for="op in opsFor(subCondOf(sub))" :key="op.value" :value="op.value">
                             {{ op.label }}
                           </option>
                         </select>
@@ -240,7 +264,18 @@
                         -->
                         <template v-if="subCondOf(sub).op === 'contains'">
                           <span v-for="(_, vi) in condValues(subCondOf(sub))" :key="vi" class="cond-value">
-                            <input v-model="condValues(subCondOf(sub))[vi]" class="panel-input"
+                            <!--
+                              结论码用下拉：手打码太容易错，而错的码**永远不会命中**（还看不出来）。
+                              结论条件不参与 @字段引用（见 types/approval 的 conditionRefField），所以这里不给输入框。
+                            -->
+                            <select v-if="isResultField(subCondOf(sub).field)" v-model="condValues(subCondOf(sub))[vi]"
+                              class="panel-input" style="width: 96px">
+                              <option value="">选择结论…</option>
+                              <option v-for="r in resultOptions(condValues(subCondOf(sub))[vi])" :key="r.value"
+                                :value="r.value">{{ r.label }}</option>
+                            </select>
+
+                            <input v-else v-model="condValues(subCondOf(sub))[vi]" class="panel-input"
                               list="flow-field-ref-options" placeholder="值" style="width: 96px">
 
                             <v-icon-btn v-if="condValues(subCondOf(sub)).length > 1" size="x-small" title="删除这个值"
@@ -256,8 +291,28 @@
                           </button>
                         </template>
 
+                        <!-- 结论码用下拉（同上）；其它字段照旧是"常量或 @字段引用" -->
+                        <select v-else-if="isResultField(subCondOf(sub).field)" v-model="subCondOf(sub).value"
+                          class="panel-input" style="width: 200px">
+                          <option value="">选择结论…</option>
+                          <option v-for="r in resultOptions(subCondOf(sub).value)" :key="r.value" :value="r.value">
+                            {{ r.label }}
+                          </option>
+                        </select>
+
                         <input v-else v-model="subCondOf(sub).value" class="panel-input" list="flow-field-ref-options"
                           placeholder="5000 或 @字段" style="width: 200px">
+
+                        <!--
+                          仓库候选：点分类 = 整组一起填（选「本地仓」→ 本地仓 / 广州仓 / 中山仓 / 代发仓），
+                          点单个 = 追加进这条条件。清单来自「角色设置 → 仓库设置」。
+                        -->
+                        <WarehousePicker
+                          :groups="warehouseGroups"
+                          :selected="selectedWarehouseValues(subCondOf(sub))"
+                          @pick-group="(names) => applyWarehouseGroup(subCondOf(sub), names)"
+                          @pick-one="(name) => appendWarehouseValue(subCondOf(sub), name)"
+                        />
 
                         <v-icon-btn class="ml--2" size="x-small" variant="text"
                           @click="removeGroupItem(groupOf(item), k)">
@@ -278,12 +333,20 @@
 
                     <select v-model="condOf(item).op" class="panel-input" style="width: 88px"
                       @change="onOpChange(condOf(item), $event)">
-                      <option v-for="op in OPS" :key="op.value" :value="op.value">{{ op.label }}
+                      <option v-for="op in opsFor(condOf(item))" :key="op.value" :value="op.value">{{ op.label }}
                       </option>
                     </select>
                     <template v-if="condOf(item).op === 'contains'">
                       <span v-for="(_, vi) in condValues(condOf(item))" :key="vi" class="cond-value">
-                        <input v-model="condValues(condOf(item))[vi]" class="panel-input" list="flow-field-ref-options"
+                        <!-- 结论码用下拉（同组内那条）：错的码永远不会命中，而手打很容易错 -->
+                        <select v-if="isResultField(condOf(item).field)" v-model="condValues(condOf(item))[vi]"
+                          class="panel-input" style="width: 96px">
+                          <option value="">选择结论…</option>
+                          <option v-for="r in resultOptions(condValues(condOf(item))[vi])" :key="r.value"
+                            :value="r.value">{{ r.label }}</option>
+                        </select>
+
+                        <input v-else v-model="condValues(condOf(item))[vi]" class="panel-input" list="flow-field-ref-options"
                           placeholder="值" style="width: 96px">
 
                         <v-icon-btn v-if="condValues(condOf(item)).length > 1" size="x-small" title="删除这个值"
@@ -299,9 +362,31 @@
                       </button>
                     </template>
 
-                    <!-- 其它操作符是单值：常量（5000 / 是）或「@字段名」引用另一字段的值，输入 @ 会给候选 -->
+                    <!--
+                      结论字段（上一环节的审批结论）→ 结论码下拉：手打码太容易错，错的码永远不命中。
+                      其它操作符是单值：常量（5000 / 是）或「@字段名」引用另一字段的值，输入 @ 会给候选。
+                    -->
+                    <select v-else-if="isResultField(condOf(item).field)" v-model="condOf(item).value"
+                      class="panel-input" style="width: 120px">
+                      <option value="">选择结论…</option>
+                      <option v-for="r in resultOptions(condOf(item).value)" :key="r.value" :value="r.value">
+                        {{ r.label }}
+                      </option>
+                    </select>
+
                     <input v-else v-model="condOf(item).value" class="panel-input" list="flow-field-ref-options"
                       placeholder="5000 或 @字段" style="width: 120px">
+
+                    <!--
+                      仓库候选：点分类 = 整组一起填（选「本地仓」→ 本地仓 / 广州仓 / 中山仓 / 代发仓），
+                      点单个 = 追加进这条条件。清单来自「角色设置 → 仓库设置」。
+                    -->
+                    <WarehousePicker
+                      :groups="warehouseGroups"
+                      :selected="selectedWarehouseValues(condOf(item))"
+                      @pick-group="(names) => applyWarehouseGroup(condOf(item), names)"
+                      @pick-one="(name) => appendWarehouseValue(condOf(item), name)"
+                    />
 
                     <v-icon-btn class="ml--2" size="x-small" variant="text" @click="removeCondition(item.index)">
                       <v-icon size="11">mdi-close</v-icon>
@@ -359,7 +444,8 @@
           <div class="flow-canvas">
             <VueFlow v-model:edges="edges" v-model:nodes="nodes" :connection-radius="30" :default-viewport="{ zoom: 1 }"
               :delete-key-code="['Backspace', 'Delete']" fit-view-on-init :max-zoom="1.8" :min-zoom="0.3"
-              @connect="onConnect" @edge-click="onEdgeClick" @move="onMove" @pane-click="selectedEdge = null">
+              @connect="onConnect" @edge-click="onEdgeClick" @move="onMove" @node-click="onNodeClick"
+              @pane-click="selectedEdge = null">
               <Background :gap="16" />
               <Controls position="bottom-left" />
               <MiniMap pannable position="bottom-right" zoomable />
@@ -446,8 +532,26 @@
               -->
               <template #node-loop="{ id, data, selected }">
                 <div class="node-shell">
-                  <LoopCardNode :data="data" :selected="selected" @edit="openCardDialog(id)"
-                    @remove="removeNodeById(id)" />
+                  <LoopCardNode :data="data" :outer-approvals="loopCardOuterApprovals" :selected="selected"
+                    @edit="openCardDialog(id)" @remove="removeNodeById(id)" />
+
+                  <div v-if="nodeErrorOf(id)" class="node-error" :title="nodeErrorOf(id)">
+                    <v-icon size="12">mdi-alert-circle-outline</v-icon>
+                    <span>{{ nodeErrorOf(id) }}</span>
+                  </div>
+                </div>
+              </template>
+
+              <!--
+                引用模板卡片：只显示"引用的是哪张模板"，**不在这里画**被引用的流程 ——
+                内容只有一份（在源模板里），这正是"复用"而不是"复制"的关键：
+                源模板改了，之后新建的单立刻用新版（见 utils/templateRef）。
+              -->
+              <template #node-ref="{ id, data, selected }">
+                <div class="node-shell">
+                  <RefCardNode :branches="outBranches(id)" :data="data" :selected="selected"
+                    :templates="refTemplateChoices" @branch-click="selectBranch" @open="openRefTemplate"
+                    @preview="openRefPreview" @remove="removeNodeById(id)" />
 
                   <div v-if="nodeErrorOf(id)" class="node-error" :title="nodeErrorOf(id)">
                     <v-icon size="12">mdi-alert-circle-outline</v-icon>
@@ -464,10 +568,19 @@
           </div>
 
           <div class="text-grey text-[11px] mt-2 shrink-0">
-            选中连线按 Backspace / Delete 可删除；节点可自由拖动；Ctrl+Z 撤销 / Ctrl+Shift+Z 重做
+            选中连线按 Backspace / Delete 可删除；节点可自由拖动；Ctrl+Z 撤销 / Ctrl+Shift+Z 重做；
+            点一张卡片按 Ctrl+C 复制、Ctrl+V 粘贴（副本不带连线，位置在源卡片右下方）
           </div>
           <LoopCardDialog v-if="editingCardData" :data="editingCardData" :open="cardDialog"
             :outer-approvals="loopCardOuterApprovals" @close="closeCardDialog" />
+
+          <RefPreviewDialog
+            v-if="previewRefId"
+            :open="!!previewRefId"
+            :template-id="previewRefId"
+            @close="closeRefPreview"
+            @open-template="openRefTemplate"
+          />
 
           <EdgeOptionTreeDialog :link-options="selectedEdgeLinkOptions" :model-value="selectedEdgeOptionGroups"
             :open="optionDialog" @close="optionDialog = false" @update:model-value="commitEdgeOptionGroups" />
@@ -528,6 +641,7 @@ import type {
   FlowGraph,
   FlowGraphEdge,
   LoopNodeData,
+  RefNodeData,
 } from '@/types/approval'
 // 连线形状清单：与卡片内部画布共用（两处各写一份迟早不一致）
 import { applyEdgeShape, DEFAULT_EDGE_BORDER_RADIUS, DEFAULT_EDGE_CURVATURE, EDGE_STYLES } from '@/utils/edgeStyles'
@@ -544,17 +658,25 @@ import EdgeOptionTreeDialog from '@/components/flow/EdgeOptionTreeDialog.vue'
 import LoopCardDialog from '@/components/flow/LoopCardDialog.vue'
 import LoopCardNode from '@/components/flow/LoopCardNode.vue'
 import ProbeNode from '@/components/flow/ProbeNode.vue'
+// 引用模板卡片：画布上的卡片本体（只存一个指向源模板的引用，内容在建单期搬进来）
+import RefCardNode from '@/components/flow/RefCardNode.vue'
+// 引用卡片「展开预览」弹窗：只读看一眼源模板里到底有什么（画布上刻意不画它的内容）
+import RefPreviewDialog from '@/components/flow/RefPreviewDialog.vue'
 import StartEndNode from '@/components/flow/StartEndNode.vue'
+// 「仓库」候选值选择器（条件值侧）：候选来自「角色设置 → 仓库设置」维护的清单
+import WarehousePicker from '@/components/flow/WarehousePicker.vue'
 import OrgTree from '@/components/OrgTree.vue'
 import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
-import { APPROVAL_RESULTS, collapseConditionValue, conditionValues, CURRENT_GROUP_FIELD, FIELD_REF_PREFIX, flowToChain, isConditionGroup, isResultCondition, PROBE_EMPTY_BRANCH, PROBE_EXISTS_BRANCH, uid } from '@/types/approval'
+import { APPROVAL_RESULTS, collapseConditionValue, conditionValues, FIELD_REF_PREFIX, flowToChain, isConditionGroup, isResultCondition, PROBE_EMPTY_BRANCH, PROBE_EXISTS_BRANCH, uid } from '@/types/approval'
 import { ensureRejectLoopBack, graphToFlowFrom } from '@/utils/approvalFlow'
-import { DERIVED_KEYS } from '@/utils/biRowFields'
-import { addApproval, getApprovalOne, updateApprovalModel } from '@/utils/collection'
-// 条件字段候选：BI 产品字段 + 派生指标（毛利率 / 海外仓库存金额）
-import { PRODUCT_FIELDS } from '@/utils/productFields'
+import { addApproval, getApprovalOne, getApprovalOptions, loadWarehouses, updateApprovalModel } from '@/utils/collection'
+// 条件字段候选：与卡片内部画布共用同一份（见 utils/conditionFields 的文件头）
+import { CONDITION_FIELD_OPTIONS } from '@/utils/conditionFields'
+// 仓库清单（含"写进条件"的口径：分类 → 子仓库、追加单个）都是纯逻辑，放在 utils/warehouse 里
+import { appendWarehouseValue, applyWarehouseGroup, groupWarehouses, selectedWarehouseValues } from '@/utils/warehouse'
 
 const route = useRoute()
+const router = useRouter()
 const { setViewport, addSelectedEdges, setCenter, findNode } = useVueFlow()
 
 const isActive = ref(false)
@@ -569,18 +691,6 @@ function showMsg(text: string, color: 'success' | 'error' | 'warning' | 'info' =
   snackbar.value = { show: true, text, color }
 }
 
-/* ==================== 保存失败：指出是哪个环节 ==================== */
-
-/**
- * 校验失败时锁定的出错位置（由 graphToFlowFrom 的 errorNodeId / errorEdgeId 给出）。
- *
- * 为什么要有这个：原先失败只弹一句「请检查连线」，而画布上几十个框、上百条线，
- * 用户根本不知道看哪儿。现在出错的那个**环节卡片上直接写原因**，
- * 视图自动移过去，画布上方还有一条提示条可以再点「定位」。
- *
- * 生命周期：只在保存时刷新 —— 改完再存一次就换到新位置 / 清空，
- * 不监听每次拖动（那样错误提示会在用户还没改完时就闪掉，反而看不到）。
- */
 const saveError = ref<{ message: string, nodeId?: string, edgeId?: string } | null>(null)
 
 /** 该环节要显示的错误文案（绑到节点组件的 error prop 上） */
@@ -639,29 +749,11 @@ const nodes = ref<any[]>([
   { id: 'end', type: 'end', position: { x: 300, y: 240 } },
 ])
 
-/**
- * 分支条件的**字段候选**（喂给 <datalist>，见模板里的说明）。三部分：
- *   1) 65 个 BI 产品字段 —— 条件求值时就是按这些中文 key 从产品数据里取值；
- *   2) 派生指标（毛利率 / 海外仓库存金额）—— BI 里没有这两列，由 biRowFields 算出（见 deriveFlowFields）；
- *   3) 审批结论与办理表单字段 —— 上一环节的结论（result）以及办理人填的值（amount / qty / …）。
- * 前两部分的 value 用 `key`（= BI 中文列名，与产品数据里的键一致），label 显示为对应说明。
- *
- * 同一份清单也用于条件**值**侧的「@字段名」引用候选（模板里的 flow-field-ref-options）——
- * 引用和左字段取值都走同一个求值上下文，所以两边能选的东西本来就该一致。
+/*
+ * 分支条件的**字段候选**：与「组间轮询」卡片内部画布、条件值侧的 `@引用` 共用**同一份**
+ * （见 utils/conditionFields 的文件头 —— 以前两处各抄一份，加字段漏一处就"卡片里选不到"）。
  */
-const FIELD_OPTIONS = computed(() => [
-  ...PRODUCT_FIELDS.map(f => ({ value: f.key, label: f.title })),
-  { value: DERIVED_KEYS.grossMargin, label: '派生指标（SKU3月前毛利润 ÷ SKU3月前回款 × 100）' },
-  { value: DERIVED_KEYS.overseasAmount, label: '派生指标（= 总库存金额，白板里的"海外仓库存金额/呆滞金额"就是它）' },
-  { value: 'result', label: '上一环节的审批结论（pass / reject / …）' },
-  { value: CURRENT_GROUP_FIELD, label: '当前环节对应的组别（按组轮询时 = 本轮轮到的那个组）' },
-  { value: 'amount', label: '办理时填写的金额' },
-  { value: 'qty', label: '办理时填写的数量' },
-  { value: 'reason_belong', label: '办理时选择的原因分类' },
-  { value: 'second_reason', label: '办理时选择的二级原因' },
-  { value: 'remark', label: '办理时填写的补充说明' },
-  { value: 'confirmed', label: '办理时的确认标记（如报废清仓）' },
-])
+const FIELD_OPTIONS = CONDITION_FIELD_OPTIONS
 /** 统一连线箭头：与连线同色，尺寸收敛 */
 const arrowMarker = { type: MarkerType.ArrowClosed, color: '#cbd5e1', width: 16, height: 16 }
 
@@ -677,12 +769,58 @@ const selectedEdgeLabel = computed({
   },
 })
 
+const offerRule = computed<{ op: string, value: string }>(() => {
+  const list = (selectedEdge.value?.data?.offerWhen ?? []) as ConditionExpr[]
+  const first = list[0]
+  const one: BranchCondition | null = list.length === 1 && first && !isConditionGroup(first) ? first : null
+  return one && one.field === 'result' && (one.op === 'eq' || one.op === 'ne')
+    ? { op: one.op, value: String(one.value ?? '') }
+    : { op: '', value: '' }
+})
+
+/** 写回选项条件；op / value 任一为空 → 删掉字段（"不限"与"没配"是同一种表示） */
+function writeOfferRule (op: string, value: string) {
+  const edge = selectedEdge.value
+  if (!edge) return
+  ensureEdgeData()
+  if (!op || !value) {
+    delete edge.data.offerWhen
+    return
+  }
+  edge.data.offerWhen = [{ field: 'result', op, value }]
+}
+
+function onOfferOp (e: Event) {
+  writeOfferRule((e.target as HTMLSelectElement).value, offerRule.value.value)
+}
+
+function onOfferCode (e: Event) {
+  writeOfferRule(offerRule.value.op, (e.target as HTMLSelectElement).value)
+}
+
 /** 选中连线是否为「审批结果分支」：审批节点出线且该节点已有 ≥2 条出线 */
 const isResultEdge = computed(() => {
   const edge = selectedEdge.value
   if (!edge) return false
   const src = nodes.value.find(n => n.id === edge.source)
   if (src?.type !== 'approval') return false
+  return edges.value.filter(e => e.source === edge.source).length > 1
+})
+
+/**
+ * 选中连线是否为「引用模板的分流线」：引用卡片出线，且卡片已有 ≥2 条出线。
+ *
+ * 与审批结果分支**共用同一套交互**（线路名称 / 绑结论 / 条件 / 兜底主线）——
+ * 差别只在"结论从哪来"：那边是上一环节的审批结论，这边是**被引用那一段最后办出来的结论**；
+ * 但引擎给下游的都是同一个 `result`，所以面板上共用同一个「审批结论」下拉。
+ *
+ * 审批环节专属的配置（办理选项树 / 选项条件）**不给它**：引用卡片自己没有"办理这一刻"。
+ */
+const isRefEdge = computed(() => {
+  const edge = selectedEdge.value
+  if (!edge) return false
+  const src = nodes.value.find(n => n.id === edge.source)
+  if (src?.type !== 'ref') return false
   return edges.value.filter(e => e.source === edge.source).length > 1
 })
 
@@ -818,6 +956,26 @@ function removeCondValue(c: BranchCondition, i: number) {
   if (list.length === 0) {
     list.push('')
   }
+}
+
+/* ==================== 「仓库」候选值（条件值侧） ==================== */
+
+/**
+ * 右侧面板「仓库」按钮的候选：**分类 → 其下全部仓库**。
+ *
+ * 来源是「角色设置 → 仓库设置」维护的那份清单（PB `warehouses` 表；没维护过时用
+ * utils/warehouse 的文件默认值）—— 与审批人覆盖值同一套"外部维护、模板引用"的做法。
+ *
+ * ⚠️ 它只是**候选**：写进条件的是**具体仓库名**（见 utils/warehouse 的 applyWarehouseGroup /
+ *    appendWarehouseValue），模板里不会存"引用了清单"这层关系 ——
+ *    所以清单以后改名 / 增删，**已保存的模板不受影响**。这与「引用模板」刻意不同：
+ *    条件是业务口径，必须落成确定的取值，不能跟着清单漂。
+ */
+const warehouseGroups = ref<Array<{ parent: string, names: string[] }>>([])
+
+async function loadWarehouseGroups() {
+  const res = await loadWarehouses()
+  warehouseGroups.value = groupWarehouses(res.rows)
 }
 
 /**
@@ -1093,6 +1251,97 @@ watch(edges, list => {
   }
 })
 
+// ===== 复制 / 粘贴卡片（Ctrl / Cmd + C、V）=====
+
+/**
+ * 剪贴板里那**一张**卡片：只存类型 + 数据的深拷贝 + 源节点 id。
+ *
+ * · 存 id 是为了粘贴时以**源卡片的位置**为基准往右下错开 —— 副本就在旁边，
+ *   不用去画布另一头找它；源卡片被删了就退回"视口中心的空位"（复用加节点那套避让）。
+ * · **不存连线**：连线两端是"别处"的节点，复制过去要么指错、要么得连带造一批节点出来。
+ *   复制卡片真正省的是重复录入（标题 / 审批人 / 条件配置），线请重新拖一条。
+ */
+const copiedNode = ref<{ id: string, type: string, data: unknown } | null>(null)
+
+/** 连按粘贴的次数：让副本依次错开，而不是每次都叠在同一处 */
+let pasteCount = 0
+
+/** 最后点过的卡片（由画布的 @node-click 记录）—— Ctrl+C 复制的是它 */
+const pickedNodeId = ref('')
+
+function onNodeClick ({ node }: { node: any }) {
+  pickedNodeId.value = String(node?.id ?? '')
+}
+
+/**
+ * 卡片数据的深拷贝：JSON 往返。
+ *
+ * 必须**拷贝**而不是共用引用：否则改了副本的审批人，原卡片也跟着变（最迷惑人的那种 bug）。
+ * 用 JSON 而不是 `structuredClone`，理由与项目里其它快照一致（见 LoopCardDialog 的 cloneGraph）：
+ * 数据可能来自 Vue 的响应式代理，`structuredClone` 遇到 Proxy 会抛 DataCloneError。
+ */
+function copyNodeData (data: unknown): unknown {
+  // eslint-disable-next-line unicorn/prefer-structured-clone -- 见上：Proxy 会让 structuredClone 抛 DataCloneError
+  return data === undefined || data === null ? {} : JSON.parse(JSON.stringify(data))
+}
+
+/** 卡片名（提示文案里点名用；没写名字时按类型给个叫法） */
+const CARD_NAME_BY_TYPE: Record<string, string> = {
+  approval: '审批环节',
+  notify: '飞书提醒',
+  condition: '条件分支',
+  probe: '数据查询',
+  loop: '组间轮询',
+  ref: '引用模板',
+}
+
+function cardNameOf (node: any): string {
+  const title = String(node?.data?.title ?? '').trim()
+  return title || CARD_NAME_BY_TYPE[String(node?.type)] || '卡片'
+}
+
+/** Ctrl+C：把最后点过的那张卡片存进剪贴板 */
+function copyPickedNode () {
+  const node = nodes.value.find(n => n.id === pickedNodeId.value)
+  if (!node || node.type === 'start' || node.type === 'end') {
+    showMsg('先点一下要复制的卡片（开始 / 结束节点不用复制）', 'warning')
+    return
+  }
+  copiedNode.value = { id: String(node.id), type: String(node.type), data: copyNodeData(node.data) }
+  pasteCount = 0
+  showMsg(`已复制「${cardNameOf(node)}」—— 按 Ctrl+V 粘贴`, 'success')
+}
+
+/** Ctrl+V：粘贴一张副本（不带连线） */
+function pasteCopiedNode () {
+  const copied = copiedNode.value
+  if (!copied) {
+    showMsg('剪贴板里还没有卡片：先点一张卡片，按 Ctrl+C 复制', 'warning')
+    return
+  }
+  pasteCount += 1
+  const node: any = {
+    id: uid(),
+    type: copied.type,
+    position: { x: 0, y: 0 },
+    data: copyNodeData(copied.data),
+  }
+  const source = nodes.value.find(n => n.id === copied.id)
+  if (source) {
+    // 以源卡片为基准往右下挪；连按几次就排成一条斜线，一眼看得出哪几个是新粘的
+    node.position = {
+      x: Number(source.position?.x ?? 0) + 32 * pasteCount,
+      y: Number(source.position?.y ?? 0) + 32 * pasteCount,
+    }
+    nodes.value.push(node)
+  } else {
+    // 源卡片已经不在了（删掉 / 换过模板）：交给"加节点"那套找个不压其它卡片的空位
+    addNodeToCanvas(node)
+  }
+  pickedNodeId.value = node.id
+  showMsg(`已粘贴「${cardNameOf(node)}」—— 拖到合适位置，再拖线接上下游`, 'success')
+}
+
 function onKeydown(e: KeyboardEvent) {
   // 输入框 / 文本域内不拦截，交给浏览器原生文本撤销
   const t = e.target as HTMLElement | null
@@ -1114,6 +1363,13 @@ function onKeydown(e: KeyboardEvent) {
   } else if (key === 'y') {
     e.preventDefault()
     redo()
+  } else if (key === 'c' && !e.shiftKey) {
+    // 复制卡片（输入框里的复制已在函数开头放过：那是复制文字，不该变成复制卡片）
+    e.preventDefault()
+    copyPickedNode()
+  } else if (key === 'v' && !e.shiftKey) {
+    e.preventDefault()
+    pasteCopiedNode()
   }
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
@@ -1137,6 +1393,51 @@ const OPS = [
   { value: 'lte', label: '小于等于' },
   { value: 'contains', label: '包含' },
 ] as const
+
+/** 操作符的中文名（下拉里显示；表里没有的（老数据）就原样显示码） */
+function opLabel (op: string): string {
+  return OPS.find(o => o.value === op)?.label ?? op
+}
+
+/** 这个字段是不是「上一环节的审批结论」（保留字段 result，见 types/approval 的 conditionRefField） */
+function isResultField (field: unknown): boolean {
+  return String(field ?? '').trim() === 'result'
+}
+
+/**
+ * 「上一环节的审批结论」的候选 = 全局结论码表（"结果分支"下拉读的也是它，见 APPROVAL_RESULTS）。
+ *
+ * 表里没有的码（老模板 / 拼错的码）**补在最后**：不补的话下拉会把已有值显示成空白，
+ * 用户一保存就被改成表里第一项 —— 等于悄悄改了模板的分流口径。
+ */
+function resultOptions (raw: unknown): Array<{ value: string, label: string }> {
+  const v = String(raw ?? '').trim()
+  if (!v || APPROVAL_RESULTS.some(r => r.value === v)) {
+    return [...APPROVAL_RESULTS]
+  }
+  return [...APPROVAL_RESULTS, { value: v, label: `${v}（表里没有的码）` }]
+}
+
+/**
+ * 某个条件可用的操作符。
+ *
+ * `result` **只给「等于」**，两条理由指向同一件事：结论是一个**码**，不是可比较的量。
+ *  1. 「包含」在它身上是**子串匹配**（`containsHit` 用 `String#includes`）——
+ *     「不接收（not_receive）」会被「包含 接收（receive）」命中：看着配好了，
+ *     实际按你没预期的口径分流。
+ *  2. 「不等于」更危险：引擎判断"这条线绑的是哪个结论"时**只看字段名、不看操作符**
+ *     （见 types/approval 的 isResultCondition / firstResultValueOf），
+ *     于是 `result ≠ 驳回` 这条线会被判成"**就是**驳回"—— 终态、时间线与分支文案全跟着错。
+ * 要表达"其余结论"，写多条「等于」+ 留一条无条件兜底主线（这也是引擎一直推荐的做法）。
+ *
+ * 老数据里若存着别的操作符，把它补进候选 —— 不能让下拉"看不见"已有值（否则一保存就被改掉）。
+ */
+function opsFor (c: BranchCondition): Array<{ value: string, label: string }> {
+  const base = isResultField(c.field) ? OPS.filter(o => o.value === 'eq') : [...OPS]
+  return base.some(o => o.value === c.op)
+    ? [...base]
+    : [...base, { value: c.op, label: `${opLabel(c.op)}（模板里存着的旧写法）` }]
+}
 
 /** 当前选中的员工（含部门信息，加入节点时展开写入） */
 const selectedUser = ref<(Omit<ApprovalChainItem, 'type'> & { name: string }) | null>(null)
@@ -1184,8 +1485,14 @@ function selectBranch(edgeId: string) {
 function isBranchEdgeOf(edge: any): boolean {
   if (!edge) return false
   const source = nodes.value.find(n => n.id === edge.source)
+  /*
+   * 「审批节点」与「引用卡片」在这里同款：都能有 ≥2 条出线按结论分流
+   * （审批 = 上一环节的结论；引用 = 被引用那一段最后办出来的结论）。
+   * 只有 ≥2 条时才当分支 —— 单出线的引用卡片就是"穿过去"，没有分支可配。
+   */
   const resultBranchable
-    = source?.type === 'approval' && (edges.value.filter(e => e.source === edge.source).length > 1)
+    = (source?.type === 'approval' || source?.type === 'ref')
+      && (edges.value.filter(e => e.source === edge.source).length > 1)
   return source?.type === 'condition' || resultBranchable
 }
 
@@ -1476,7 +1783,7 @@ function addNotifyNode() {
 
 /** 画布上的"卡片型"节点：摆放避让时按卡片高度估算（start/end 是小胶囊） */
 function isCardNode(type?: string): boolean {
-  return type === 'approval' || type === 'condition' || type === 'notify' || type === 'probe' || type === 'loop'
+  return type === 'approval' || type === 'condition' || type === 'notify' || type === 'probe' || type === 'loop' || type === 'ref'
 }
 
 /**
@@ -1513,6 +1820,59 @@ function addLoopNode() {
       },
     } satisfies LoopNodeData,
   })
+}
+
+/**
+ * 加一张「引用模板」卡片。
+ *
+ * 故意**不预选**源模板：预选上第一张，会让"手滑拖出来但没选"变成
+ * "悄悄引用了另一张模板的流程" —— 那比当场报错糟得多。
+ * 没选会保存失败并点名这张卡片（见 utils/approvalFlow 的 readTemplateRef）。
+ */
+function addRefNode() {
+  const seq = nodes.value.filter(n => n.type === 'ref').length + 1
+  addNodeToCanvas({
+    id: uid(),
+    type: 'ref',
+    position: { x: 0, y: 0 },
+    data: { title: `引用模板${seq}`, refTemplateId: '' } satisfies RefNodeData,
+  })
+}
+
+/** 可引用的模板（库里全量，见 utils/collection 的 getApprovalOptions） */
+const refTemplateOptions = ref<{ id: string, name: string, status: number }[]>([])
+
+/**
+ * 卡片下拉里的候选：**排除当前正在编辑的这张模板**。
+ * 自引用在语义上没有意义（自己引用自己 = 无限展开），建单期也会被成环检测拦下 ——
+ * 但那种"能选却跑不通"的组合，一开始就不该出现在下拉里。
+ */
+const refTemplateChoices = computed(() => refTemplateOptions.value.filter(t => t.id !== editId.value))
+
+async function loadRefTemplates() {
+  refTemplateOptions.value = await getApprovalOptions()
+}
+
+/** 「打开源模板」：**新标签页**打开，当前这张模板未保存的改动不会丢 */
+function openRefTemplate(templateId: string) {
+  const href = router.resolve({ path: '/createStream', query: { id: templateId } }).href
+  window.open(href, '_blank')
+}
+
+/**
+ * 「展开预览」：弹窗里只读看一眼源模板的流程。
+ *
+ * 用 id 而不是布尔开关：`RefPreviewDialog` 挂在 `v-if` 上，
+ * 换一张卡片就是换一次组件实例，弹窗里的加载状态自然重置，不会串到上一张。
+ */
+const previewRefId = ref('')
+
+function openRefPreview(templateId: string) {
+  previewRefId.value = templateId
+}
+
+function closeRefPreview() {
+  previewRefId.value = ''
 }
 
 /**
@@ -1732,9 +2092,23 @@ async function saveStream() {
 onMounted(() => {
   const id = String(route.query.id ?? '')
   if (id) loadGraph(id)
+  // 引用卡片的源模板候选：与加载画布并行，失败只是下拉为空（不影响编辑）
+  loadRefTemplates()
+  // 条件面板里「仓库」按钮的候选（同上：拿不到就只剩手动输入）
+  loadWarehouseGroups()
 })
 </script>
 
+<!--
+  ⚠️ 这个块**不能**加 `scoped`（下面的 @import 与 vue-flow 的类名强相关）。
+
+  加了会静默坏掉：Sass 先把 @import 的内容内联进来，Vue 再统一加 `[data-v-xxx]`，
+  编译成 `.vue-flow__node[data-v-xxx]` —— 而 `.vue-flow__node` / `.vue-flow__pane` /
+  `.vue-flow__edge` 落在 **VueFlow 组件内部**的元素上，拿不到本组件的标记
+  （只有子组件的**根**元素才继承父组件的标记，所以只剩 `.vue-flow` 那条还生效），
+  结果是节点定位、连线图层、连接点尺寸全丢 —— 画布看着一片空白。
+  FlowPreview.vue 踩过这个坑（预览整块不显示），修法就是把导入单独放回一个无 scoped 的块。
+-->
 <style lang="scss">
 @import '@vue-flow/core/dist/style.css';
 @import '@vue-flow/core/dist/theme-default.css';
@@ -2354,14 +2728,6 @@ onMounted(() => {
   border: 1px solid var(--flow-selection-border);
 }
 
-/* ===== 连接点：小圆点，hover 变主色 ===== */
-/*
- * Vue Flow 用 transform: translate(-50%, ±50%) 给连接点做居中定位，
- * 所以这里**不能**用 transform: scale() 做 hover 放大——它会整体覆盖掉 translate，
- * 圆点瞬间偏移半个身位 → 鼠标脱离圆点 → 缩回 → 再进入，形成高频抖动，
- * 表现就是"悬浮时多个圆点影像重叠"，且按下时经常抓不中、拉不出连线。
- * 因此 hover 只改颜色和 box-shadow 光环，几何位置保持不动。
- */
 .flow-canvas .vue-flow__handle {
   width: 10px;
   height: 10px;

@@ -176,13 +176,13 @@
       </div>
 
       <!--
-        「审批结论」：**审批环节**分出来的支必须绑定一个结论（引擎按结论选路），
+        「审批结论」：审批环节分出来的支**可以**绑定一个结论（引擎按结论选路），
         卡片内部最经典的写法「通过 → 这一环结束 / 驳回 → 这一环结束」就是这种支。
 
-        以前这里**没有这个控件**，只能手写条件 —— 一旦写成别的字段，保存时会被拦：
-        「…不是有效的审批结果分支，请点击该线在上方面板选择对应审批结论」，
-        可卡片内部根本没有那个"上方面板"，等于走进了死胡同。所以按主画布的口径补上
-        （数据格式与 pages/createStream.vue 的 selectedEdgeResult 完全一致）：
+        **也可以不绑**：直接在下面给这条线写条件（业务字段 / 办理期字段，如
+        `confirmed = 接收`、`剩余接收数量 > 0`、`qty > 100`）—— 引擎选路时会带上
+        办理人填的值，条件命中即走这条线（见 utils/approvalFlow 的校验说明）。
+        数据格式与 pages/createStream.vue 的 selectedEdgeResult 完全一致：
           · 选一个结论 = 替换 conditions 里的 { field:'result', op:'eq', value }，并顺手把结论文案当分支名；
           · 选「主线」 = 去掉结论条件（无条件 → 通过 / 其它结论未命中时走它）。
       -->
@@ -208,7 +208,7 @@
           <span>配置选项{{ optionSummary }}</span>
         </button>
 
-        <span class="edge-note">要按组别 / 业务字段分流，请先加一个「条件分支」节点</span>
+        <span class="edge-note">绑结论不是必须的：也可以在下面直接写业务 / 办理期字段的条件</span>
       </div>
 
       <div class="edge-row">
@@ -236,13 +236,27 @@
           <option value="contains">包含</option>
         </select>
 
-        <input v-model="c.value" class="edge-input" placeholder="值">
+        <!--
+          值一侧也给候选（与主画布同一套「@字段名」引用写法）：
+          之前的版本这里是裸输入框，对比"另一个字段的值"只能靠手打字段名，写错一个字母就永远不命中。
+          下拉里给的是 `@剩余接收数量` 这类引用；要写常量（如 5000、美2组）直接手打即可。
+        -->
+        <input v-model="c.value" class="edge-input" list="card-field-ref-options" placeholder="值 / @引用字段">
 
         <button class="edge-del" title="删除这条条件" @click="removeCondition(c)">✕</button>
       </div>
 
       <datalist id="card-field-options">
         <option v-for="f in FIELD_OPTIONS" :key="f.value" :value="f.value">{{ f.label }}</option>
+      </datalist>
+
+      <!--
+        条件**值**侧的候选：带 @ 前缀的「引用另一字段」写法（见 types/approval 的 FIELD_REF_PREFIX）。
+        不复用上面那个 datalist —— 它给的是字段名本身，直接选进 value 会变成
+        "总库存金额 == 总库存金额" 这种常量比较，而不是引用。
+      -->
+      <datalist id="card-field-ref-options">
+        <option v-for="f in FIELD_OPTIONS" :key="f.value" :value="FIELD_REF_PREFIX + f.value">{{ f.label }}</option>
       </datalist>
 
       <div class="edge-row">
@@ -275,15 +289,15 @@
     type ApprovalOptionGroup,
     type BranchCondition,
     type ConditionExpr,
-    CURRENT_GROUP_FIELD,
+    FIELD_REF_PREFIX,
     isConditionGroup,
     isResultCondition,
     uid,
   } from '@/types/approval'
-  import { DERIVED_KEYS } from '@/utils/biRowFields'
+  // 条件字段候选：与主画布共用同一份（见 utils/conditionFields 的文件头）
+  import { CONDITION_FIELD_OPTIONS } from '@/utils/conditionFields'
   // 连线形状清单：与主画布共用同一份（别在这里再写一份，否则两处的五种会走偏）
   import { applyEdgeShape, DEFAULT_EDGE_BORDER_RADIUS, DEFAULT_EDGE_CURVATURE, EDGE_STYLES } from '@/utils/edgeStyles'
-  import { PRODUCT_FIELDS } from '@/utils/productFields'
 
   const props = defineProps<{
     /** 卡片内部的画布快照（直接改它 —— 与项目里"父子共享同一引用"的写法一致） */
@@ -765,24 +779,15 @@
     }
   }
 
-  /**
-   * 字段候选：与主画布同一份清单（BI 字段 + 派生指标 + 运行时字段），
-   * 外加**卡片专属**的「当前环节对应的组别」——卡片内部按组分流就是靠它。
-   * （主画布那份写死在 createStream 里，这里照抄一份；两处要一起加字段。）
+  /*
+   * 字段候选：与主画布**共用同一份**（utils/conditionFields）。
+   *
+   * 以前这里照抄了一份，于是"主画布能选的字段，卡片里选不到"——踩过：剩余接收数量，
+   * 表现为"轮询内没法按剩余判断"。现在只此一份，加字段不会再漏。
+   * 卡片内部子流程的条件是**办理期**求值的，所以 result / qty / 剩余接收数量这些都能用
+   * （卡片的「行条件」才是建单期，那些字段在那儿会被拦下）。
    */
-  const FIELD_OPTIONS = [
-    ...PRODUCT_FIELDS.map(f => ({ value: f.key, label: f.title })),
-    { value: DERIVED_KEYS.grossMargin, label: '派生指标（毛利率）' },
-    { value: DERIVED_KEYS.overseasAmount, label: '派生指标（= 总库存金额）' },
-    { value: CURRENT_GROUP_FIELD, label: '当前环节对应的组别（按组轮询时 = 本轮轮到的那个组）' },
-    { value: 'result', label: '上一环节的审批结论（pass / reject / …）' },
-    { value: 'amount', label: '办理时填写的金额' },
-    { value: 'qty', label: '办理时填写的数量' },
-    { value: 'reason_belong', label: '办理时选择的原因分类' },
-    { value: 'second_reason', label: '办理时选择的二级原因' },
-    { value: 'remark', label: '办理时填写的补充说明' },
-    { value: 'confirmed', label: '办理时的确认标记' },
-  ]
+  const FIELD_OPTIONS = CONDITION_FIELD_OPTIONS
 </script>
 
 <style lang="scss" scoped>

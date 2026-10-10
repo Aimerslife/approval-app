@@ -4,16 +4,79 @@
   code, pre, .v-code {
     font-family: var(--v-font-mono);
   }
+
+  /* =========================================================
+     表格分隔线：更细、更浅（所有 v-data-table 统一）
+     =========================================================
+     Vuetify 的表格线默认是 `thin solid rgba(var(--v-border-color), var(--v-border-opacity))`
+     —— thin = 1px，浅色主题 --v-border-opacity 是 0.12（深色 0.25）。
+     数据页那种「border + fixed-header + striped」的大表行多线密，1px + 12% 偏重、抢视线，
+     这里统一收成 0.5px + 透明度减半（高 DPI 上是真正的发丝线，普通屏也会因色变淡而显细）。
+
+     两个坑：
+       · 竖线（gridlines 的 border-right）不动 —— 网格需要骨架，只把"下划线"变浅；
+       · 表头/表尾那两条线在 Vuetify 里是 **inset 阴影**（--fixed-header / --fixed-footer），
+         不是 border，必须单独改 box-shadow，否则它俩会比行线重一档。
+
+     放在 vuetify-overrides 层：它排在 vuetify-components 之后（见文件头），
+     不必靠选择器权重去压 Vuetify 的默认值。
+     ========================================================= */
+  .v-table > .v-table__wrapper > table > tbody > tr > td,
+  .v-table > .v-table__wrapper > table > tbody > tr > th,
+  .v-table > .v-table__wrapper > table > thead > tr > td,
+  .v-table > .v-table__wrapper > table > thead > tr > th,
+  .v-table > .v-table__wrapper > table > tfoot > tr > td,
+  .v-table > .v-table__wrapper > table > tfoot > tr > th {
+    border-bottom-width: 0.5px;
+    border-bottom-color: rgba(var(--v-border-color), calc(var(--v-border-opacity) * 0.5));
+  }
+
+  .v-table.v-table--fixed-header > .v-table__wrapper > table > thead > tr > th {
+    box-shadow: inset 0 -0.5px 0 rgba(var(--v-border-color), calc(var(--v-border-opacity) * 0.5));
+  }
+
+  .v-table.v-table--fixed-footer > .v-table__wrapper > table > tfoot > tr > td,
+  .v-table.v-table--fixed-footer > .v-table__wrapper > table > tfoot > tr > th {
+    box-shadow: inset 0 0.5px 0 rgba(var(--v-border-color), calc(var(--v-border-opacity) * 0.5));
+  }
+
+
+  .v-data-table-footer__items-per-page {
+    font-size: 12px;
+    // padding: 0;
+    > .v-select {
+      /*
+       * 下拉箭头那侧也收一收：它默认靠 `--v-field-padding-after` 留白，而那个变量
+       * Vuetify 全库**没有定义**（那条 padding-inline-* 声明会被丢弃），所以这里直接给值。
+       */
+      .v-field__append-inner {
+        padding-inline: 4px;
+      }
+
+      /*
+       * 框的内边距：Vuetify 默认 左右 16px / 上 8px / 下 4px（VField.css 里 .v-field 的
+       * --v-field-padding-*），配 12px 的字太松。左右收到 8px / 4px，上下归零。
+       * 框的高矮由 --v-input-control-height 决定 —— 想更矮就单独覆盖那一个变量。
+       */
+      .v-field {
+        // --v-field-padding-start: 8px;
+        --v-field-padding-end: 4px;
+        --v-field-padding-top: 0px;
+        --v-field-padding-bottom: 0px;
+        --v-input-control-height: 30px;
+        font-size: 12px;
+      }
+
+      .v-field__input {
+        padding-top: 0;
+        padding-bottom: 0;
+        font-size: 12px;
+          
+      }
+    }
+  }
 }
 
-/* =========================================================
-   通用页面规范（各页面统一使用，勿再散落硬编码背景/标题）
-   用法：<v-container fluid class="page-bg"> ... </v-container>
-   ========================================================= */
-
-/* 页面灰底：浅色 / 深色自动切换，替代各页 isDark 三元硬编码。
-   .page-bg = 背景 + min-height:100vh（整页可滚动时用）
-   .bg-app   = 仅背景色（页面自己管理高度/滚动布局时叠加用） */
 .page-bg,
 .bg-app {
   background-color: #eef1f6;
@@ -78,6 +141,83 @@
   .v-field__prepend-inner {
     padding-top: 0;
     align-self: center;
+  }
+}
+
+/* ===== 紧凑搜索框 v-text-field：与 .filter-select 同一档高度（筛选区统一使用）=====
+ *
+ * 原本是 5 份 scoped 副本（components/ApprovalFilterBar、components/OrgTree、
+ * pages/workStream、pages/setDatas、pages/mine），内容近似但值不一致 ——
+ * 控件高 25/30px、输入框最小高 25/28/30/40px、标签 12/13px，
+ * 结果是"同一个搜索框在不同页面长得不一样"。这里收敛成一份：
+ * 取多数页面那一档（控件高 25px、输入框最小高 28px、标签 12px）。
+ * 某个页面确实需要更大/更小，在自己页面里覆盖对应变量即可（例：只改
+ * `--v-input-control-height`），不必再抄一整块。
+ *
+ * ⚠️ 不再用 `:deep()`：这是全局样式，没有 scoped 编译，直接写后代选择器
+ *    （写法与上面的 .filter-select 一致）。
+ */
+.filter-input {
+  .v-field {
+    --v-field-padding-top: 2px;
+    --v-field-padding-bottom: 1px;
+    --v-input-control-height: 25px;
+    font-size: 12px;
+  }
+
+  .v-field__input {
+    min-height: 28px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+
+  .v-label {
+    font-size: 12px;
+  }
+
+  .v-field__append-inner {
+    align-self: center;
+    padding-top: 0;
+  }
+
+  .v-field__prepend-inner {
+    margin-top: 0;
+    padding-top: 1px;
+
+    .v-icon {
+      font-size: 14px;
+    }
+  }
+
+  .v-input__details {
+    padding-top: 0;
+    min-height: 0;
+  }
+}
+
+/* ===== 筛选行容器：输入框/下拉不参与挤压，宽度固定 =====
+ *
+ * 用法：把筛选项包在 `<v-sheet class="filter-bar d-flex flex-wrap …">` 里
+ * （workStream、setDatas 的筛选区就是这样用的）。
+ *
+ * 为什么宽度不直接写进上面的 .filter-input：同一个类还被
+ * components/ApprovalFilterBar（自己给了 `w-[220px]`）和 components/OrgTree（要自适应占满）
+ * 用着 —— 全局写死 160px 会把这两处弄坏。所以"固定宽度"只作用于 .filter-bar 之内。
+ *
+ * 原本这两页各自抄了一份一模一样的宽度规则（4 行 × 2 处），现在只此一份。
+ */
+.filter-bar {
+  .filter-input,
+  .filter-select {
+    flex: 0 0 auto;
+  }
+
+  .filter-input {
+    width: 160px;
+  }
+
+  .filter-select {
+    width: 120px;
   }
 }
 

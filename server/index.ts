@@ -7,8 +7,10 @@ import https from 'node:https'
 import * as lark from '@larksuiteoapi/node-sdk'
 import Database from 'better-sqlite3'
 import { runBiSync, uploadRows } from './biSync'
+import { deleteApprovalOrder } from './orderDelete'
 import { purgeBiData as runPurgeBiData } from './purgeData'
 import { runReminders } from './reminders'
+import { syncSnapshots } from './snapshotSync'
 
 /*
  * 飞书凭据**只从环境变量取**（.env.local，已被 .gitignore 忽略）。
@@ -981,6 +983,57 @@ http.createServer(async (req, res) => {
         json(res, 200, { code: 0, data: summary })
       } catch (error: any) {
         console.error('[biPurge] 清空失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || String(error) })
+      }
+      return
+    }
+
+    // ─── 删除审批单（仅超级管理员） ─────────────
+    // DELETE /api/approval/order?id=<approval_chain 记录 id>
+    //   请求头：Authorization: <调用者的 PB token>（服务端拿它去问 PB「这是谁、是不是 superAdmin」）
+    //
+    // 为什么权限判定也在服务端：approval_chain / approval_files 的 deleteRule 是空的
+    // （只有管理员能删），浏览器直删会被 PB 拒；这里用管理员凭据执行，
+    // 所以"调用者是不是 superAdmin"必须由服务端核实（见 server/orderDelete.ts 的说明）。
+    if (pathname === '/api/approval/order' && req.method === 'DELETE') {
+      try {
+        const token = String(req.headers.authorization ?? '')
+        const summary = await deleteApprovalOrder({ token, id: url.searchParams.get('id') ?? '' })
+        console.log(`[orderDelete] ${summary.by.email ?? summary.by.id} 删除审批单 ${summary.order_no || summary.id}（附件 ${summary.filesDeleted} 个，deleted=${summary.deleted}）`)
+        json(res, 200, { code: 0, data: summary })
+      } catch (error: any) {
+        console.error('[orderDelete] 删除失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || String(error) })
+      }
+      return
+    }
+
+    // ─── 快照同步（把真实列回填进 data，仅超级管理员） ───
+    // POST /api/bi/snapshot            只重写 data 快照（列 / sync_key / 审批单都不动）
+    // POST /api/bi/snapshot?dryRun=1   只统计差异、不写库（界面先用它把"将更新多少行"摆出来）
+    // POST /api/bi/snapshot?ids=a,b    只处理指定行（调试 / 单行修复）
+    // POST /api/bi/snapshot?limit=100  只处理前 N 行
+    // POST /api/bi/snapshot?includeBlanks=1  连「列里是 0/空」的值一起写（默认跳过）
+    // POST /api/bi/snapshot?rekey=1    顺带按当前列重算 sync_key（唯一键；冲突的跳过并报出来）
+    //   请求头：Authorization: <调用者的 PB token>
+    //
+    // 为什么需要它：表格的单元格值来自 data 快照，而筛选/排序/唯一键走真实列 ——
+    // 直接在库里改列，界面看不到（详见 server/snapshotSync.ts 的说明）。
+    if (pathname === '/api/bi/snapshot' && req.method === 'POST') {
+      try {
+        const summary = await syncSnapshots({
+          token: String(req.headers.authorization ?? ''),
+          // 不传就让模块用默认组件（见 snapshotSync.ts 的 DEFAULT_COMPONENT_ID）
+          componentId: url.searchParams.get('componentId') ?? undefined,
+          dryRun: url.searchParams.get('dryRun') === '1' || url.searchParams.get('dryRun') === 'true',
+          ids: (url.searchParams.get('ids') ?? '').split(',').map(s => s.trim()).filter(Boolean),
+          limit: Number(url.searchParams.get('limit') ?? 0) || 0,
+          includeBlanks: url.searchParams.get('includeBlanks') === '1' || url.searchParams.get('includeBlanks') === 'true',
+          rekey: url.searchParams.get('rekey') === '1' || url.searchParams.get('rekey') === 'true',
+        })
+        json(res, 200, { code: 0, data: summary })
+      } catch (error: any) {
+        console.error('[biSnapshot] 同步失败:', error?.message ?? error)
         json(res, 500, { code: -1, msg: error?.message || String(error) })
       }
       return

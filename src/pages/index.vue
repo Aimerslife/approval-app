@@ -2,37 +2,19 @@
   <v-container class="quick-nav fill-height d-flex flex-column justify-center" max-width="1040">
     <div class="w-100">
       <!-- 顶部品牌区：限宽居中，避免 logo 随容器被拉满整行 -->
-      <v-img
-        alt="logo"
-        class="mx-auto mb-3"
-        height="96"
-        max-width="240"
-        src="@/assets/logo.png"
-      />
+      <v-img alt="logo" class="mx-auto mb-3" height="96" max-width="240" src="@/assets/logo.png" />
 
       <div class="mb-10 text-center">
         <div class="text-[26px] font-weight-bold">快速导航</div>
       </div>
-      <v-row>
-        <v-col v-for="link in links" :key="link.href" cols="12" sm="6">
-          <v-card
-            class="nav-card"
-            :href="link.href"
-            rel="noopener noreferrer"
-            rounded="lg"
-            variant="flat"
-          >
+      <v-row v-for="(item,index) in links" :key="index">
+        <v-col v-for="link in item" :key="link.href" cols="12" sm="6">
+          <v-card class="nav-card" :href="link.href" rel="noopener noreferrer" rounded="lg" variant="flat">
             <template #title>
               <span class="text-[19px] font-bold">{{ link.title }}</span>
             </template>
             <template #prepend>
-              <v-avatar
-                class="nav-avatar ml-2 mr-1"
-                color="primary"
-                :icon="link.icon"
-                size="44"
-                variant="tonal"
-              />
+              <v-avatar class="nav-avatar ml-2 mr-1" color="primary" :icon="link.icon" size="44" variant="tonal" />
             </template>
             <template #subtitle>
               <span class="underline decoration-dashed">{{ link.subtitle }}</span>
@@ -48,7 +30,8 @@
 </template>
 
 <script setup lang="ts">
-  const links = [
+const links = [
+  [
     {
       href: '/mine',
       icon: 'mdi-text-box-outline',
@@ -61,6 +44,7 @@
       subtitle: 'Explore available data.',
       title: '数据',
     },
+  ], [
     {
       href: '/analyze',
       icon: 'mdi-widgets-outline',
@@ -74,6 +58,7 @@
       title: '说明文档',
     },
   ]
+]
 </script>
 
 <style lang="scss" scoped>
@@ -112,6 +97,7 @@
 
 /* 用户关掉动效偏好时不做位移（无障碍；也让截图/打印时稳定） */
 @media (prefers-reduced-motion: reduce) {
+
   .quick-nav .nav-card,
   .quick-nav .nav-arrow,
   .quick-nav .nav-avatar {

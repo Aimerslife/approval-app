@@ -403,6 +403,137 @@ export async function purgeBiData (dryRun = false): Promise<PurgeSummary> {
   return payload.data as PurgeSummary
 }
 
+/* ==================== 快照同步（仅超级管理员） ==================== */
+
+/**
+ * 快照同步的返回体，形状与 server/snapshotSync.ts 的 SnapshotSyncSummary 一致。
+ *
+ * 语义：把 `bi_rows` 的**真实列**回填进 `data` 快照（表格单元格值读的就是 `data`），
+ * **只写 `data` 一个字段** —— 列 / `sync_key` / 审批单都不动。
+ */
+export interface SnapshotSyncSummary {
+  dryRun: boolean
+  /** 谁执行的：服务端拿调用者 token 问过 PocketBase，不采信前端传来的任何字段 */
+  by: { id: string, role: string, name?: string, email?: string }
+  componentId: string
+  /** 扫描到的行数 */
+  scanned: number
+  /** 需要重写快照的行数（实际成功多少看 `written`） */
+  changed: number
+  /** 两样都不需要动、跳过的行数 */
+  unchanged: number
+  /** 需要重算 `sync_key` 的行数（已排除冲突的） */
+  keyChanged: number
+  /** 因**唯一索引冲突**跳过改键的行数（这些行快照照常同步；处理掉冲突后再跑一次即可） */
+  keyConflicts: number
+  /** 改键的例子（最多 8 条；`reason` 非空表示这行是冲突被跳过的） */
+  keySamples: { id: string, sku: string, from: string, to: string, reason: string }[]
+  /** 实际写入成功的行数（dryRun 恒为 0） */
+  written: number
+  /** 写入失败的行数（dryRun 恒为 0） */
+  failed: number
+  /** 本次是否重算了 sync_key */
+  rekey: boolean
+  /** 每个字段有多少行会被改（按行数降序，最多 12 条）；`zeroed` = 其中"列是 0/空"的次数 */
+  fieldChanges: { key: string, column: string, rows: number, zeroed: number }[]
+  /** 前几条具体例子 */
+  samples: { id: string, sku: string, key: string, from: string, to: string }[]
+  /**
+   * ⚠️「列里是 0/空」**被跳过**的总处数（默认不写这些字段）。
+   * 它们的列值停在 PB 的默认值上（金额类很常见），写下去等于把界面上的金额刷成 0。
+   * `includeBlanks = true` 时它表示"确实会写下去"的处数。
+   */
+  skippedBlanks: number
+  /** 本次是否连「列为 0/空」一起写 */
+  includeBlanks: boolean
+  /** 失败明细（最多 20 条） */
+  failures: string[]
+  elapsedMs: number
+}
+
+/**
+ * 同步快照：把真实列回填进 `data`（**只写快照**）。
+ *
+ * ⚠️ 走 **app server**（`/api/bi` 前缀由 vite 代理到它，与 uploadBiRows / purgeBiData 同一条路），
+ *    并把**调用者自己的 PB token** 放进 Authorization —— 服务端据此向 PocketBase 核实
+ *    "这是谁、role 是不是 superAdmin"（前端说什么都不作数）。
+ *
+ * @param opts.dryRun        true = 只统计差异、不写库（界面先用它把"将更新多少行"摆出来）
+ * @param opts.ids           只处理指定的行（调试 / 单行修复用；不传则处理整个组件）
+ * @param opts.includeBlanks true = 连「列里是 0/空」也写进快照。
+ *                           **默认不写**：那些列的 0 多半是"从没被写过"（金额类很常见），
+ *                           写下去等于把界面上的金额刷成 0（见 server/snapshotSync.ts 的说明）。
+ * @param opts.rekey          true = 顺带按当前列重算 `sync_key`（唯一键）。
+ *                           改了「仓位 / 组别 / SKU / 呆滞」这类**参与键的列**之后要用它，
+ *                           否则下次全量同步认不出这些行。冲突（两行同一个新键）会跳过并报出来。
+ */
+export async function syncBiSnapshots (
+  opts: { dryRun?: boolean, ids?: string[], includeBlanks?: boolean, rekey?: boolean } = {},
+): Promise<SnapshotSyncSummary> {
+  const qs = new URLSearchParams()
+  if (opts.dryRun) {
+    qs.set('dryRun', '1')
+  }
+  if (opts.ids && opts.ids.length > 0) {
+    qs.set('ids', opts.ids.join(','))
+  }
+  if (opts.includeBlanks) {
+    qs.set('includeBlanks', '1')
+  }
+  if (opts.rekey) {
+    qs.set('rekey', '1')
+  }
+  const res = await fetch(`/api/bi/snapshot${qs.toString() ? `?${qs}` : ''}`, {
+    method: 'POST',
+    headers: { Authorization: pb.authStore.token },
+  })
+  const payload = await res.json().catch(() => null)
+  if (!res.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.msg || `同步快照失败：HTTP ${res.status}`)
+  }
+  return payload.data as SnapshotSyncSummary
+}
+
+/* ==================== 删除审批单（仅超级管理员） ==================== */
+
+/**
+ * 删除结果，形状与 server/orderDelete.ts 的 DeleteOrderSummary 一致。
+ *
+ * `deleted = false` 表示"这次调用没删到东西，因为它之前就已经不在了" ——
+ * 服务端把这种情况**当成功**返回（幂等），所以界面照样提示「已删除」。
+ */
+export interface DeleteOrderSummary {
+  id: string
+  /** 单号（已被删掉过则为空串） */
+  order_no: string
+  status: number | null
+  deleted: boolean
+  /** 一起清掉的附件条数 */
+  filesDeleted: number
+  /** 谁删的：服务端拿调用者 token 问过 PocketBase，不采信前端字段 */
+  by: { id: string, role: string, name?: string, email?: string }
+}
+
+/**
+ * 删除一张审批单（连同它的附件）。
+ *
+ * ⚠️ 走 **app server**（`/api/approval` 前缀由 vite 代理到它，与 bi 那几个同一条路），
+ *    并把**调用者自己的 PB token** 放进 Authorization：服务端据此向 PocketBase 核实
+ *    "这是谁、role 是不是 superAdmin"（前端说什么都不作数，见 server/orderDelete.ts）。
+ *    前端删不掉也不该删：`approval_chain` 的 deleteRule 是空的（只有管理员能删）。
+ */
+export async function deleteApprovalOrder (id: string): Promise<DeleteOrderSummary> {
+  const res = await fetch(`/api/approval/order?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { Authorization: pb.authStore.token },
+  })
+  const payload = await res.json().catch(() => null)
+  if (!res.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.msg || `删除失败：HTTP ${res.status}`)
+  }
+  return payload.data as DeleteOrderSummary
+}
+
 /* ==================== 从 bi_rows 读数据 ==================== */
 
 // 纯逻辑（列名翻译 / 转义 / filter 拼装）已移到 @/utils/biQuery，这里只做 I/O。

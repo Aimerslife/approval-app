@@ -113,6 +113,31 @@
         </select>
       </div>
 
+      <!--
+        「轮完走向」：所有组都轮完、**一直没有人跳出轮询** 时去哪。
+
+        不配 = 继续卡片后面那个环节（默认，也是老行为）；配了 = 走完最后一组后跳到那里。
+        与卡片内部连线上的「提前结束轮询」是两回事 ——
+        那个是"某一组接了就直接跳出（剩下几组不再轮）"，这个是"轮到最后一个组也没人接"。
+        没有这一项时，这两种情况会落到同一个地方，"全部轮完"的兜底走向就表达不出来。
+      -->
+      <div class="rotation-row">
+        <span class="role-tag role-rotate">轮完</span>
+
+        <select
+          v-if="afterLoopOptions.length"
+          class="rotation-select rotation-select--full nodrag"
+          title="所有组都轮完、一直没人跳出轮询时去哪个环节（不配 = 继续卡片后面那个环节）"
+          :value="dataRef().afterLoop ?? ''"
+          @change="onAfterLoop"
+        >
+          <option value="">继续卡片后面的环节</option>
+          <option v-for="t in afterLoopOptions" :key="t.id" :value="t.id">{{ t.label }}</option>
+        </select>
+
+        <span v-else class="rotation-note">画布上还没有可跳的环节</span>
+      </div>
+
       <div v-if="!rotationOf.rowFilter" class="rotation-row">
         <span class="role-tag role-rotate">范围</span>
 
@@ -184,6 +209,12 @@
     /** 卡片数据（轮询配置 + 内部画布快照，见 types/approval 的 LoopNodeData） */
     data: LoopNodeData
     selected?: boolean
+    /**
+     * 「轮完走向」的候选：**卡片外**、可以跳过去接着办的环节（`{ id, label }`）。
+     * 由 createStream 传（与卡片内部「提前结束轮询」共用同一份 `loopCardOuterApprovals`，
+     * 两处白名单必须一致）。**可选**：FlowPreview 的只读预览不传 —— 那种情况下这一行不渲染。
+     */
+    outerApprovals?: { id: string, label: string }[]
   }>()
 
   const emit = defineEmits<{
@@ -259,6 +290,22 @@
     }
   }
 
+  /** 「轮完走向」的候选（缺省空数组：预览态拿不到候选，那一行会显示成提示文案） */
+  const afterLoopOptions = computed(() => props.outerApprovals ?? [])
+
+  /**
+   * 「轮完走向」写回：空值 = **删掉字段**（回到"继续卡片后面的环节"）。
+   * 与 onEnum 同一口径：不写"和默认一样"的字面量，免得以后改默认行为时被旧卡片写死的值锁住。
+   */
+  function onAfterLoop (e: Event) {
+    const v = (e.target as HTMLSelectElement).value.trim()
+    if (v === '') {
+      delete dataRef().afterLoop
+      return
+    }
+    dataRef().afterLoop = v
+  }
+
   /**
    * 枚举类策略项的写回（排序方向 / 汇总方式 / 空组处理）。
    *
@@ -288,6 +335,13 @@
     '  主MODEL = {:主MODEL} && 是否属于呆滞库存 = "1" && 销售状态 ~ "在售"',
     '读作"与本单同主MODEL、非呆滞、在售"。配合左边的「同团队」，',
     '就是"同团队里存在这款货的其他组别"。留空则回到默认口径（同一个 SKU 的所有行）。',
+    /*
+     * 常见诉求：按"还剩多少"决定要不要轮询。那是**办理期**才有的值（剩余接收数量 /
+     * 已接收数量），而行条件跑在建单那一刻 —— 写进这里会被保存校验当场拦下。
+     * 正确位置是**卡片内部子流程**的条件分支（那段是办理期求值的）。
+     */
+    '⚠️ 行条件跑在「建单那一刻」，所以「剩余接收数量」这类办理期字段在这里用不了；',
+    '要按剩余判断，请画在**卡片内部子流程**的条件分支里（点「编辑内部流程」）。',
   ].join('\n')
 
   /** 悬浮窗里的草稿：确认前不落到卡片上（取消 = 什么都不改） */
@@ -499,6 +553,21 @@
  */
 .rotation-select--wide {
   width: 78px;
+}
+
+/*
+ * 「轮完走向」那个下拉：选项是**环节名**（4-8 个字），78px 会把名字截掉
+ * —— 这一项占满整行，名字才看得全（卡片 300px，这一行不放别的东西）。
+ */
+.rotation-select--full {
+  flex: 1;
+  width: auto;
+}
+
+/* 「画布上还没有可跳的环节」那类小提示：与 .empty-hint 同色，但不占一整块 */
+.rotation-note {
+  font-size: 10px;
+  color: var(--flow-text-muted);
 }
 
 /* 条件那块可能是好几行：这一行改顶对齐，否则「条件」标签与复选框会吊在两行中间 */

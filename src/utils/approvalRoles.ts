@@ -148,9 +148,16 @@ export function flowHasRoles (flow: ApprovalFlow): boolean {
           walkSteps(b.steps)
         }
       }
-      // ⚠️ 步骤上存成员的字段是 `members`（ApprovalFlowStep），**不是** `nodes`
-      //    （`nodes` 是顶层流程节点 ApprovalFlowApprovalNode 的字段）。
-      //    写错过一次：嵌套分支里的动态负责人因此完全没被解析，而且测试也跟着写错、假通过。
+      /*
+       * ⚠️ 步骤上存成员的字段是 `members`（ApprovalFlowStep），**不是** `nodes`
+       *    （`nodes` 是顶层流程节点 ApprovalFlowApprovalNode 的字段）。
+       *    写错过一次：嵌套分支里的动态负责人因此完全没被解析，而且测试也跟着写错、假通过。
+       *
+       * 唯一的例外来自**引用模板**：源模板的顶层节点落到本流程的分支里会变成"步骤"，
+       * 曾经仍带着 `nodes`（这类环节读不到人）。现在由 utils/templateRef 的 toStepShape
+       * 在建单期**归一成 `members`**，所以这里维持只认 `members` 即可 ——
+       * 若哪天又要读可能带 `nodes` 的旧快照，请改用 types/approval 的 stepMembersOf。
+       */
       else if (s.members?.some(m => m.role)) {
         found = true
       }
@@ -182,6 +189,14 @@ export function flowHasRoles (flow: ApprovalFlow): boolean {
      */
     if (node.type === 'loop') {
       walkSteps(node.steps)
+      continue
+    }
+    /*
+     * 「引用模板」：内容在源模板里，本函数（判断"要不要拉组织架构缓存"）在**未展开**的
+     * 模板 flow 上会碰到它 —— 跳过。真正的角色解析发生在引用展开**之后**
+     * （见 utils/expandFlowForOrder 的执行顺序），那时这些节点已经是普通环节了。
+     */
+    if (node.type === 'ref') {
       continue
     }
     for (const b of node.branches) {
@@ -275,6 +290,10 @@ export function resolveFlowRoles (
      */
     if (node.type === 'loop') {
       return { ...node, steps: stepsOf(node.steps) ?? [] }
+    }
+    // 未展开的引用：没有成员可解析，原样带走（正常路径下这时它已经被展开掉了）
+    if (node.type === 'ref') {
+      return node
     }
     return {
       ...node,

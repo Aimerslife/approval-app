@@ -1,6 +1,6 @@
 <template>
   <v-container fluid :class="fullSceen ? 'screen-full' : 'pa-3'" @pointerdown="onPointerDown" @dblclick="onDblClick">
-    <v-sheet border rounded="5px" class="p-3 d-flex flex-wrap align-center ga-3">
+    <v-sheet border rounded="5px" class="filter-bar p-3 d-flex flex-wrap align-center ga-3">
       <v-text-field v-model="draft.search" density="compact" label="搜索" prepend-inner-icon="mdi-magnify"
         variant="solo-filled" flat hide-details single-line class="filter-input" @keyup.enter="applyFilters">
       </v-text-field>
@@ -45,8 +45,8 @@
           variant="text" @click="setFullScreen"></v-icon-btn>
       </div>
     </div>
-    <v-data-table-server v-model:page="page" v-model:items-per-page="itemsPerPage" :headers="headers" :items="rows"
-      v-model="selectedIds" item-value="id" show-select
+    <v-data-table-server v-model:page="page" v-model:items-per-page="itemsPerPage" :headers="tableHeaders" :items="rows"
+      v-model="selectedIds" item-value="id" show-select :item-selectable="isRowSelectable"
       :items-length="totalItems" :loading="loading" :no-data-text="noDataText" items-per-page-text="每页条数"
        border striped="odd" hover density="compact" fixed-header
       :items-per-page-options="[20, 50, 100, 200]"  @update:options="onTableOptions"
@@ -110,7 +110,7 @@
 import { PRODUCT_FIELDS, type ProductField } from '@/utils/productFields'
 // 与服务端**同一个**唯一键实现，用来预告「这份文件入库后是多少行」
 import { makeSyncKey } from '@/utils/biRowFields'
-import { formatDatas, exportExcel } from '@/utils/utils'
+import { formatDatas, exportExcel, type ExportColumn } from '@/utils/utils'
 // Excel 解析放在独立模块里（纯函数，能被 tsx 直接跑单测），页面只负责接线
 import {
   biColumnOf, fetchAllBiRows, fetchBiFacets, fetchBiRows,
@@ -122,6 +122,12 @@ import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
 import { createApprocalModel, getApprovalFirstByFilter, getOrdersByRow, getOrdersByRows } from '@/utils/collection'
 // 建单时把行数据转成条件求值用的业务上下文（去千分位、摊平 data 快照）
 import { toFlowContext } from '@/utils/approvalFlow'
+/*
+ * 建单期把「数据查询」「组间轮询」展开掉（见 utils/expandFlowForOrder）。
+ * ⚠️ 少了这一步，快照里会留下没展开的 probe/loop 节点 —— 单子建得出来、前面几环也能办，
+ *    办到那一环时提交会报「没有在建单时展开，单据数据不完整」。
+ */
+import { expandFlowForOrder } from '@/utils/expandFlowForOrder'
 // 动态审批人（角色）：模板里配「部门负责人」，建单时按组织架构解析成真人（见 utils/approvalRoles）
 import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
 import { fetchOrgTreeCache, type OrgTreeData } from '@/api/api'
@@ -203,13 +209,33 @@ function widthOf(key: string): number {
   return typeof saved === 'number' && saved >= MIN_COL_WIDTH ? saved : DEFAULT_WIDTHS[key]
 }
 
+/**
+ * 导出用的列：与表格**同一份**口径 —— 当前顺序、当前显隐、当前标题与列宽。
+ *
+ * 不要直接把行对象丢给 xlsx：`json_to_sheet` 会拿**第一行对象的键顺序**当表头，
+ * 那是 PB 记录的原始字段顺序（id / created / data / 中文列名…），与页面上看到的
+ * 列顺序、显隐完全对不上，导出来就是"表头被随意排布"。
+ */
+function exportColumns(): ExportColumn[] {
+  return [
+    ...visibleFields.value.map(f => ({ key: f.key, title: f.title, width: widthOf(f.key) })),
+    // 表格右侧的固定列「任务状态」：页面上有它，导出也带上（取值是算出来的，不是 bi_rows 的字段）
+    { title: '任务状态', value: row => taskOf(row.id).text, width: 100 },
+  ]
+}
+
 async function exportToExcel() {
   loading.value = true
   try {
     const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
-    exportExcel(all.map(formatDatas), '导出数据')
+    /*
+     * 任务状态是按行关联单据算出来的，页面上只算过**当前页**这一批；
+     * 导出是全量，先把全量状态补齐 —— 否则导出里除当前页外都会显示成「未开启任务」（假数据）。
+     */
+    await loadTaskStatus(all)
+    await exportExcel(all.map(formatDatas), '导出数据', exportColumns())
   } catch (e) {
-    console.error('[setDatas] 导出失败:', e)
+    console.error('[workStream] 导出失败:', e)
     showMsg(`导出失败：${e instanceof Error ? e.message : String(e)}`, 'error')
   } finally {
     loading.value = false
@@ -416,20 +442,34 @@ interface TaskView {
     color: string
     variant: 'flat' | 'tonal'
     title: string
+    /**
+     * 这一行**有没有单**（在流程中 / 已通过 / 已驳回都算）。
+     *
+     * 为什么要单独一个字段、而不是拿 `taskOf(...) === NO_TASK` 判断：
+     * `taskByRowId` 是 ref，取出来的对象是 Vue 的**响应式代理**，与 `NO_TASK` 常量
+     * **不是同一个引用** —— 那样写会让所有行都被判成"已有单"（实测：全表都勾不上）。
+     */
+    hasOrder: boolean
 }
 
 /** 没有单 = 未开启任务。共用一个常量：一页最多 200 行，不要每行都新建对象 */
 const NO_TASK: TaskView = {
-    text: '未开启任务', color: 'secondary', variant: 'tonal', title: '该行还没有审批单',
+    text: '未开启任务', color: 'secondary', variant: 'tonal', title: '该行还没有审批单', hasOrder: false,
 }
 
 /** approval_chain.status → 展示文案。缺值/未知值都兜住，库里出现新状态时不会渲染成空白 */
 function statusView(status: number | undefined, orderNo?: string): TaskView {
-    const title = orderNo ? `单号 ${orderNo}` : ''
-    if (status === APPROVAL_STATUS.PENDING) return { text: '进行中', color: 'primary', variant: 'flat', title }
-    if (status === APPROVAL_STATUS.APPROVED) return { text: '已通过', color: 'success', variant: 'flat', title }
-    if (status === APPROVAL_STATUS.REJECTED) return { text: '已驳回', color: 'error', variant: 'flat', title }
-    return { text: status === undefined ? '状态未知' : `状态 ${status}`, color: 'secondary', variant: 'tonal', title }
+    /*
+     * 提示里点明"不能重新开启"：这一行的勾选框是灰的，光给个单号不足以说明为什么点不动。
+     * 能走到这里的行都是**已经有单**的（没有单的行用 NO_TASK），所以这句话恒成立。
+     */
+    const title = `${orderNo ? `单号 ${orderNo} · ` : ''}已有单，不能重新开启任务`
+    // 走到这里的行都**已经有单**（没有单的行用 NO_TASK），所以 hasOrder 恒为 true
+    const base = { title, hasOrder: true }
+    if (status === APPROVAL_STATUS.PENDING) return { text: '进行中', color: 'primary', variant: 'flat', ...base }
+    if (status === APPROVAL_STATUS.APPROVED) return { text: '已通过', color: 'success', variant: 'flat', ...base }
+    if (status === APPROVAL_STATUS.REJECTED) return { text: '已驳回', color: 'error', variant: 'flat', ...base }
+    return { text: status === undefined ? '状态未知' : `状态 ${status}`, color: 'secondary', variant: 'tonal', ...base }
 }
 
 /** 行 id → 该行当前单的展示信息（没有单的行也会写进去 = 未开启任务） */
@@ -437,6 +477,30 @@ const taskByRowId = ref<Record<string, TaskView>>({})
 
 function taskOf(rowId: unknown): TaskView {
     return taskByRowId.value[String(rowId ?? '')] ?? NO_TASK
+}
+
+/**
+ * 这一行现在**还能不能开启任务**。
+ *
+ * 口径（需求）：**在流程中**或**已经结束**的单都不允许重新开启 —— 也就是"一行数据只对应一张单"。
+ * 实现上就一句：**只要这一行已经有单就锁住**（看 `hasOrder`，理由见 TaskView 的注释）。
+ *
+ * 为什么不能只拦"进行中"：已通过 / 已驳回同样是**结束状态**，放过去就会给同一条数据
+ * 再开一张新单，两张单各跑各的流程 —— 业务上说不清哪张算数、审批人也可能收到两份待办。
+ *
+ * ⚠️ 若以后要让"已驳回"的行能重新提：**必须同时改两处**，否则界面能勾、建单却跳过：
+ *    ① 这里（`hasOrder` 的来源 `statusView`）；② 建单闸门 `findBlockingOrder`。
+ *
+ * ⚠️ 页面上的状态来自一次批量查询，读失败时会空掉（那时这里一律返回 true = 放行）——
+ *    所以它只是**界面提示**；真正的闸门在建单时按库里的单判断（见 findBlockingOrder）。
+ */
+function canStartTask(rowId: unknown): boolean {
+    return !taskOf(rowId).hasOrder
+}
+
+/** 给 v-data-table 的 `item-selectable` 用：已有单的行连勾都勾不上（含全选 / Shift 连选） */
+function isRowSelectable(row: Record<string, unknown> | undefined): boolean {
+    return canStartTask(row?.id)
 }
 
 /** 给 v-chip 用的属性（不含 text，否则它会被当成 DOM 属性写到元素上） */
@@ -490,7 +554,12 @@ function refreshTaskStatus() {
 const headers = computed(() => [
   ...visibleFields.value.map(({ title, key, sortable, fixed }) => {
     const w = widthOf(key)
-    // 只有「用户调过宽度」的列才给 width，没调过的只给 minWidth（原因见上方注释）
+    /*
+     * 普通列：只有「用户调过宽度」的列才给 width，没调过的只给 minWidth（原因见上方注释）。
+     * **固定列例外**：Vuetify 是按 `width` 累加 `fixedOffset` 的（多列固定时没静态宽度
+     * 会报 “Multiple fixed columns should have a static width”，偏移也会错位）——
+     * 所以图片列（productFields 里 fixed: true）必须给死宽度。
+     */
     const resized = colLayout.value.some(i => i.field === key && typeof i.width === 'number')
     return {
       title,
@@ -498,7 +567,7 @@ const headers = computed(() => [
       sortable: sortable ?? false,
       align: 'center' as const,
       fixed,
-      ...(resized ? { width: w, minWidth: w } : { minWidth: w }),
+      ...(resized || fixed ? { width: w, minWidth: w } : { minWidth: w }),
     }
   }),
   // 任务状态：永远排在最后、固定在右侧。
@@ -513,6 +582,34 @@ const headers = computed(() => [
     minWidth: 100,
   },
 ])
+
+/**
+ * 左侧「复选框 + 产品图片」两列要**一起**钉住。
+ *
+ * 复选框列是 Vuetify 为 `show-select` 内部 `unshift` 进来的（key = data-table-select），
+ * 它**不带 fixed** —— 而图片列是 `fixed: true`（fixedOffset 从 0 起算），
+ * 于是横向滚动时图片会滑到复选框上面，把多选框盖掉一半、看着像"复选框没固定"。
+ *
+ * 这里自己声明同一 key 的表头并 `fixed: 'start'`：Vuetify 见到该 key 就不再注入它那份
+ * （见 node_modules/vuetify 的 createHeaders：`keys.has('data-table-select')` 就不 unshift），
+ * 两列偏移按 48 + 图片宽依次累加 —— 一起固定在左侧，且顺序不变。
+ */
+const SELECT_HEADER = {
+  title: '',
+  key: 'data-table-select',
+  sortable: false,
+  width: 48,
+  minWidth: 48,
+  fixed: 'start' as const,
+}
+
+/**
+ * 表格实际用的表头 = 复选框列 + 字段列。
+ *
+ * ⚠️ 不能把它并进 `headers`：列宽拖拽靠 `LEADING_COLUMNS` 把 th 下标减 1 映射回
+ * **字段列**（见 resizeTargetOf），多一列会让映射整体错位一格。
+ */
+const tableHeaders = computed(() => [SELECT_HEADER, ...headers.value])
 
 let resizing: { key: string; startX: number; startWidth: number } | null = null
 
@@ -815,15 +912,34 @@ const selectedIds = ref<string[]>([])
 /** 批量建单的进度文案，挂在按钮上（如「处理中 3/20」） */
 const batchText = ref('')
 
-async function findOpenOrder(biRowId: string, syncKey: string) {
+/**
+ * 查这一行**已有的单**里，有没有"挡住重新开启"的那张（建单闸门，按库里的单判断）。
+ *
+ * 口径与 `canStartTask` 必须一致：**只要有单就挡**（在流程中 / 已通过 / 已驳回）。
+ * 之前这里只找 `PENDING` —— 于是已通过、已驳回的行会被**重新开启**，建出第二张单。
+ *
+ * 读失败时**只告警、不阻断**（保持原样）：这是防重复的安全网，不该因为一次读失败
+ * 就让功能完全不可用；代价是极端情况下可能多建一张 —— 相比"所有人都开不了单"，
+ * 那一边更可接受。
+ */
+async function findBlockingOrder(biRowId: string, syncKey: string) {
     try {
         const list = await getOrdersByRow(biRowId, syncKey)
-        return list.find(o => o.status === APPROVAL_STATUS.PENDING)
+        // 优先报"进行中"那张（它对用户最要紧），否则报最新那张（getOrdersByRow 按新到旧给）
+        return list.find(o => o.status === APPROVAL_STATUS.PENDING) ?? list[0]
     } catch (e) {
-        // 查不出来时只告警、不阻断：这是道防重复的安全网，不该因为一次读失败就让功能不可用
         console.warn('[workStream] 查该数据已有审批单失败，继续建单:', e)
         return undefined
     }
+}
+
+/** 被挡下的原因，写成给用户看的一句话（点名单号与状态，别只说"已有单"） */
+function blockReasonOf(order: ApprovalOrder): string {
+    const no = order.order_no ?? order.id ?? '—'
+    if (order.status === APPROVAL_STATUS.PENDING) return `已有进行中的单 ${no}`
+    if (order.status === APPROVAL_STATUS.APPROVED) return `已有已通过的单 ${no}，已结束不能再开启`
+    if (order.status === APPROVAL_STATUS.REJECTED) return `已有已驳回的单 ${no}，已结束不能再开启`
+    return `已有单 ${no}（状态 ${order.status}），不能再开启`
 }
 /**
  * 组织架构缓存（一次会话取一次就够；建单时用它解析动态审批人）。
@@ -854,9 +970,21 @@ interface TaskResult {
 
 async function startTasks() {
     if (starting.value) return
-    const targets = rows.value.filter(r => selectedIds.value.includes(String(r.id ?? '')))
-    if (!targets.length) {
+    const picked = rows.value.filter(r => selectedIds.value.includes(String(r.id ?? '')))
+    if (!picked.length) {
         showMsg('请先勾选要开启任务的数据（表头复选框可全选当前页）', 'error')
+        return
+    }
+    /*
+     * 已有单（在流程中 / 已结束）的行从目标里剔掉。
+     * 它们的勾选框本来就被 `isRowSelectable` 禁用了，但**全选、Shift 连选、翻页前留下的勾选**
+     * 仍可能把它们带进来 —— 所以这里再筛一次，并把剔掉的条数交给汇总提示
+     * （只说"跳过 N 条"不说是为什么，用户会当成出错）。
+     */
+    const targets = picked.filter(r => canStartTask(r.id))
+    const lockedCount = picked.length - targets.length
+    if (!targets.length) {
+        showMsg(`选中的 ${picked.length} 条都已有单（在流程中或已结束），不能重新开启任务`, 'warning')
         return
     }
 
@@ -883,7 +1011,7 @@ async function startTasks() {
         selectedIds.value = []
         // 建完单立刻把状态刷成「进行中」，否则用户会以为没成功
         await refreshTaskStatus()
-        reportTaskResults(results)
+        reportTaskResults(results, lockedCount)
     } catch (e) {
         console.error('[workStream] 批量开启任务失败:', e)
         showMsg(`开启任务失败：${e instanceof Error ? e.message : String(e)}`, 'error')
@@ -913,27 +1041,47 @@ async function createTaskForRow(
     if (syncKey) seen.add(syncKey)
 
     try {
-        // 同一条数据同时只允许一张进行中的单
-        const open = await findOpenOrder(biRowId, syncKey)
-        if (open) {
-            return { kind: 'skipped', label, detail: `已有进行中的单 ${open.order_no ?? open.id}` }
+        /*
+         * 同一条数据只允许一张单：**在流程中**或**已经结束**（已通过 / 已驳回）都不再重开。
+         * 页面上的勾选已经被 `isRowSelectable` 挡住了，这里再按库里的单判一次 ——
+         * 页面那份状态是批量查出来缓存的，可能过期（或那次查询失败），不能当成唯一依据。
+         */
+        const blocker = await findBlockingOrder(biRowId, syncKey)
+        if (blocker) {
+            return { kind: 'skipped', label, detail: blockReasonOf(blocker) }
         }
         const context = toFlowContext(rawRows.value[biRowId] ?? row)
-        /*
-         * 动态审批人（角色）在**建单时**解析成真人，并写进本单的 flow 快照。
-         * 必须**按行**解析：部门可能来自这一行的数据（deptFrom，如「组别」），批内每行都不同；
-         * 所以不能像流水线那样用一份共用 payload。
-         * 解析不出来就判这一条失败 —— 没人办的环节会让单子永远停住，当场报出来比事后追查好。
-         */
         const templateFlow = payload.flow as ApprovalFlow | undefined
         let flow = templateFlow
-        if (templateFlow && flowHasRoles(templateFlow)) {
-            const resolved = resolveFlowRoles(templateFlow, await orgTree(), context)
-            if (resolved.unresolved.length) {
-                const why = resolved.unresolved.map(u => `${u.where}：${u.reason}`).join('；')
-                return { kind: 'failed', label, detail: `动态审批人没解析出来 —— ${why}` }
+        if (templateFlow) {
+            /*
+             * ⓪①② 建单期展开：先展开「引用模板」（把源模板的流程搬进来），
+             * 再把「数据查询」求值（只留命中那条分支），最后按组展开「组间轮询」。
+             * 见 utils/expandFlowForOrder —— flow 是**静态快照**，运行期不再求值，
+             * 漏掉这一步会留下没展开的 ref/probe/loop，办到那一环时提交直接报错。
+             * 引用在这一步被"拍平"进本单快照：源模板以后改了，**已建的单不受影响**。
+             */
+            const expanded = await expandFlowForOrder(templateFlow, context)
+            if (expanded.issues.length > 0) {
+                return { kind: 'failed', label, detail: `流程展开失败 —— ${expanded.issues.join('；')}` }
             }
-            flow = resolved.flow
+            flow = expanded.flow
+            /*
+             * ③ 动态审批人（角色）在**建单时**解析成真人，并写进本单的 flow 快照。
+             * 必须**按行**解析：部门可能来自这一行的数据（deptFrom，如「组别」），批内每行都不同；
+             * 所以不能像流水线那样用一份共用 payload。
+             * 也必须排在展开**之后**：轮询展开出来的那一环，成员是「该组负责人（role.dept = 组名）」，
+             * 得让角色解析去填人（见 utils/approvalRotation 的文件头）。
+             * 解析不出来就判这一条失败 —— 没人办的环节会让单子永远停住，当场报出来比事后追查好。
+             */
+            if (flowHasRoles(flow)) {
+                const resolved = resolveFlowRoles(flow, await orgTree(), context)
+                if (resolved.unresolved.length) {
+                    const why = resolved.unresolved.map(u => `${u.where}：${u.reason}`).join('；')
+                    return { kind: 'failed', label, detail: `动态审批人没解析出来 —— ${why}` }
+                }
+                flow = resolved.flow
+            }
         }
         const order = await createApprocalModel(
             {
@@ -953,14 +1101,19 @@ async function createTaskForRow(
     }
 }
 
-/** 把一批结果汇总成一条提示（snackbar 装不下的时候就举例，不逐条列） */
-function reportTaskResults(results: TaskResult[]) {
+/**
+ * 把一批结果汇总成一条提示（snackbar 装不下的时候就举例，不逐条列）。
+ *
+ * @param lockedCount 因为"已有单（在流程中 / 已结束）"被剔掉的条数（见 startTasks）
+ */
+function reportTaskResults(results: TaskResult[], lockedCount = 0) {
     const created = results.filter(r => r.kind === 'created')
     const skipped = results.filter(r => r.kind === 'skipped')
     const failed = results.filter(r => r.kind === 'failed')
     const head = [`共 ${results.length} 条`, `成功 ${created.length}`]
     if (skipped.length) head.push(`跳过 ${skipped.length}`)
     if (failed.length) head.push(`失败 ${failed.length}`)
+    if (lockedCount) head.push(`已有单不可重开 ${lockedCount}`)
     const rest = [...skipped, ...failed]
     const detail = rest.slice(0, 3).map(r => `${r.label}：${r.detail ?? r.kind}`).join('；')
     const text = head.join('、') + (detail ? `（${detail}${rest.length > 3 ? ` 等 ${rest.length} 条` : ''}）` : '')
@@ -980,19 +1133,6 @@ onBeforeUnmount(() => {
 })
 </script>
 <style scoped lang="scss">
-.filter-input,
-.filter-select {
-  flex: 0 0 auto;
-}
-
-.filter-input {
-  width: 160px;
-}
-
-.filter-select {
-  width: 120px;
-}
-
 /* —— 列设置面板 —— */
 .col-item {
   display: flex;
@@ -1058,44 +1198,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.filter-input {
-  :deep(.v-field) {
-    --v-field-padding-top: 2px;
-    --v-field-padding-bottom: 1px;
-    --v-input-control-height: 25px;
-    font-size: 12px;
-  }
-
-  :deep(.v-field__input) {
-    min-height: 30px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-
-  :deep(.v-label) {
-    font-size: 13px;
-  }
-
-  :deep(.v-field__append-inner) {
-    align-self: center;
-    padding-top: 0;
-  }
-
-  :deep(.v-field__prepend-inner) {
-    margin-top: 0;
-    padding-top: 1px;
-
-    .v-icon {
-      font-size: 14px;
-    }
-  }
-
-  :deep(.v-input__details) {
-    padding-top: 0;
-    min-height: 0;
-  }
-}
-
 :deep(.v-data-table .v-table__wrapper > table > thead > tr > th.v-data-table-column--fixed) {
   z-index: 3;
 }
@@ -1141,14 +1243,12 @@ onBeforeUnmount(() => {
   --v-input-control-height: 30px;
   --v-field-padding-top: 1px;
   --v-field-padding-bottom: 0px;
-  font-size: 12px;
 }
 
 :deep(.v-data-table-footer__items-per-page > .v-select .v-field__input) {
   min-height: 26px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 12px;
 }
 
 :deep(.v-data-table-footer__items-per-page > .v-select .v-field__append-inner) {

@@ -45,6 +45,36 @@ export function formatDatas (row: Record<string, unknown>): Record<string, unkno
 }
 
 /**
+ * 按「总量 / 总额」折算其中**一部分数量**的价值：总金额 ÷ 总数量 × 数量。
+ *
+ * 用途：办理弹窗里在「剩余接收数量」旁展示这批货值多少钱 —— 件数说明不了轻重，
+ * 业务上是按金额判断接不接（口径由业务给定：总库存金额 ÷ 总库存数量 × 剩余数量）。
+ *
+ * 返回**展示文本**（千分位 + 最多两位小数，与 formatNumber 同口径）；
+ * 任何一个数取不到（空串 / null / 非数字 / 总量 ≤ 0 导致单价算不出来）都返回空串 ——
+ * 这种地方宁可空着，也不能显示"价值 0 元"这种假金额让人据此做决定。
+ *
+ * ⚠️ 空串与 0 必须分开判：`Number('')` 也是 0，只看 Number 会把"没下发"当成"数量是 0"。
+ */
+export function shareValueText (totalAmount: unknown, totalQty: unknown, qty: unknown): string {
+  if (!isFilledNumber(totalAmount) || !isFilledNumber(totalQty) || !isFilledNumber(qty)) {
+    return ''
+  }
+  const amount = Number(totalAmount)
+  const total = Number(totalQty)
+  const n = Number(qty)
+  if (!Number.isFinite(amount) || !Number.isFinite(total) || total <= 0 || !Number.isFinite(n)) {
+    return ''
+  }
+  return formatNumber((amount / total) * n)
+}
+
+/** 这个值算不算"填了"：空串 / null / undefined 都不算（0 算，它是有效值） */
+function isFilledNumber (value: unknown): boolean {
+  return value !== null && value !== undefined && String(value).trim() !== ''
+}
+
+/**
  * 把「可能已被 formatDatas 格式化过」的值解析回数字，供排序使用。
  * 先去掉千分位再转；解析不出来时返回 0（保持顺序稳定，不抛错）。
  */

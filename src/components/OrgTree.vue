@@ -394,41 +394,4 @@
     color: rgb(var(--v-theme-primary)) !important;
 }
 
-.filter-input {
-    :deep(.v-field) {
-        --v-field-padding-top: 2px;
-        --v-field-padding-bottom: 1px;
-        --v-input-control-height: 30px;
-        font-size: 12px;
-    }
-
-    :deep(.v-field__input) {
-        min-height: 40px;
-        padding-top: 1px;
-        padding-bottom: 1px;
-    }
-
-    :deep(.v-label) {
-        font-size: 13px;
-    }
-
-    :deep(.v-field__append-inner) {
-        align-self: center;
-        padding-top: 0;
-    }
-
-    :deep(.v-field__prepend-inner) {
-        margin-top: 0;
-        padding-top: 1px;
-
-        .v-icon {
-            font-size: 14px;
-        }
-    }
-
-    :deep(.v-input__details) {
-        padding-top: 0;
-        min-height: 0;
-    }
-}
 </style>

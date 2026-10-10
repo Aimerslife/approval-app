@@ -1,5 +1,5 @@
 <template>
-  <v-container class="page-bg px-6 pb-6 pt-10" fluid>
+  <v-container class="page-bg px-30 pb-6 pt-10" fluid>
     <!-- 页头 -->
     <div class="mb-4 px-1">
       <div class="text-[20px] font-bold">角色设置</div>
@@ -7,7 +7,7 @@
     </div>
 
     <!-- 成员表格卡片 -->
-    <v-sheet border class="overflow-hidden" rounded="xl">
+    <v-sheet  class="overflow-hidden" rounded="xl">
       <!-- 卡片工具栏：成员数 + 搜索 -->
       <div class="d-flex align-center flex-wrap ga-4 px-5 py-3">
         <div class="flex-grow-1">
@@ -20,6 +20,7 @@
           density="compact"
           hide-details
           clearable
+          class="filter-input"
           label="搜索成员"
           prepend-inner-icon="mdi-magnify"
           single-line
@@ -53,8 +54,6 @@
         <template #item.role="{ value }">
           <v-chip color="primary" label size="small" variant="tonal">{{ roleName(value) }}</v-chip>
         </template>
-        <!-- 多个权限标签用 flex + gap 分隔：原来给每个标签加 mr-1，
-                     最后一个的尾部外边距也计入行盒宽度，会把整格往左推（内容左偏 2px） -->
         <template #item.permission="{ value }">
           <div class="d-flex flex-wrap justify-center ga-1">
             <span v-for="item in rolePermission" :key="item.key" class="text-[12px] text-medium-emphasis">
@@ -96,14 +95,13 @@
     </v-sheet>
 
     <!-- 组别 → 默认审批人：默认值在 utils/organazation.ts 里维护，这里负责展示与「换人」 -->
-    <v-sheet border class="overflow-hidden mt-6" rounded="xl">
+    <v-sheet  class="overflow-hidden mt-6" rounded="xl">
       <div class="d-flex align-center flex-wrap ga-4 px-5 py-3">
         <div class="flex-grow-1">
           <span class="text-[13px] text-medium-emphasis">共
             <b class="text-primary">{{ approverRows.length }}</b> 个组别</span>
           <span v-if="customCount" class="text-[12px] text-medium-emphasis ml-2">
             · 已改 <b class="text-primary">{{ customCount }}</b> 个</span>
-          <span class="text-[12px] text-medium-emphasis ml-2">（默认值维护在 utils/organazation.ts；改过的显示为「已改」，可恢复默认）</span>
         </div>
 
         <v-text-field
@@ -111,6 +109,7 @@
           clearable
           density="compact"
           hide-details
+          class="filter-input"
           label="搜索组别 / 审批人"
           prepend-inner-icon="mdi-magnify"
           single-line
@@ -153,8 +152,7 @@
 
         <template #item.action="{ item }">
           <div class="d-flex justify-center ga-1">
-            <v-btn color="primary" size="x-small" variant="tonal" @click="openPicker(item)">更换</v-btn>
-
+            <v-btn color="primary" size="small" variant="tonal" @click="openPicker(item)">更换</v-btn>
             <v-btn
               v-if="item.source === 'custom'"
               size="x-small"
@@ -165,6 +163,184 @@
         </template>
       </v-data-table>
     </v-sheet>
+
+    <!--
+      仓库（仓位）清单：默认值在 utils/warehouse.ts 里维护，这里维护的是**人工改过的整份清单**
+      （保存进 PocketBase 的 warehouses 表）。有维护记录就完全以它为准，「恢复默认」= 清空它。
+    -->
+    <v-sheet  class="overflow-hidden mt-6" rounded="xl">
+      <div class="d-flex align-center flex-wrap ga-4 px-5 py-3">
+        <div class="flex-grow-1 d-flex align-center ga-2">
+          <span class="text-[13px] text-medium-emphasis">共
+            <b class="text-primary">{{ warehouseRows.length }}</b> 个仓库</span>
+          <v-chip
+            :color="warehouseCustom ? 'primary' : undefined"
+            label
+            size="x-small"
+            variant="tonal"
+          >{{ warehouseCustom ? '已自定义' : '默认清单' }}</v-chip>
+        </div>
+
+        <v-btn
+          v-if="warehouseCustom"
+          size="small"
+          variant="text"
+          @click="askResetWarehouses"
+        >恢复默认</v-btn>
+
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-plus"
+          size="small"
+          variant="flat"
+          @click="openWarehouseAdd"
+        >新增仓库</v-btn>
+
+        <v-text-field
+          v-model="warehouseSearch"
+          clearable
+          density="compact"
+          hide-details
+          class="filter-input"
+          label="搜索分类 / 仓库名"
+          prepend-inner-icon="mdi-magnify"
+          single-line
+          style="max-width: 240px"
+          variant="outlined"
+        />
+      </div>
+
+      <v-divider />
+
+      <v-data-table
+        class="text-[12px]"
+        density="compact"
+        :headers="warehouseHeaders"
+        hover
+        :items="warehouseRows"
+        :items-per-page="10"
+        :items-per-page-options="[10, 20, 50]"
+        :loading="warehouseLoading"
+        :search="warehouseSearch"
+      >
+        <template #item.parent="{ value }">
+          <v-chip  size="small" label variant="tonal" color="info">{{ value }}</v-chip>
+        </template>
+
+        <template #item.name="{ value }">
+          <span class="text-[12px]">{{ value }}</span>
+        </template>
+
+        <template #item.action="{ item }">
+          <div class="d-flex justify-center ga-1">
+            <v-btn color="primary" size="small" variant="tonal" @click="openWarehouseEdit(item)">编辑</v-btn>
+            <v-btn size="small" variant="text" @click="askRemoveWarehouse(item)">删除</v-btn>
+          </div>
+        </template>
+      </v-data-table>
+    </v-sheet>
+
+    <!-- 新增 / 编辑一个仓库：分类可以直接输入新的（写完即成为候选） -->
+    <v-dialog v-model="warehouseDialog" max-width="520">
+      <v-card class="overflow-hidden" rounded="xl">
+        <v-card-title class="d-flex align-center justify-space-between px-6 py-4">
+          <div class="d-flex align-center ga-2">
+            <v-avatar color="primary" size="28" variant="tonal">
+              <v-icon icon="mdi-warehouse" size="16" />
+            </v-avatar>
+
+            <span class="text-[15px] font-bold">{{ warehouseEditing ? '编辑仓库' : '新增仓库' }}</span>
+          </div>
+
+          <v-icon-btn icon="mdi-close" size="small" variant="text" @click="warehouseDialog = false" />
+        </v-card-title>
+
+        <v-divider />
+
+        <v-card-text class="px-6 py-5 d-flex align-center gap-2">
+          <v-combobox
+            v-model="warehouseDraft.parent"
+            class="w-[60px] filter-input"
+            density="compact"
+            hide-details="auto"
+            :items="warehouseParents"
+            label="上级分类"
+            placeholder="如：本地仓 / 中转仓 / 海外仓 / 平台仓"
+            variant="outlined"
+          >
+            <template #message>
+              <span class="text-[11px]">可以直接输入新的分类名，保存后它也会出现在候选里</span>
+            </template>
+          </v-combobox>
+
+          <v-text-field
+            v-model="warehouseDraft.name"
+            density="compact"
+            class="filter-input"
+            hide-details="auto"
+            label="仓库名"
+            placeholder="如：广州仓 / FBA仓"
+            variant="outlined"
+          />
+        </v-card-text>
+
+        <v-divider />
+
+        <v-card-actions class="px-6 py-3">
+          <v-spacer />
+          <v-btn variant="text" @click="warehouseDialog = false">取消</v-btn>
+
+          <v-btn
+            color="primary"
+            :loading="warehouseSaving"
+            variant="flat"
+            @click="saveWarehouseDraft"
+          >保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 删除 / 恢复默认：都要先确认（动的是维护表，删错了得重新配） -->
+    <v-dialog v-model="confirmOpen" max-width="460">
+      <v-card class="overflow-hidden" rounded="xl">
+        <v-card-title class="d-flex align-center ga-2 px-6 py-4">
+          <v-avatar :color="confirmKind === 'reset' ? 'warning' : 'error'" size="28" variant="tonal">
+            <v-icon size="16">{{ confirmKind === 'reset' ? 'mdi-backup-restore' : 'mdi-delete-outline' }}</v-icon>
+          </v-avatar>
+
+          <span class="text-[15px] font-semibold">
+            {{ confirmKind === 'reset' ? '恢复默认仓库清单' : '删除仓库' }}
+          </span>
+        </v-card-title>
+
+        <v-divider />
+
+        <v-card-text class="px-6 py-5 text-[13px]">
+          <template v-if="confirmKind === 'reset'">
+            将清空维护表里的 <b>{{ warehouseRows.length }}</b> 条记录
+          </template>
+
+          <template v-else>
+            确定删除「<b>{{ confirmTarget?.parent }}</b> / <b>{{ confirmTarget?.name }}</b>」吗？
+            删除后新建的审批单里不会再出现它。
+          </template>
+        </v-card-text>
+
+        <v-divider />
+
+        <v-card-actions class="px-6 py-3">
+          <v-spacer />
+          <v-btn variant="text" @click="closeConfirm">取消</v-btn>
+
+          <v-btn
+            :color="confirmKind === 'reset' ? 'warning' : 'error'"
+            :loading="confirmLoading"
+            variant="flat"
+            @click="runConfirm"
+          >确定</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- 更换默认审批人：直接复用「通讯录」（组织架构树） -->
     <v-dialog v-model="pickerOpen" max-width="900">
@@ -345,8 +521,12 @@
     deleteGroupApproverOverride,
     getGroupApproverOverrides,
     getUserInfo,
+    loadWarehouses,
+    resetWarehouses,
     saveGroupApprover,
+    saveWarehouses,
     updateUserRole,
+    WAREHOUSE_SETUP_ERROR,
     type UserInfo,
   } from '@/utils/collection'
   import {
@@ -355,6 +535,12 @@
     mergeGroupApprovers,
     type GroupApproverRow,
   } from '@/utils/groupApprovers'
+  import {
+    cleanWarehouse,
+    findBadWarehouse,
+    warehouseKey,
+    type WarehouseRow,
+  } from '@/utils/warehouse'
 
   const currentRole = ref('')
   const data = ref<UserInfo[]>([])
@@ -439,15 +625,6 @@
     model.value = true
   }
 
-  /* ==================== 组别 → 默认审批人 ==================== */
-  /*
-   * 两个来源合并成一张表（合并口径见 utils/groupApprovers）：
-   *   · 默认值 —— utils/organazation.ts 里人工维护的那份，改文件即刻生效；
-   *   · 覆盖值 —— 本页通过通讯录换过的人，存在 PocketBase 的 group_approvers 表。
-   * 「恢复默认」= 删掉那条覆盖记录。
-   */
-
-  /** 提示条：保存/恢复这类"改数据"的动作必须有明确反馈，不能静默 */
   const hint = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
     show: false,
     text: '',
@@ -548,9 +725,170 @@
     }
   }
 
+  /* ==================== 仓库（仓位）清单 ==================== */
+  /*
+   * 与上面「组别 → 默认审批人」的差别：那边是**逐行覆盖**（默认值为主、只换个人），
+   * 这里是**整表替换** —— 仓库要能新增、改名、删除，逐行覆盖表达不了"删掉某一项"。
+   * 口径（见 utils/warehouse 的文件头）：维护表里有记录就完全以它为准，空表才用文件默认值。
+   */
+
+  const warehouseRows = ref<WarehouseRow[]>([])
+  const warehouseCustom = ref(false)
+  const warehouseLoading = ref(false)
+  const warehouseSearch = ref('')
+  const warehouseHeaders = ref([
+    { title: '序号', key: 'index', align: 'start' },
+    { title: '仓库名', key: 'name', align: 'start' },
+    { title: '上级分类', key: 'parent', align: 'start' },
+    { title: '操作', key: 'action', align: 'center', sortable: false },
+  ] as const)
+
+  /** 写失败时的提示：环境没准备好（没应用迁移）就把原因原样说出来，其余换成通用文案 */
+  function warehouseErrorHint (error: unknown): string {
+    return error instanceof Error && error.name === WAREHOUSE_SETUP_ERROR
+      ? error.message
+      : '操作失败，请稍后重试'
+  }
+
+  /** 维护表读不出来（未应用迁移）时 `loadWarehouses` 会回落默认值，页面照常可用 */
+  async function loadWarehouseList () {
+    warehouseLoading.value = true
+    try {
+      const res = await loadWarehouses()
+      warehouseRows.value = res.rows
+      warehouseCustom.value = res.custom
+    } finally {
+      warehouseLoading.value = false
+    }
+  }
+
+  /** 上级分类的候选：清单里已出现过的（弹窗里是 combobox，可以直接写新的） */
+  const warehouseParents = computed(() => [...new Set(warehouseRows.value.map(r => r.parent))])
+
+  const warehouseDialog = ref(false)
+  /** 正在编辑的那一行；null = 新增 */
+  const warehouseEditing = ref<WarehouseRow | null>(null)
+  const warehouseDraft = ref<WarehouseRow>({ parent: '', name: '',index: 0})
+  const warehouseSaving = ref(false)
+
+  function openWarehouseAdd () {
+    warehouseEditing.value = null
+    warehouseDraft.value = { parent: warehouseParents.value[0] ?? '', name: '',index:0 }
+    warehouseDialog.value = true
+  }
+
+  function openWarehouseEdit (row: WarehouseRow) {
+    warehouseEditing.value = { ...row }
+    warehouseDraft.value = { ...row }
+    warehouseDialog.value = true
+  }
+
+  async function saveWarehouseDraft () {
+    const editing = warehouseEditing.value
+    // 改自己时不该跟"自己"判重：只有**其余行**参与重复检查（改成同分类同名会被拦下）
+    const others = warehouseRows.value.filter(r => !editing || warehouseKey(r) !== warehouseKey(editing))
+    const bad = findBadWarehouse(warehouseDraft.value, others)
+    if (bad) {
+      showHint(bad, 'warning')
+      return
+    }
+
+    const next = cleanWarehouse(warehouseDraft.value)
+    const list = editing
+      ? warehouseRows.value.map(r => (warehouseKey(r) === warehouseKey(editing) ? next : r))
+      : [...warehouseRows.value, next]
+
+    warehouseSaving.value = true
+    try {
+      await saveWarehouses(list)
+      await loadWarehouseList()
+      warehouseDialog.value = false
+      showHint(`「${next.parent} / ${next.name}」已保存`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 保存仓库失败:', error)
+      // 与「换审批人」同理：写失败必须说出来，否则下次进页面又变回旧值
+      showHint(warehouseErrorHint(error), 'error')
+    } finally {
+      warehouseSaving.value = false
+    }
+  }
+
+  /*
+   * 删除与「恢复默认」都动维护表，所以都要先确认。
+   * 一个弹窗按 `confirmKind` 切换文案与动作，避免为两件"取消/确定"几乎一样的事写两套。
+   */
+  const confirmKind = ref<'remove' | 'reset' | null>(null)
+  const confirmTarget = ref<WarehouseRow | null>(null)
+  const confirmLoading = ref(false)
+  const confirmOpen = computed({
+    get: () => confirmKind.value !== null,
+    set: (open: boolean) => {
+      if (!open) {
+        confirmKind.value = null
+      }
+    },
+  })
+
+  function askRemoveWarehouse (row: WarehouseRow) {
+    // 只留一条时不给删：删掉最后一条 = 清空维护表 = 整份默认清单又回来，用户会以为界面在骗他
+    if (warehouseRows.value.length <= 1) {
+      showHint('至少要留一个仓库；想回到默认清单请点「恢复默认」', 'warning')
+      return
+    }
+    confirmTarget.value = row
+    confirmKind.value = 'remove'
+  }
+
+  function askResetWarehouses () {
+    confirmTarget.value = null
+    confirmKind.value = 'reset'
+  }
+
+  function closeConfirm () {
+    confirmKind.value = null
+    confirmTarget.value = null
+  }
+
+  async function runConfirm () {
+    const kind = confirmKind.value
+    const target = confirmTarget.value
+    if (!kind) {
+      return
+    }
+    confirmLoading.value = true
+    try {
+      if (kind === 'reset') {
+        await resetWarehouses()
+        showHint('已恢复为默认仓库清单', 'success')
+      } else if (target) {
+        const list = warehouseRows.value.filter(r => warehouseKey(r) !== warehouseKey(target))
+        await saveWarehouses(list)
+        showHint(`已删除「${target.parent} / ${target.name}」`, 'success')
+      }
+      await loadWarehouseList()
+      closeConfirm()
+    } catch (error) {
+      console.error('[roleSetting] 仓库清单写入失败:', error)
+      showHint(warehouseErrorHint(error), 'error')
+    } finally {
+      confirmLoading.value = false
+    }
+  }
+
   onMounted(() => {
     getDatas()
     loadApprovers()
+    loadWarehouseList()
+    /*
+     * 本页下拉菜单的字号要靠一条全局规则调（弹层 teleport 到 body，scoped 选择器够不着），
+     * 所以在 body 上打一个页面类把它圈住 —— 与 workStream / setDatas 的 data-table-page 同一套路。
+     * 离开页面时摘掉，免得这条规则漏到别的页面。
+     */
+    document.body.classList.add('role-setting-page')
+  })
+
+  onBeforeUnmount(() => {
+    document.body.classList.remove('role-setting-page')
   })
 </script>
 
@@ -636,5 +974,16 @@
     background-color: rgb(var(--v-theme-primary) / 7%);
     border: 1px solid rgb(var(--v-theme-primary) / 22%);
     border-radius: 10px;
+}
+:deep(.v-data-table-footer__items-per-page > .v-select .v-field__outline) {
+  --v-field-border-opacity: 0.2;
+}
+:global(body.role-setting-page .v-select__content .v-list-item),
+:global(body.role-setting-page .v-select__content .v-list-item-title),
+:global(body.role-setting-page .v-select__content .v-list-item-subtitle),
+:global(body.role-setting-page .v-combobox__content .v-list-item),
+:global(body.role-setting-page .v-combobox__content .v-list-item-title),
+:global(body.role-setting-page .v-combobox__content .v-list-item-subtitle) {
+    font-size: 12px;
 }
 </style>

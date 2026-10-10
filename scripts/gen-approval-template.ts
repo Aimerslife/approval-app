@@ -143,6 +143,9 @@ const RESULT_BY_LABEL: Array<[RegExp, string]> = [
   [/建议弃置/, 'discard'],
   [/部分接收/, 'part_receive'],
   [/报废清仓/, 'scrap'],
+  // ⚠️ 必须排在「回收」**前面**：这条规则是"第一个匹配命中即用"，
+  //    放后面的话「供应商回收」会被 /回收/ 抢先映射成 recycle（静默错，且不报错）
+  [/供应商回收/, 'supplier_recycle'],
   [/回收/, 'recycle'],
   [/待定/, 'pending'],
   [/其他原因/, 'other_reason'],

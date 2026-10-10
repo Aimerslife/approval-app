@@ -1,5 +1,5 @@
 <template>
-  <v-card min-height="50vh">
+  <v-card min-height="50vh" border variant="flat">
     <!-- 产品概览：图片 / 名称 / 关键标签 -->
     <div class="d-flex align-center ga-4 pa-4">
       <v-img

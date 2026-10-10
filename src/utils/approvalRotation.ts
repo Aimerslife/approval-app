@@ -7,6 +7,7 @@ import type {
   ApprovalFlowStep,
   RotationSpec,
 } from '../types/approval'
+import { RECEIVED_QTY_FIELD, REMAINING_QTY_FIELD } from '../types/approval'
 import { BI_ROW_FIELD_BY_KEY, BI_ROW_KEY_BY_FIELD, DERIVED_KEYS } from './biRowFields'
 import { extractFilterParams, filterFieldNames } from './rotationQuery'
 
@@ -137,6 +138,15 @@ export function collectRotations (flow: ApprovalFlow): Array<{ id: string, label
     if (node.type === 'notify') {
       continue
     }
+    /*
+     * 「引用模板」：内容在**源模板**里，这里看不到 —— 直接跳过。
+     *
+     * 不会漏掉源模板里的轮询：建单期是"先展开引用、再收集轮询"（见 utils/expandFlowForOrder
+     * 的执行顺序），轮到本函数时引用早被换成了真内容，那时收集到的就是它。
+     */
+    if (node.type === 'ref') {
+      continue
+    }
     for (const b of node.branches) {
       note(b.id, b.members)
       walkSteps(b.steps)
@@ -167,6 +177,10 @@ const RUNTIME_ONLY_FIELDS = new Set([
   'reason_belong',
   'second_reason',
   'remark',
+  // 接收数量的派生字段：由办理流水累计出来（见 types/approval 的 receivedQuantities），
+  // 建单那一刻还没有任何流水 → 绑不出值
+  RECEIVED_QTY_FIELD,
+  REMAINING_QTY_FIELD,
 ])
 
 /**
@@ -258,6 +272,14 @@ export function expandRotations (
   const expanded: Record<string, number> = {}
   /** 展开前的环节 id → 展开后的**第一环** id（驳回回退的目标要跟着改，见 mapBranches） */
   const firstOf: Record<string, string> = {}
+  /**
+   * 注入了「轮完走向」的分支（见 loopEndBranches）：主循环跑完之后要统一重映射一次目标。
+   *
+   * 为什么要后处理：`firstOf` 是**单趟**填的，而这些分支的目标通常排在卡片**之后**
+   * （轮完当然继续往后走），注入那一刻 `firstOf[目标]` 还是空的 —— 目标本身若是轮询卡片，
+   * 它展开后会改名，届时 `exitTo` 就会指向一个不存在的环节（运行期直接抛「目标环节不存在」）。
+   */
+  const injectedExits: Array<{ exitTo: { stepId: string } }> = []
 
   /**
    * 该环节是否配了轮询。
@@ -583,6 +605,12 @@ export function expandRotations (
           }
           out.push(...ringSteps)
         }
+        // 「轮完走向」紧跟在**所有环之后**（见 loopEndBranchGroup 的说明）
+        if (s.afterLoop?.stepId) {
+          const g = loopEndBranchGroup(s.id, s.afterLoop.stepId)
+          injectedExits.push(g)
+          out.push({ id: g.id, type: 'branch', branches: g.branches })
+        }
         continue
       }
       const members = s.members ?? []
@@ -733,14 +761,75 @@ export function expandRotations (
           nodes.push(n)
         }
       }
+      // 「轮完走向」紧跟在**所有环之后**（见 loopEndBranchGroup 的说明）
+      if (node.afterLoop?.stepId) {
+        const g = loopEndBranchGroup(node.id, node.afterLoop.stepId)
+        injectedExits.push(g)
+        nodes.push({ id: g.id, type: 'branch', branches: g.branches })
+      }
       continue
     }
     if (node.type === 'notify') {
       nodes.push(node)
       continue
     }
+    // 未展开的引用原样带走（它不是分支节点，没有 branches 可映射）
+    if (node.type === 'ref') {
+      nodes.push(node)
+      continue
+    }
     nodes.push({ ...node, branches: mapBranches(node.branches) })
   }
 
+  /*
+   * 注入的「轮完走向」分支，目标统一重映射一次（理由见 injectedExits 的声明）。
+   * 目标是普通环节 → `firstOf` 里没有这条记录 → 原样保留，
+   * 与 `rename` 对"卡片外环节 id 不变"的口径一致。
+   */
+  for (const g of injectedExits) {
+    const mapped = firstOf[g.exitTo.stepId]
+    if (mapped) {
+      g.exitTo.stepId = mapped
+    }
+  }
+
   return { flow: nodes, expanded, issues }
+}
+
+/**
+ * 「轮完走向」：所有组都轮完、**一直没有跳出轮询**时走的那条分支。
+ *
+ * 形态是「无条件分支 + `exitTo`」—— 复用运行期已有的两样东西（见 types/approval）：
+ *   · `conditions: []` 在 `matchBranch` 里是**兜底分支**：流程走到这里必命中；
+ *   · 分支上的 `exitTo` 表示"从目标环节**本身**接着办"（`walkSteps` / `walkFlow` 里优先判定）。
+ * 所以不用给运行期加任何新概念，展开后它就是流程里一个普通分支组。
+ *
+ * 为什么必须由**建单期展开**来注入（而不是保存时就写进 flow）：卡片展开成几环是建单时才知道的，
+ * "最后一环之后"这个位置在模板里并不存在；而且保存期注入还会被 `ensureRejectLoopBack`
+ * 当成"审批环节后面的分支组"往里补「驳回」分支（见那里的说明）。
+ *
+ * ⚠️ 只在**真的展开了至少一环**时调用（见两处调用点）：一个组都没命中时整张卡片按
+ * `whenEmpty: 'skip'` 跳过，那时"轮完"并不成立 —— 保持"跳过"的老语义。
+ *
+ * ⚠️ 目标必须是本图里的审批 / 提醒环节：与卡片内部的「提前结束轮询」共用同一份白名单
+ * （保存期已校验，见 utils/approvalFlow 的 readAfterLoop），运行期 `exitTo` 找不到目标会直接抛错。
+ */
+function loopEndBranchGroup (
+  cardId: string,
+  target: string,
+): { id: string, branches: ApprovalBranch[], exitTo: { stepId: string } } {
+  const exitTo = { stepId: target }
+  return {
+    id: `${cardId}:after-loop`,
+    branches: [{
+      id: `${cardId}:after-loop:branch`,
+      name: '轮询走完',
+      conditions: [],
+      steps: [],
+      isEnd: false,
+      exitTo,
+    }],
+    // 交给调用方登记后处理重映射（上面那趟循环）
+    exitTo,
+  }
 }

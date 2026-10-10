@@ -242,7 +242,7 @@
                                   "loopBackTo": {
                                     "stepId": "4bf06dca-e5b7-4f8f-ba00-892009cb392c"
                                   },
-                                  "name": "驳回回退上一级",
+                                  "name": "回退上一级",
                                   "steps": []
                                 }
                               ],

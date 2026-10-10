@@ -61,8 +61,6 @@ const ROUTE_ROLES: Record<string, AppRole[]> = {
   '/workStream': ADMIN_UP,
   '/approvalModel': ADMIN_UP,
   '/createStream': ADMIN_UP,
-  // 流程编排 v2（实验页）：与 createStream 同一档
-  '/createStream2': ADMIN_UP,
   '/editStream': ADMIN_UP,
   '/editRule': ADMIN_UP,
 
@@ -123,6 +121,29 @@ const ACTION_ROLES = {
    * 所以这张表是"界面别给人看到"，不是"权限的最终防线"。
    */
   'bi:purge': ['superAdmin'],
+
+  /**
+   * 同步快照（把 `bi_rows` 的真实列回填进 `data`）：只给超级管理员。
+   *
+   * 为什么给它单独一个动作、而不是并进 `bi:upload`：
+   *   上传是"用一份文件替换数据"，快照同步是"把列的值搬进快照"——
+   *   后者会**按列覆盖掉 data 里已有的值时可能把值写成 0**（金额类列实测与快照差 25%~70%，
+   *   见 server/snapshotSync.ts 的 zeroOverwrites），是整库级的写操作，
+   *   但没有"删行"的风险，所以与 `bi:purge`（清空）同档：超级管理员。
+   */
+  'bi:snapshot': ['superAdmin'],
+
+  /**
+   * 删除审批单（整条 `approval_chain` + 它的附件）：只给超级管理员。
+   *
+   * 比「清空 BI 数据」更要小心：`bi_rows` 是 BI 的镜像，删了还能再同步回来；
+   * 审批单是**业务过程记录**，删了就真没了（没有回收站）。所以连"管理员"都不给。
+   *
+   * ⚠️ 同 `bi:purge`：这只是**界面礼貌**，真正的拦截在服务端
+   * （server/orderDelete.ts 拿调用者的 token 去问 PocketBase role，
+   *  而且这两个集合的 deleteRule 是空的，浏览器直删本来也删不掉）。
+   */
+  'approval:delete': ['superAdmin'],
 } as const
 
 export type AppAction = keyof typeof ACTION_ROLES

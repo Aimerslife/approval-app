@@ -1,5 +1,6 @@
 import type {
   ApprovalAttachment,
+  ApprovalFlow,
   ApprovalOrder,
   NodeDecision,
   NodeSubmitPayload,
@@ -9,10 +10,46 @@ import {
   APPROVAL_STATUS,
   buildBranchTerminalMap,
   PICK_MEMBERS_RESULT,
+  PICK_TEAM_RESULT,
   rebuildChain,
 } from '@/types/approval'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
+// 「下一环还是不是同一个人办」：与页面上「连续同人环节合并成一条节点」同一口径
+import { nextStepSameApprover } from '@/utils/approvalRuntime'
 import { updateApprovalOrder, uploadApprovalFile } from '@/utils/collection'
+// 到达提醒：这一步办完后**新到达**的「飞书提醒」环要发消息（与建单时同一套，见 utils/notifySteps）
+import { sendArrivedNotifies } from '@/utils/notifySteps'
+
+/**
+ * 到达提醒：把这一步办完**新到达**的「飞书提醒」环发给它们的提醒对象。
+ *
+ * 与建单时同一套（`sendArrivedNotifies` 的文件头就是按"刚推进到"设计的）：
+ * 拿"推进前 / 推进后"两次 chain 的 `stepIds` 差分，定位这一轮刚到达的提醒环。
+ * "推进前"那份用**提交前**的 decisions 重算（此刻 decisions 里已追加了本次结论）。
+ *
+ * ⚠️ 故意**不 await**：库已经写完了，消息慢（飞书一跳几百毫秒）不该把用户的弹窗卡住；
+ *    发失败只记日志 —— 与"发送失败绝不能回滚审批"同一口径（见 utils/notifySteps 的文件头）。
+ * ⚠️ 测试期由 NOTIFY_TEST_GATE 收口（只发给指定姓名那个人）。
+ */
+function fireArrivedNotifies (args: {
+  flow: ApprovalFlow
+  /** 提交**前**的整份快照（只用它的 decisions 重算"推进前"到过哪些提醒环） */
+  snapshot: ApprovalOrder['chain']
+  terminalMap: ReturnType<typeof buildBranchTerminalMap>
+  context: ReturnType<typeof flowContextOfOrder>
+  afterStepIds: string[]
+  orderNo?: string
+}) {
+  void sendArrivedNotifies({
+    flow: args.flow,
+    before: rebuildChain(args.flow, args.snapshot?.decisions ?? [], args.terminalMap, args.context).stepIds,
+    after: args.afterStepIds,
+    orderNo: args.orderNo,
+    context: args.context,
+  }).catch(error => {
+    console.warn('[useNodeSubmit] 到达提醒发送异常（不影响已保存的审批）:', error)
+  })
+}
 
 /**
  * 审批环节「提交办理」的**唯一实现**：
@@ -127,18 +164,20 @@ export function useNodeSubmit (options: {
       const rebuilt = rebuildChain(flow, decisions, terminalMap, context)
 
       /*
-       * 3.5 「选择接收团队」：只校验"选了没有"，**不往后续环节写人**。
+       * 3.5 「选择接收组别 / 选择接收团队」：只校验"选了没有"，**不往后续环节写人**。
        *
        * 为什么不填充下一环（早先那版写过，已按业务口径改掉）：
-       * 「选择接收团队」是**终结**结论 —— 接收方是结果（谁接下这批货），不是下一环的审批人。
+       * 这两条都是**终结**结论 —— 接收方是结果（谁接下这批货），不是下一环的审批人。
        * 选完之后流程即结束、后面的环节不再展开，也就没人有权限办 ——
        * 终止这件事由 rebuildChain 按 CLOSE_FLOW_RESULTS 完成（见 types/approval.ts）。
-       * 选中的人记在本环节的办理流水里（decisions[].extra.members），时间线按「接收人员」展示。
+       * 选中的**组别 / 团队**记在本环节的办理流水里（decisions[].extra.members），
+       * 时间线按「接收组别」或「接收团队」展示（粒度看 ReceiverTeam.pick）。
        *
        * 没选人仍然拦下来（与"审批意见必填"同一档）：这条结论就是"选了谁"，不选等于没办。
        */
-      if (payload.result === PICK_MEMBERS_RESULT && !hasPickedMember(payload.extra?.members)) {
-        options.onMessage?.('请选择接收团队', 'warning')
+      if ((payload.result === PICK_MEMBERS_RESULT || payload.result === PICK_TEAM_RESULT)
+        && !hasPickedMember(payload.extra?.members)) {
+        options.onMessage?.(payload.result === PICK_TEAM_RESULT ? '请选择接收团队' : '请选择接收组别', 'warning')
         payload.done(false)
         return null
       }
@@ -157,8 +196,20 @@ export function useNodeSubmit (options: {
       // 记下最新版本，供下一次提交的「读-改-写」使用（见 latest 的说明）
       latest = { ...order, ...updated }
       options.onUpdated?.(updated)
+
+      /*
+       * 6. 到达提醒：这一步办完**新到达**的「飞书提醒」环，发消息给它们的提醒对象。
+       * 抽成独立函数（见文件下方 fireArrivedNotifies）：本函数的圈复杂度已经贴着上限，
+       * 而且发送是"副作用尾巴"，独立出来后主流程一眼看得清。
+       */
+      fireArrivedNotifies({ flow, snapshot, terminalMap, context, afterStepIds: rebuilt.stepIds, orderNo: order.order_no })
       options.onMessage?.('审批信息已保存', 'success')
-      payload.done(true)
+      /*
+       * 回传「下一环还是不是同一个人办」：是的话弹窗**先不关** ——
+       * 页面上那两个环节本来就会被合并成一条节点，父组件把新链路传回来后
+       * activeStep 会落到下一环，用户在同一个窗口里接着办（见 ApprovalNode.handleConfirm）。
+       */
+      payload.done(true, { sameApproverNext: nextStepSameApprover(rebuilt.chain, payload.index) })
       return updated
     } catch (error) {
       console.error('[useNodeSubmit] 保存审批信息失败:', error)
@@ -174,7 +225,7 @@ export function useNodeSubmit (options: {
 }
 
 /**
- * 「选择接收团队」是否真的选了人。
+ * 「选择接收组别」是否真的选了人。
  * 兼容两种形状：单选时 `extra.members` 是成员对象，多选时是成员数组。
  */
 function hasPickedMember (raw: unknown): boolean {

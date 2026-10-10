@@ -1,6 +1,6 @@
 <template>
   <v-container :class="fullSceen ? 'screen-full' : 'pa-3'" fluid @dblclick="onDblClick" @pointerdown="onPointerDown">
-    <v-sheet border class="p-3 d-flex flex-wrap align-center ga-3" rounded="5px">
+    <v-sheet border class="filter-bar p-3 d-flex flex-wrap align-center ga-3" rounded="5px">
       <v-text-field
         v-model="draft.search"
         density="compact"
@@ -131,6 +131,23 @@
         >上传到数据库</v-btn>
 
         <!--
+          快照同步：把**真实列**回填进表格读的 data 快照（只写 data）。
+          用途：直接在库里改了列（筛选会跟着变、单元格值不变）之后，用它把界面刷成列的值。
+          ⚠️ 同为界面礼貌，权限判定在服务端（server/snapshotSync.ts 拿 token 问 PB 的 role）。
+        -->
+        <v-btn
+          v-if="canSnapshot"
+          class="ml-3"
+          color="#0052D9"
+          :disabled="snapshotting"
+          prepend-icon="mdi-database-sync-outline"
+          size="x-small"
+          title="把库里的真实列写进 data 快照（只更新快照，不动列与唯一键）"
+          variant="tonal"
+          @click="openSnapshotDialog"
+        >同步快照</v-btn>
+
+        <!--
           清空数据：**只给超级管理员**看。
           ⚠️ 这只是界面礼貌，不是权限 —— 真正的校验在服务端
           （server/purgeData.ts 拿 token 去问 PocketBase 这个人的 role 是不是 superAdmin）；
@@ -207,13 +224,129 @@
         </v-card>
       </v-dialog>
 
+      <!--
+        快照同步确认框：先 dryRun 把"将更新多少行、哪些字段、有多少处会把值写成 0"摆出来，
+        再让人点确认 —— 不做无提示的整库写操作。
+      -->
+      <v-dialog v-model="snapshotDialog" max-width="620" persistent>
+        <v-card>
+          <v-card-title class="text-[15px]">同步快照（列 → data）</v-card-title>
+
+          <v-card-text>
+            <p class="text-[13px] mb-2">
+              把 <code>bi_rows</code> 的<strong>真实列</strong>写进表格读的 <code>data</code> 快照 ——
+              <strong>只更新快照</strong>：列、审批单都不动；唯一键（<code>sync_key</code>）只有勾上最后那项才会写。
+            </p>
+
+            <p class="text-[12px] mb-2 text-medium-emphasis">
+              什么时候用它：你直接在库里改了列（筛选跟着变了、单元格值不变），用它把界面刷成列的值。
+            </p>
+
+            <div v-if="snapshotSummary" class="text-[12px]">
+              扫描 <strong>{{ snapshotSummary.scanned }}</strong> 行：
+              将更新快照 <strong>{{ snapshotSummary.changed }}</strong> 行，未变 {{ snapshotSummary.unchanged }} 行。
+
+              <template v-if="snapshotSummary.rekey">
+                <div class="mt-1">
+                  <span>将重算唯一键 <strong>{{ snapshotSummary.keyChanged }}</strong> 行</span>
+
+                  <span v-if="snapshotSummary.keyConflicts > 0" class="text-warning">
+                    ，{{ snapshotSummary.keyConflicts }} 行因键冲突跳过（只同步快照）
+                  </span>
+                </div>
+
+                <div v-for="(k, i) in snapshotSummary.keySamples.slice(0, 4)" :key="`k${i}`" class="text-[11px]">
+                  {{ k.sku || k.id }}：{{ k.from }} → {{ k.to }}
+                  <span v-if="k.reason" class="text-warning">（{{ k.reason }}，只同步快照不改键）</span>
+                </div>
+              </template>
+
+              <div v-if="snapshotSummary.skippedBlanks > 0" class="mt-1 text-medium-emphasis">
+                另有 <strong>{{ snapshotSummary.skippedBlanks }}</strong> 处「列里是 0 / 空」——
+                <template v-if="snapshotSummary.includeBlanks">已勾选，<strong>会写下去</strong>（快照里对应的值会变成 0）。</template>
+                <template v-else>默认<strong>跳过</strong>（那些列多半从没被写过，写下去会把金额刷成 0）。</template>
+              </div>
+
+              <template v-if="snapshotSummary.fieldChanges.length > 0">
+                <div class="mt-2 text-medium-emphasis">改动最多的字段：</div>
+
+                <div v-for="f in snapshotSummary.fieldChanges.slice(0, 6)" :key="f.key">
+                  {{ f.key }}（{{ f.column }}）：{{ f.rows }} 行<template v-if="f.zeroed">，跳过 {{ f.zeroed }} 处 0/空</template>
+                </div>
+              </template>
+
+              <template v-if="snapshotSummary.samples.length > 0">
+                <div class="mt-2 text-medium-emphasis">例子：</div>
+
+                <div v-for="(s, i) in snapshotSummary.samples.slice(0, 4)" :key="i" class="text-[11px]">
+                  {{ s.sku || s.id }} · {{ s.key }}：{{ s.from }} → {{ s.to }}
+                </div>
+              </template>
+            </div>
+
+            <div v-else class="text-[12px] text-medium-emphasis">正在统计差异…</div>
+
+            <!--
+              「列里是 0/空」默认跳过：那些列的 0 多半是"从没被写过"（金额类最常见），
+              写下去等于把界面上的金额刷成 0。只有"我故意把某列改成 0"才需要勾上。
+            -->
+            <v-checkbox
+              v-model="snapshotIncludeBlanks"
+              class="mt-2"
+              color="#0052D9"
+              density="compact"
+              :disabled="snapshotting"
+              hide-details
+              @update:model-value="refreshSnapshotPreview"
+            >
+              <template #label>
+                <span class="text-[12px]">连「列为 0 / 空」的值也写进快照</span>
+              </template>
+            </v-checkbox>
+
+            <!--
+              重算唯一键：改了「仓位 / 组别 / SKU / 呆滞」这类**参与键的列**之后才需要。
+              ⚠️ 两行改成同一个键会被 UNIQUE 索引拒 —— 服务端会先挑出冲突、跳过它们并报出来。
+              另外 approval_chain.sync_key（审批单里存的键副本）这个功能**不碰**，
+              所以按旧键关联的老单子会关联不上（按记录 id 关联的不受影响）。
+            -->
+            <v-checkbox
+              v-model="snapshotRekey"
+              class="mt-1"
+              color="#0052D9"
+              density="compact"
+              :disabled="snapshotting"
+              hide-details
+              @update:model-value="refreshSnapshotPreview"
+            >
+              <template #label>
+                <span class="text-[12px]">同时重算唯一键 sync_key（按当前列）</span>
+              </template>
+            </v-checkbox>
+          </v-card-text>
+
+          <v-card-actions>
+            <v-spacer />
+            <v-btn :disabled="snapshotting" variant="text" @click="snapshotDialog = false">取消</v-btn>
+
+            <v-btn
+              color="#0052D9"
+              :disabled="!canExecuteSnapshot || snapshotting"
+              :loading="snapshotting"
+              variant="flat"
+              @click="doSnapshot"
+            >执行同步</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
       <div>
         <v-icon-btn
           color="#7A7A7A"
           icon="mdi-refresh"
           :loading="loading"
           size="small"
-          title="从数据库重新读取"
+          title="从数据库重新读取（读的是 data 快照；直接在库里改了列请用「同步快照」）"
           variant="text"
           @click="reload(true)"
         />
@@ -352,7 +485,7 @@
 <script lang="ts" setup>
   import {
     biColumnOf, type BiRowQuery, fetchAllBiRows, fetchBiFacets, fetchBiRows,
-    purgeBiData, type PurgeSummary, uploadBiRows,
+    purgeBiData, type PurgeSummary, type SnapshotSyncSummary, syncBiSnapshots, uploadBiRows,
   } from '@/api/api'
   import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
   import { useUserStore } from '@/stores/user'
@@ -362,7 +495,7 @@
   // Excel 解析放在独立模块里（纯函数，能被 tsx 直接跑单测），页面只负责接线
   import { describeExcelProblems, parseExcelSheet } from '@/utils/excelTable'
   import { PRODUCT_FIELDS, type ProductField } from '@/utils/productFields'
-  import { exportExcel, formatDatas } from '@/utils/utils'
+  import { exportExcel, formatDatas, type ExportColumn } from '@/utils/utils'
 
   /** BI 组件 id */
   const COMPONENT_ID = '0c356d17-3c48-4c3b-b133-e6406a88c5fe'
@@ -474,6 +607,109 @@
    */
   const canUpload = computed(() => canAct(userStore.appRole, 'bi:upload'))
 
+  /* ==================== 快照同步（列 → data，仅超级管理员） ==================== */
+
+  /**
+   * 能不能同步快照 —— 同样走权限判定表（见 utils/permissions 的 ACTION_ROLES：
+   * 未知动作 fail-closed）。界面藏起来只是礼貌，真正的拦截在服务端
+   * （server/snapshotSync.ts 拿调用者 token 去问 PocketBase 的 role）。
+   */
+  const canSnapshot = computed(() => canAct(userStore.appRole, 'bi:snapshot'))
+
+  const snapshotDialog = ref(false)
+  const snapshotting = ref(false)
+  /** dryRun 的统计结果（确认框里显示"将更新多少行 / 哪些字段 / 跳过多少处 0"） */
+  const snapshotSummary = ref<SnapshotSyncSummary | null>(null)
+  /**
+   * 是否连「列里是 0/空」的值一起写。
+   *
+   * 默认**不写**：那些列的 0 多半是"从没被写过"（金额类的回款/毛利润实测 6 万多处），
+   * 写下去等于把界面上的金额刷成 0。默认语义因此是一句话：
+   * **只把列里确实有值、且与快照不同的字段同步过去**。只有"我故意把某列改成 0"时才勾。
+   */
+  const snapshotIncludeBlanks = ref(false)
+
+  /**
+   * 是否顺带**重算 `sync_key`**（唯一键 = `SKU|店铺|仓位|组别|呆滞`）。
+   *
+   * 什么时候需要：直接在库里改了**参与键的那几列**（仓位 / 组别 / SKU / 呆滞）——
+   * 行的键还停在旧值上，下次全量同步就认不出它（会"新建一条同键行 + 把这条当 orphan"）。
+   *
+   * 默认**不勾**：改键会改变下次同步的匹配结果；冲突（两行同一个新键）的行会被跳过并报出来。
+   */
+  const snapshotRekey = ref(false)
+
+  /** 预演结果显示"确实有活可干"（快照有改动，或勾了重算且有键要换）才允许执行 */
+  const canExecuteSnapshot = computed(() => {
+    const s = snapshotSummary.value
+    return !!s && (s.changed > 0 || s.keyChanged > 0)
+  })
+
+  /** 按当前开关重新跑一遍预演（勾选切换时用，让界面上的数字和实际会写的一致） */
+  async function refreshSnapshotPreview () {
+    try {
+      snapshotSummary.value = await syncBiSnapshots({
+        dryRun: true,
+        includeBlanks: snapshotIncludeBlanks.value,
+        rekey: snapshotRekey.value,
+      })
+    } catch (error) {
+      showMsg(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  /**
+   * 打开确认框：**先 dryRun** 把差异摆出来再让人确认。
+   *
+   * 为什么必须有这一步：快照同步是按列覆盖 data，一次可能动上千行；
+   * 而库里金额类列与快照本来就不一致（实测 25%~70%，6 万多处），
+   * 不先看一眼 skippedBlanks 就执行，可能把界面上的金额刷成 0。
+   */
+  async function openSnapshotDialog () {
+    if (!canSnapshot.value) {
+      showMsg('只有超级管理员可以同步快照', 'warning')
+      return
+    }
+    snapshotSummary.value = null
+    snapshotIncludeBlanks.value = false
+    snapshotRekey.value = false
+    snapshotDialog.value = true
+    await refreshSnapshotPreview()
+  }
+
+  /** 执行：写库后重新取数 —— 表格的值来自 data，写完必须重取才看得见 */
+  async function doSnapshot () {
+    // 双保险：按钮已按权限/差异禁用，这里再拦一次（权限不能只靠"按钮点不到"保证）
+    if (!canSnapshot.value) {
+      showMsg('只有超级管理员可以同步快照', 'warning')
+      return
+    }
+    snapshotting.value = true
+    try {
+      const res = await syncBiSnapshots({
+        includeBlanks: snapshotIncludeBlanks.value,
+        rekey: snapshotRekey.value,
+      })
+      snapshotDialog.value = false
+      const parts = [`已写入 ${res.written} 行`]
+      if (res.changed > 0) parts.push(`其中快照 ${res.changed} 行`)
+      if (res.keyChanged > 0) parts.push(`重算唯一键 ${res.keyChanged} 行`)
+      if (res.keyConflicts > 0) parts.push(`${res.keyConflicts} 行键冲突被跳过`)
+      if (res.failed > 0) parts.push(`${res.failed} 行失败（明细见控制台）`)
+      showMsg(parts.join('，'), res.failed > 0 ? 'error' : 'success')
+      if (res.failures.length > 0) {
+        console.warn('[setDatas] 快照同步失败明细:', res.failures)
+      }
+      // force：参数签名可能没变，必须绕过短路；下拉选项也跟着重取一遍（列没变，保持一致）
+      await reload(true)
+    } catch (error) {
+      console.error('[setDatas] 同步快照失败:', error)
+      showMsg(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      snapshotting.value = false
+    }
+  }
+
   /* ==================== 清空数据（仅超级管理员） ==================== */
 
   /**
@@ -563,6 +799,16 @@
     return typeof saved === 'number' && saved >= MIN_COL_WIDTH ? saved : DEFAULT_WIDTHS[key]
   }
   /**
+   * 导出用的列：与表格**同一份**口径 —— 当前顺序、当前显隐、当前标题与列宽。
+   *
+   * 不要直接把行对象丢给 xlsx：`json_to_sheet` 会拿**第一行对象的键顺序**当表头，
+   * 那是 PB 记录的原始字段顺序（id / created / data / 中文列名…），
+   * 与页面上看到的列顺序、显隐完全对不上（见 utils/exportExcel 的说明）。
+   */
+  function exportColumns (): ExportColumn[] {
+    return visibleFields.value.map(f => ({ key: f.key, title: f.title, width: widthOf(f.key) }))
+  }
+  /**
    * 导出：按**当前生效的筛选条件**从 PB 取全量（不是只导当前那一页）。
    * 取回来的是中文 key 的行，与上传导入用的是同一套列名，可以来回倒。
    */
@@ -570,7 +816,7 @@
     loading.value = true
     try {
       const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
-      await exportExcel(all.map(formatDatas), '导出数据')
+      await exportExcel(all.map(formatDatas), '导出数据', exportColumns())
     } catch (error) {
       console.error('[setDatas] 导出失败:', error)
       showMsg(`导出失败：${error instanceof Error ? error.message : String(error)}`, 'error')
@@ -1215,19 +1461,6 @@
   onMounted(() => reload())
 </script>
 <style scoped lang="scss">
-.filter-input,
-.filter-select {
-  flex: 0 0 auto;
-}
-
-.filter-input {
-  width: 160px;
-}
-
-.filter-select {
-  width: 120px;
-}
-
 /* —— 列设置面板 —— */
 .col-item {
   display: flex;
@@ -1301,44 +1534,6 @@
   overflow: hidden;
 }
 
-.filter-input {
-  :deep(.v-field) {
-    --v-field-padding-top: 2px;
-    --v-field-padding-bottom: 1px;
-    --v-input-control-height: 25px;
-    font-size: 12px;
-  }
-
-  :deep(.v-field__input) {
-    min-height: 30px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-
-  :deep(.v-label) {
-    font-size: 13px;
-  }
-
-  :deep(.v-field__append-inner) {
-    align-self: center;
-    padding-top: 0;
-  }
-
-  :deep(.v-field__prepend-inner) {
-    margin-top: 0;
-    padding-top: 1px;
-
-    .v-icon {
-      font-size: 14px;
-    }
-  }
-
-  :deep(.v-input__details) {
-    padding-top: 0;
-    min-height: 0;
-  }
-}
-
 :deep(.v-data-table .v-table__wrapper > table > thead > tr > th.v-data-table-column--fixed) {
   z-index: 3;
 }
@@ -1384,14 +1579,12 @@
   --v-input-control-height: 30px;
   --v-field-padding-top: 1px;
   --v-field-padding-bottom: 0px;
-  font-size: 12px;
 }
 
 :deep(.v-data-table-footer__items-per-page > .v-select .v-field__input) {
   min-height: 26px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 12px;
 }
 
 :deep(.v-data-table-footer__items-per-page > .v-select .v-field__append-inner) {

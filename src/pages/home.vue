@@ -41,6 +41,9 @@
               <v-btn color="primary" variant="text" @click.stop="goApproval(item)">
                 <span class="text-[13px]">审批</span>
               </v-btn>
+
+              <!-- 删除审批单：按钮里自带权限判断（只有超级管理员看得见）与确认框 -->
+              <DeleteOrderButton :row="item" @deleted="onOrderDeleted" @error="onDeleteFailed" />
             </template>
           </v-data-table>
         </v-sheet>
@@ -60,7 +63,8 @@
 
           <v-data-table v-model:page="page" class="text-[12px]" border density="compact" :headers="headers" fixed-header
             hover fixed-footer :items="historyList" :items-per-page="itemsPerPage"
-            :items-per-page-options="[20, 50, 100, 200]" items-per-page-text="每页条数" striped="odd">
+            :items-per-page-options="[20, 50, 100, 200]" items-per-page-text="每页条数" striped="odd"
+            @click:row="handleRowClick">
             <template #bottom>
               <div class="text-center pt-2">
                 <v-pagination v-model="page" :length="pageCount" />
@@ -69,6 +73,9 @@
             <!-- 与当前审批单 tab 用同一套状态映射（原来两个 tab 的驳回一个 warning 一个 error） -->
             <template #item.status="{ value }">
               <v-chip :color="statusMeta(value).color" size="small">{{ statusMeta(value).text }}</v-chip>
+            </template>
+            <template #item.actions="{ item }">
+              <DeleteOrderButton :row="item" @deleted="onOrderDeleted" @error="onDeleteFailed" />
             </template>
           </v-data-table>
         </v-sheet>
@@ -115,53 +122,29 @@
 
       <div class="px-2 py-4 bg-[#EEF1F6] rounded bg-app">
         <v-timeline density="compact" side="end" truncate-line="both" width="100%">
-          <ApprovalNode v-for="(step, index) in selectedChain" :key="`${selectedOrder?.id}-${index}`"
-            :allowed-options="selectedOptionItems[selectedStepIds[index]]"
-            :allowed-results="selectedResultOptions[selectedStepIds[index]]" :can-handle="index === selectedCurrentStep"
-            :data="step" :index="index" :length="selectedChain.length" :prev-time="selectedStartTimes[index]"
-            :start-time="selectedOrder?.created" @submit="onDrawerSubmit" />
+          <!--
+            时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 selectedStepGroups），
+            弹窗里把这一串动作连着办（办完自动接下一环）。
+          -->
+          <ApprovalNode v-for="(g, gi) in selectedStepGroups" :key="`${selectedOrder?.id}-${g.stepIds[0] || gi}`"
+            :allowed-options="selectedOptionItems[g.stepIds[0]]"
+            :allowed-results="selectedResultOptions[g.stepIds[0]]"
+            :can-handle="g.indexes.includes(selectedCurrentStep)"
+            :data="g.steps[0]" :discard-segment-size="discardNodeCount" :index="g.indexes[0]"
+            :in-discard-segment="discardIndexOf(g)"
+            :length="selectedChain.length"
+            :next-steps="nextStepsOf(g, selectedOptionItems, selectedResultOptions)"
+            :option-context="optionContextOf(selectedOrder, selectedChain, g.indexes[0])"
+            :prev-time="g.startTimes[0]" :receiver-team="selectedReceiverTeam" :start-time="selectedOrder?.created"
+            :stock-amount="selectedStockAmount" :remaining-qty="selectedRemainingQty" :stock-qty="selectedStockQty"
+            @submit="onDrawerSubmit" />
+
+          <!-- 时间线最后一条：流转为什么停下（与审批页同一口径） -->
+          <FlowEndNote :end="selectedFlowEnd" />
         </v-timeline>
       </div>
     </v-container>
   </v-navigation-drawer>
-
-  <v-fab app color="primary" extended location="bottom right" prepend-icon="mdi-plus">
-    <div class="text-none font-weight-regular">新建</div>
-
-    <v-dialog activator="parent" max-width="500">
-      <template #default="{ isActive }">
-        <v-card rounded="lg">
-          <v-card-title class="d-flex justify-space-between align-center">
-            <div class=" text-medium-emphasis  text-[18px]">新建审批单</div>
-
-            <v-btn icon="mdi-close" size="30" variant="text" @click="isActive.value = false">
-              <v-icon size="20">mdi-close</v-icon>
-            </v-btn>
-          </v-card-title>
-
-          <v-divider />
-
-          <v-card-text>
-            <div>选择审批模板</div>
-            <div class="mb-2">备注</div>
-
-            <v-textarea class="mb-2" :counter="200" persistent-counter rows="2" variant="outlined" />
-
-            <v-btn class="text-none font-weight-bold ms-n4" color="primary" text="Retry Premium Free" variant="text"
-              @click="generateApprovalChain" />
-          </v-card-text>
-
-          <v-divider class="mt-2" />
-
-          <v-card-actions class="my-2 d-flex justify-end">
-            <v-btn class="text-none" rounded="xl" text="取消" @click="isActive.value = false" />
-
-            <v-btn class="text-none" color="primary" rounded="xl" text="新建" variant="flat" @click="goCreate" />
-          </v-card-actions>
-        </v-card>
-      </template>
-    </v-dialog>
-  </v-fab>
   <!-- 抽屉里提交办理后要有反馈（原先这个页面没有 snackbar，写库成功/失败都看不见） -->
   <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000" variant="tonal">
     {{ snackbar.text }}
@@ -170,20 +153,36 @@
 
 <script setup lang="ts">
 import type { ApprovalChainItem, NodeSubmitPayload } from '@/types/approval'
-import { sendFeishuCard } from '@/api/api'
+import { sendFeishuCard, type DeleteOrderSummary } from '@/api/api'
 import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
 import ApprovalNode from '@/components/ApprovalNode.vue'
+// 操作栏的「删除审批单」：按钮内置权限判断与确认框（两个页面共用同一个组件）
+import DeleteOrderButton from '@/components/DeleteOrderButton.vue'
+// 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
+import FlowEndNote from '@/components/FlowEndNote.vue'
 import GoodsInfo from '@/components/GoodsInfo.vue'
 import { drawerSet } from '@/composables/useEditorFullscreen'
 // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
 import { useNodeSubmit } from '@/composables/useNodeSubmit'
 // 取数 / 组装行 / 筛选：与 mine.vue 共用（原先两页各写一份，加一列要改两处）
 import { useApprovalTable } from '@/composables/useApprovalTable'
-import { collectStepOptionItems, collectStepResultOptions } from '@/types/approval'
+import { collectStepOptionItems, collectStepResultOptions, receivedQuantities } from '@/types/approval'
+// 条件求值上下文（建单快照优先）：算剩余接收数量要用它，与流程引擎同源
+import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
 import { approvalStatusMeta } from '@/utils/approvalFilters'
 import { APPROVAL_TABLE_HEADERS, toApprovalRow, type ApprovalRow } from '@/utils/approvalRows'
-import { runtimeOf, stepStartTimesOf } from '@/utils/approvalRuntime'
-import { formatDate, generateApprovalChain } from '@/utils/utils'
+// 重算链路 / 每步起始时间 / 「连续同人环节」合并 / 弃置段起点：与审批页（approvalPage）共用同一份口径
+import {
+  discardSegmentStart,
+  groupApproverSteps,
+  nextStepsOf,
+  runtimeOf,
+  stepStartTimesOf,
+  type ApproverStepGroup,
+} from '@/utils/approvalRuntime'
+// 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口）
+import { toProductView } from '@/utils/biRowFields'
+import { formatDate } from '@/utils/utils'
 
 // 两个 tab 就是同一批数据的两个切面：当前 = 未结束，历史 = 已结束
 const tab = ref<'home' | 'history'>('home')
@@ -194,7 +193,15 @@ function onScroll() {
 }
 const open = shallowRef(false)
 const router = useRouter()
-const setOpen = computed(() => open.value && tab.value === 'home')
+/*
+ * 抽屉的显隐。
+ *
+ * 原来这里还 `&& tab.value === 'home'` —— 于是**历史审批单里点行也不会打开抽屉**，
+ * 看不到它走过哪几环、为什么停。两个 tab 共用同一个抽屉，且抽屉内容对已办结的单
+ * 天然是只读的（见模板里 `can-handle` 的说明），所以不再按 tab 区分。
+ * ⚠️ 折叠式侧边栏（drawerSet）由 handleRowClick / setClose 管，不在这里做。
+ */
+const setOpen = computed(() => open.value)
 const page = ref(1)
 const itemsPerPage = ref(15)
 
@@ -232,6 +239,33 @@ const pageCount = computed(() => Math.max(1, Math.ceil(visibleRows.value.length 
 /** 右侧抽屉里展开的那一单 */
 const selectedNode = ref<ApprovalRow | null>(null)
 const selectedOrder = computed(() => orders.value.find(o => o.id === selectedNode.value?.id) ?? null)
+/**
+ * 接收数量的账：总库存数量 / 已接收 / 剩余（口径与流程引擎共用，见 types/approval 的 receivedQuantities）。
+ * 总库存数量优先取**建单快照**（与条件取值同源），快照里没有才退回关联产品。
+ */
+const selectedQtyLedger = computed(() =>
+  receivedQuantities(selectedOrder.value?.chain?.decisions ?? [], flowContextOfOrder(selectedOrder.value)),
+)
+/**
+ * 抽屉里那一单产品的「总库存数量」/「总库存金额」→ 下发给办理弹窗。
+ * 前者：选中**全部接收**时接收数量就是它（不可修改），也是接收/回收数量的上限；
+ * 后者：回收金额的上界（必须小于，见 ApprovalNode 的 lessThan）。
+ */
+const selectedStockQty = computed(() =>
+  String(selectedQtyLedger.value.total ?? toProductView(selectedOrder.value?.expand?.relation)['总库存数量'] ?? ''),
+)
+/** 本环节还能接多少件（剩余）；算不出来就留空，办理端退回按总库存数量 */
+const selectedRemainingQty = computed(() =>
+  (selectedQtyLedger.value.remaining === undefined ? '' : selectedQtyLedger.value.remaining),
+)
+const selectedStockAmount = computed(() =>
+  String(toProductView(selectedOrder.value?.expand?.relation)['总库存金额'] ?? ''),
+)
+/**
+ * 本单所属团队（按快照里的「组别」反查团队表）：
+ * 「选择接收组别」的候选限定在它之内（业务口径：不涉及其他团队）。
+ */
+const selectedReceiverTeam = computed(() => receiverTeamOf(selectedOrder.value))
 const selectedChain = computed<ApprovalChainItem[][]>(() => {
   const order = selectedOrder.value
   return order ? runtimeOf(order).chain : []
@@ -257,6 +291,41 @@ const selectedOptionItems = computed(() => {
 const selectedCurrentStep = computed(() =>
   selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1,
 )
+/** 流转**为什么**停下（办完 / 走到结束节点 / 命中终结结论 / 卡住）：时间线最后一条展示它 */
+const selectedFlowEnd = computed(() =>
+  selectedOrder.value ? runtimeOf(selectedOrder.value).end : undefined,
+)
+/**
+ * 时间线上的节点：同一审批人**连续**办理的相邻环节合成一条（见 utils/approvalRuntime）。
+ * 与审批页同一口径 —— 两处不一致时，同一条单在两个页面看到的节点数会不一样。
+ */
+const selectedStepGroups = computed(() =>
+  groupApproverSteps(selectedChain.value, selectedStepIds.value, selectedStartTimes.value),
+)
+
+/**
+ * 弃置审批段起点（-1 = 这一单没进入弃置）。
+ * 与审批页 / 我的审批同一口径，判定集中在 utils/approvalRuntime 的 discardSegmentStart（别在本页另写一套）。
+ */
+const selectedDiscardStart = computed(() => discardSegmentStart(selectedChain.value))
+
+/**
+ * 这一组落在弃置段里吗 —— 落在就返回**段内序号**（0 起），否则 undefined。
+ * 时间线据此把圆点从这一段起逐渐缩小、并整段包上独立背景（见 ApprovalNode 的 inDiscardSegment）。
+ */
+function discardIndexOf (group: ApproverStepGroup): number | undefined {
+  const start = selectedDiscardStart.value
+  const i = group.indexes[0]
+  return start >= 0 && i >= start ? i - start : undefined
+}
+
+/**
+ * 弃置段一共几条节点（**合并后**的节点数，与 discardIndexOf 同一口径）。
+ *
+ * 交给 ApprovalNode 认出"哪条是这一段的最后一条"：整段背景只有首/尾两条留圆角、
+ * 只有它们不往缝里撑，中间的直角首尾相接才拼成**一整块**背景（见其 discardSegmentSize）。
+ */
+const discardNodeCount = computed(() => selectedStepGroups.value.filter(g => discardIndexOf(g) !== undefined).length)
 
 function goCreate() {
   sendFeishuCard({
@@ -315,12 +384,27 @@ function showMsg(text: string, color: 'success' | 'error' | 'warning' = 'success
 }
 
 /**
- * 抽屉里的「提交」= **就地办理**，落库逻辑与审批页共用 useNodeSubmit（一份实现，不会漂）。
+ * 删掉一条单之后：重新**全量**取数 —— 列表、筛选下拉的选项、两个 tab 都由 orders 派生，
+ * 少刷一处就会出现"单子没了、筛选里还留着它的部门"这种残留。
  *
- * 原先这里是「关掉弹窗 + router.push 跳去审批页」：用户填的结论 / 意见 / 附件
- * 一个都没写库，却被当成提交成功 —— 所以改成就地保存。
- * 若仍想在提交后跳到审批页，在 onUpdated 里调 goApproval() 即可。
+ * 抽屉正开着这一条时一并关掉：留着一个指向"已删除记录"的抽屉最迷惑人
+ * （时间线还在、点办理会写到不存在的单上）。
  */
+async function onOrderDeleted(summary: DeleteOrderSummary) {
+  if (selectedNode.value?.id === summary.id) {
+    selectedNode.value = null
+    open.value = false
+  }
+  await load()
+  // deleted = false 表示它之前就已经不在了（服务端按幂等处理）——提示如实说，别谎报"删除成功"
+  showMsg(summary.deleted ? '审批单已删除' : '该审批单已经不在了，列表已刷新', summary.deleted ? 'success' : 'warning')
+}
+
+/** 删除失败（多为权限或网络）：把服务端给的原因原样弹出来 */
+function onDeleteFailed(message: string) {
+  showMsg(message, 'error')
+}
+
 const { submitNode } = useNodeSubmit({
   order: selectedOrder,
   onMessage: showMsg,

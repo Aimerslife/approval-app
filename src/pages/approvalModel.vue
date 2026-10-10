@@ -208,7 +208,7 @@
   import type { ApprovalModal } from '@/types/approval'
   import FlowMiniMap from '@/components/FlowMiniMap.vue'
   import FlowPreview from '@/components/FlowPreview.vue'
-  import { addApproval, deleteApproval, getApproval } from '@/utils/collection'
+  import { addApproval, deleteApproval, findTemplatesUsing, getApproval } from '@/utils/collection'
   import { formatDate } from '@/utils/utils'
   const router = useRouter()
   const chians = ref<ApprovalModal[]>([])
@@ -290,7 +290,24 @@
     chians.value = res
     console.log(res)
   }
-  function removeParten (id: string) {
+  /**
+   * 打开"删除确认"前，先查**有没有别的模板引用了它**（见 utils/templateRef 的 collectTemplateRefs）。
+   *
+   * 为什么拦在这里而不是"删完再说"：模板之间是按 id 引用的，删掉被引用的那张，
+   * 引用它的模板会在**下一次建单时**才失败 —— 那时问题已经从"改配置"变成"单据建不出来"，
+   * 而且报错的地方离原因很远（建单页只会说"引用的模板已不存在"）。
+   * 所以删除前直接拦下，并点名"谁在引用"。
+   */
+  async function removeParten (id: string) {
+    const users = await findTemplatesUsing(id)
+    if (users.length > 0) {
+      const names = users.slice(0, 3).map(u => `「${u.name || '未命名模板'}」`).join('、')
+      notify(
+        `不能删除：${names}${users.length > 3 ? ` 等 ${users.length} 个模板` : ''}引用了这张模板，请先在那些模板里去掉引用`,
+        'error',
+      )
+      return
+    }
     dialog.value = true
     currentId.value = id
     currentPanel.value = 'delete'

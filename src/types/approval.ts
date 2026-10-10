@@ -15,8 +15,18 @@ export interface NodeSubmitPayload {
   opinion: string
   /** 待上传的附件 */
   files: File[]
-  /** 落库结束后的回调：true 关闭弹窗，false 保持打开便于重试 */
-  done: (ok: boolean) => void
+  /**
+   * 落库结束后的回调。
+   *
+   * - `ok = false` → 校验失败 / 写入失败：保持弹窗打开，便于改错后重试；
+   * - `ok = true` 且 `info.sameApproverNext` → **先别关**：写完这一环，紧挨着的下一环
+   *   还是同一个人办 —— 父组件把新链路传回来后，弹窗会在同一个窗口里接着办那一环
+   *   （见 ApprovalNode 的 handleConfirm / activeStep）。
+   *
+   * 为什么要回传这个判断：chain 只展开到第一个待办环节为止（见 rebuildChain），
+   * 提交**前**组件看不到"下一环是谁"，只有落库侧拿着新链路才算得出来。
+   */
+  done: (ok: boolean, info?: { sameApproverNext?: boolean }) => void
 }
 
 /** 审批环节附件的引用（文件实体存在 approval_files 集合，这里只存索引） */
@@ -207,6 +217,31 @@ export function roleLabel (role: ApprovalRole): string {
 export type ApprovalChain = ApprovalChainItem[][]
 
 /**
+ * 环节的**负责人**：优先 manager（办理信息记在它上面），没有 manager 时退回第一项。
+ *
+ * 为什么放在这里（types/approval）而不是各处自己写：它是「时间线上合并同一个人相邻环节」
+ * 与「回退跳过同一个人」（见 collectRejectTargets）共用的口径，而这两种判定分别在
+ * utils/approvalRuntime 与 types/approval 里 —— 基础模块放在这里，两边都引得到，
+ * 也避免 types/approval 反向依赖 utils（会成环）。utils/approvalRuntime 原样转出去，调用点不用改。
+ */
+export function mainOf (step?: ApprovalChainItem[]) {
+  return step?.find(i => i.type === 'manager') ?? step?.[0]
+}
+
+/**
+ * 两个审批人是不是同一个人：**邮箱优先**（快照里最稳的标识），缺邮箱时退回姓名。
+ * 口径说明见 mainOf。
+ */
+export function sameApprover (a?: ApprovalChainItem, b?: ApprovalChainItem) {
+  if (!a || !b) {
+    return false
+  }
+  const ae = String(a.email ?? '').trim().toLowerCase()
+  const be = String(b.email ?? '').trim().toLowerCase()
+  return ae && be ? ae === be : (!!a.name && a.name === b.name)
+}
+
+/**
  * 把运行期追加的成员（抄送 / 转办）合并进重算出来的 chain。
  *
  * 为什么必须单独存（`approval_chain.chain.extraMembers`，按 stepId 索引）：
@@ -306,7 +341,7 @@ export interface ApprovalFlowStep {
    * 运行时两者走**同一套**建单期展开（见 utils/approvalRotation），只是产物形态不同：
    * 顶层展开成节点、分支里展开成步骤。
    */
-  type?: 'approval' | 'branch' | 'notify' | 'probe' | 'loop'
+  type?: 'approval' | 'branch' | 'notify' | 'probe' | 'loop' | 'ref'
   /** 该步骤的审批人（多人即会签）；type='branch' 的分支组步骤可留空；
    *  type='notify' 时它是**提醒对象**（同样支持 role 动态负责人） */
   members?: ApprovalChainItem[]
@@ -319,7 +354,32 @@ export interface ApprovalFlowStep {
    * 与顶层卡片、成员级轮询共用同一个 RotationSpec（建单期取数见 utils/rotationData）。
    */
   rotation?: RotationSpec
-  /** type='branch' / type='probe' 时的分支列表（各组内仍可继续递归出现分支步骤） */
+  /**
+   * type='loop' 的**卡片级**走向：所有组都轮完、**一直没有跳出轮询** 时去哪。
+   *
+   * 不配 = 自然继续卡片后面那个环节（老行为，默认）；配了 = 走完最后一组后跳到该环节。
+   * 与环上的「提前结束轮询」（`branch.exitTo`）是两回事：
+   *   · 环上的 = **某一组接了**就跳出，剩下几组不再轮；
+   *   · 这个   = **轮到最后一个组也没人接**。
+   * 没有它这两种情况会落到同一个地方，"全部轮完"这类兜底走向就表达不出来。
+   *
+   * 目标必须是本图里的审批 / 提醒环节 —— 与卡片内部跳转**同一份白名单**
+   * （见 utils/approvalFlow 的 outerExitIds；两处口径必须一致，否则会出现
+   * "内部能跳、卡片级跳不过去"这种说不清的现象）。
+   */
+  afterLoop?: { stepId: string }
+  /**
+   * type='ref'（引用模板）指向的**源模板 id**（`app_chain` 记录的 id）。
+   *
+   * 与 `loop` 卡片一样是"**一段被搬过来的子流程**"，但内容**不**存在本模板里 ——
+   * 只存一个引用，建单期才去读源模板、把它的流程整段搬进来（见 utils/templateRef）。
+   * 这样源模板改了，之后新建的单自动用新版；已建的单因为快照自包含，不受影响。
+   */
+  refTemplateId?: string
+  /**
+   * 分支列表：type='branch'（嵌套分支组）/ type='probe'（存在-不存在两条）用；
+   * `type='ref'` 时是"引用的那一段走完、按最后结论分流"的出线（见 ApprovalFlowRefNode.branches）。
+   */
   branches?: ApprovalBranch[]
   /**
    * type='loop' 时是**卡片内部的子流程**（每个组各走一遍）；
@@ -331,6 +391,26 @@ export interface ApprovalFlowStep {
    * 与 ApprovalFlowApprovalNode.optionGroups 同一件事，只是这个环节挂在分支里（画布上审批节点画在分支内）。
    */
   optionGroups?: ApprovalOptionGroup[]
+}
+
+/**
+ * 一个流程步骤的审批人 —— **两种写法都要认**。
+ *
+ *   · `members`：分支内步骤（ApprovalFlowStep）的常规字段（转换器写的就是它）；
+ *   · `nodes`  ：顶层审批节点（ApprovalFlowApprovalNode）的字段。
+ *
+ * 为什么步骤也得认 `nodes`：**引用模板**搬进来的段落是"照抄源模板的形态"（见 utils/templateRef），
+ * 源模板的**顶层**审批节点落到本流程的分支里就变成了"步骤"，却仍然带着 `nodes`，
+ * 而 `members` 是个**空数组** —— 只读 `members` 的结果是这一环**一个人都没有**：
+ * 引擎拿到空成员，时间线（ApprovalNode）就渲染不出任何人（实测：单据流转到「弃置模板」
+ * 那一段时整环空白，见 collect 的调用点）。
+ *
+ * 与 `collectRejectTargets` 里的 `nodes ?? members` 保持同一口径，别在各处另写一套。
+ */
+export function stepMembersOf (
+  step: Pick<ApprovalFlowStep, 'members'> & { nodes?: ApprovalChainItem[] },
+): ApprovalChainItem[] {
+  return step.nodes ?? step.members ?? []
 }
 
 /** 分支命中条件：字段 + 操作符 + 值；branch.condition 为空表示兜底（默认）分支 */
@@ -378,34 +458,71 @@ export function isConditionGroup (expr: ConditionExpr): expr is ConditionGroup {
 }
 
 /**
- * 「选择接收人员」结论码。
+ * 「选择接收组别」结论码。
  *
- * 语义：这一环的办理人**当场指定人**，选中的人填充到**下一环节**、成为它的审批人。
+ * 语义：这一环的办理人**当场指定由哪个组/团队接下这批货**，命中即**终结流程**
+ * （接收方是**结果**，不是下一环的审批人，见 CLOSE_FLOW_RESULTS）。
  * 所以模板里那个接收环节**可以留空**（`allowEmptyMembers`，编辑器已放开）——
- * 「谁办下一环」由业务在办理时根据实际情况决定，写死在模板里反而做不到。
- * 白板上的「指定接收团队」就是这种环节。
+ * 「谁接」由业务在办理时按实际情况决定，写死在模板里反而做不到。
+ * 白板上的「指定接收组别」就是这种环节。
  *
- * 两侧共用这个常量：办理弹窗收集人选、useNodeSubmit 负责填充。
+ * 候选来自**团队表**（utils/organazation 的 groupManage：团队 → 组 + 负责人），
+ * 不是整棵飞书通讯录，见 components/TeamPicker.vue 的说明。
  */
 export const PICK_MEMBERS_RESULT = 'pick_members'
+
+/**
+ * 「选择接收团队」结论码。
+ *
+ * 与「选择接收组别」是**同一族**的结论（当场指定接收方、命中即终结流程），差别只在**粒度**：
+ *   · pick_members —— 选到**组别**，接收方记「组别名 + 该组组长」；
+ *   · pick_team    —— 选到**团队**，接收方记「团队名 + 该团队负责人」（`parentManager`）。
+ * 两个粒度都要，是因为业务上有的货交给某个组、有的整包交给某个团队。
+ *
+ * 候选来自**团队表**（utils/organazation 的 groupManage：parent = 团队、parentManager = 团队负责人），
+ * 见 components/TeamPicker.vue 的 `mode="team"`。
+ */
+export const PICK_TEAM_RESULT = 'pick_team'
 
 /** 审批结论选项：value 与运行时办理结论（result 码）保持一致，供「审批结果分支」配置与校验 */
 export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> = [
   { value: 'pass', label: '通过' },
   { value: 'reject', label: '驳回' },
   { value: 'receive', label: '接收' },
+  /*
+   * 「不接收」：**组间轮询卡片内部**的分结论 —— 每轮到一个组，该组负责人要么「接收」
+   * （那条线通常绑「跳出循环」：不再往后轮）、要么「不接收」（走主线继续轮下一组）。
+   * 以前用户只能在卡片里写 `confirmed = 接收/不接收` 这种条件，而 confirmed 只有
+   * 「报废清仓」才写入 —— 条件永远不命中，轮询分支等于失灵（踩过）。
+   * 全局码表里有了它，编辑器「审批结论」下拉、办理下拉、引擎选路三处自动同口径。
+   */
+  { value: 'not_receive', label: '不接收' },
   { value: 'part_receive', label: '部分接收' },
   { value: 'recycle', label: '回收' },
+  /*
+   * 「供应商回收」：与「回收」同一类处置结论（办理时同样填**回收数量 + 回收金额**，
+   * 见 components/ApprovalNode.vue 的 needRecycle / supplier_recycle 分支），
+   * 但业务上要能与"自己回收"分开统计，所以**单独一个码**，不要复用 recycle。
+   *
+   * ⚠️ 因此它也**不算接收**（不在 RECEIVE_RESULTS）—— 写法与 recycle 一致，
+   *    `extra.qty` 是回收数量，混进「已接收数量」会把其余组还能接多少算错。
+   */
+  { value: 'supplier_recycle', label: '供应商回收' },
   { value: 'scrap', label: '报废清仓' },
   { value: 'rework', label: '建议返工' },
   { value: 'discard', label: '建议弃置' },
   { value: 'lack_demand', label: '市场需求不足' },
   { value: 'other_reason', label: '其他原因' },
   { value: 'pending', label: '待定' },
-  // 「选择接收人员」：办理人当场指定人，选中的人**填充到下一环节**（成为它的审批人）。
+  // 「选择接收组别」：办理人当场指定由哪个组/团队接下这批货（命中即终结流程，
+  // 接收方是**结果**、不是下一环的审批人 —— 见 PICK_MEMBERS_RESULT 的说明）。
   // 配套的是「允许没有审批人的环节」—— 模板里把接收环节留空，由上一环指定。
-  // 白板上的「指定接收团队」就是这个环节。
-  { value: PICK_MEMBERS_RESULT, label: '选择接收人员' },
+  // 白板上的「指定接收组别」就是这个环节。
+  { value: PICK_MEMBERS_RESULT, label: '选择接收组别' },
+  // 「选择接收团队」：同上的团队粒度版本 —— 接收方是「团队 + 团队负责人」，
+  // 命中即终结流程（见 PICK_TEAM_RESULT 与 CLOSE_FLOW_RESULTS）。
+  // 编辑器里的「审批结论」下拉直接读这张表，所以这一条加进来，模板里立刻可选。
+  { value: PICK_TEAM_RESULT, label: '选择接收团队' },
   // —— 原因分类：来自「库存管理流程规范」白板的「筛选一级原因/二级原因」环节——
   // 那一环的出线在图上没写标签，分类写在**目标节点标题**上，所以这些类是审批人的结论选项。
   // 纯新增，不影响已有模板（结论选项是按 flow 里绑的条件算出来的）。
@@ -436,32 +553,74 @@ export const REJECT_RESULTS: ReadonlyArray<string> = ['reject']
 /**
  * 命中即**终结流程**的结论：这一步办完流程就结束，后面的环节不再展开、也就没人有权限办。
  *
- * 目前只有「选择接收人员」：接收方是**结果**（谁接下这批货），不是下一环的审批人。
- * 所以模板里配这条结论的那个分支，后面接什么都不会生效（建议直接连到结束节点）。
+ * 目前是「选择接收组别」与「选择接收团队」两条：接收方是**结果**（哪个组 / 哪个团队接下这批货），
+ * 不是下一环的审批人。所以模板里配这两条结论的分支，后面接什么都不会生效（建议直接连到结束节点）。
  *
  * 与 REJECT_RESULTS 的唯一区别在终态判定：这里的终结算**通过**（流程正常走完），
  * REJECT_RESULTS 算驳回。见 outcomeOf()。
  */
-export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT]
+export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT, PICK_TEAM_RESULT]
 
 /**
- * 取「选择接收团队」的办理结果（接收方），用于在时间线上**单独渲染一个节点**。
+ * 「接收」类结论码：只有这两种结论下，办理流水里的 `extra.qty` 才表示**这一轮接收了多少件**。
+ *
+ * 为什么单列一份：`recycle`（回收）也写 `extra.qty`，但那是回收数量、业务含义不同 ——
+ * 混进「已接收数量」会让"其余组还能接多少"算错。
+ */
+export const RECEIVE_RESULTS: ReadonlyArray<string> = ['receive', 'part_receive']
+
+/** 「总库存数量」这一业务列：接收数量的上限来源，也是「剩余」的基数 */
+export const STOCK_QTY_FIELD = '总库存数量'
+
+/** 派生字段（运行期才有值）：按办理流水累计的**已接收数量** —— 分支条件里可直接写它 */
+export const RECEIVED_QTY_FIELD = '已接收数量'
+
+/**
+ * 派生字段（运行期才有值）：**剩余接收数量** = 总库存数量 − 已接收数量（不小于 0）。
+ *
+ * 用途：一批货先被某个组「部分接收」，剩下的要流转给其他组/团队接着收 ——
+ * 模板里就用它分流，例如「剩余接收数量 > 0」时走组间轮询 / 下一个接收环节。
+ */
+export const REMAINING_QTY_FIELD = '剩余接收数量'
+
+/**
+ * 「选择接收组别」的接收方：**组别 + 组长**（+ 历史单里可能存过的所属团队 / 邮箱）。
+ *
+ * `manager` 是该组组长（`utils/organazation` 的团队表里维护的那一列），
+ * 办理时随选中一起记进 `extra.members` —— 时间线上要一眼看出"货交给哪个组、找谁"。
+ */
+export interface ReceiverTeam extends ApprovalChainItem {
+  /** 该组组长 / 该团队负责人（团队表维护；表里没填时没有这个字段） */
+  manager?: string
+  /**
+   * 接收方是**哪一层**：`group` = 选择接收组别（manager 是组长）；
+   * `team` = 选择接收团队（manager 是团队负责人）。
+   *
+   * 历史单没有这个字段 —— 由 receiverOf 依据结论码补上；界面据此决定「组长 / 负责人」文案。
+   */
+  pick?: 'group' | 'team'
+}
+
+/**
+ * 取「选择接收组别 / 选择接收团队」的办理结果（接收方），用于在时间线上**单独渲染一个节点**。
  *
  * 为什么单独取：命中 CLOSE_FLOW_RESULTS 的结论会终止流程，接收方**不是**任何一个
  * chain 环节的审批人（它不在 chain 里），所以只能从办理流水里取出来单独展示。
- * 同一单可能被驳回重审过，取**最后一条** pick_members 结论。
+ * 同一单可能被驳回重审过，取**最后一条**这类结论；两条结论都认（粒度不同，见 PICK_TEAM_RESULT）。
  */
-export function receiverOf (order: ApprovalOrder | null | undefined): ApprovalChainItem | undefined {
+export function receiverOf (order: ApprovalOrder | null | undefined): ReceiverTeam | undefined {
   const decisions = order?.chain?.decisions ?? []
   for (let i = decisions.length - 1; i >= 0; i--) {
     const d = decisions[i]
-    if (d.result !== PICK_MEMBERS_RESULT) {
+    if (d.result !== PICK_MEMBERS_RESULT && d.result !== PICK_TEAM_RESULT) {
       continue
     }
     const raw = d.extra?.members
     const one = Array.isArray(raw) ? raw[0] : raw
     if (one && typeof one === 'object') {
-      return one as ApprovalChainItem
+      const item = one as ReceiverTeam
+      // 粒度以**结论码**为准（历史单里没有 pick 字段）：pick_team 才是团队级
+      return { ...item, pick: item.pick ?? (d.result === PICK_TEAM_RESULT ? 'team' : 'group') }
     }
   }
   return undefined
@@ -490,6 +649,20 @@ export interface ApprovalBranch {
    * 空 / 未配 = 下拉里退回用分支名当一个选项（旧口径）。
    */
   options?: string[]
+  /**
+   * **办理选项条件**（结果分支专用，可选）：满足这些条件才把本分支的选项摆给办理人。
+   *
+   * 与 `conditions` 的分工（两者正交，别混进同一个数组）：
+   *   · `conditions` = **引擎选路**：办理人提交后按它决定走哪条线（`matchBranch`）；
+   *   · `offerWhen`  = **只影响渲染**：办理那一刻这条线的选项摆不摆出来。过滤在办理端做
+   *     （见 filterOfferedOptions），**完全不参与选路**。
+   *
+   * 典型场景：同一个环节，不同来路给不同选项 —— 例如「团队负责人审批」的「同意接收」，
+   * 只在"上一环节结论 = receive"（前面某组真的接了）时才该出现；前面各组全都不接收时，
+   * 这一环不该给「同意接收」。条件是**办理期**求值的，可用字段见 utils/conditionFields
+   * （含 `result` = 上一环节结论、业务字段、累计接收数量）。
+   */
+  offerWhen?: ConditionExpr[]
   /**
    * 该分支的**选项树**（结果分支专用，可选，见 ApprovalOptionGroup）：
    * 配了它就以它为准 —— 办理时按「类别 → 一级 → 二级」分类展示，
@@ -550,6 +723,13 @@ export interface ApprovalNodeOption {
   result: string
   /** 该选项的**分类选项树**（配了才在办理时展开成「类别 → 一级 → 二级」） */
   groups?: ApprovalOptionGroup[]
+  /**
+   * 办理选项条件（来自配它的那条分支，见 `ApprovalBranch.offerWhen`）：
+   * 办理端按当前上下文过滤 —— 不满足就不把这个选项摆出来。
+   * 收集时**只搬运不过滤**：收集是纯函数、没有运行期上下文，而且它的输出还被
+   * `collectStepResultOptions` 当"这一环能选哪些结论"用，过滤会让两处口径分叉。
+   */
+  offerWhen?: ConditionExpr[]
   /**
    * 这一项来自**环节级选项树**（整个环节共用一棵树，见 ApprovalNodeData.optionGroups）。
    *
@@ -762,9 +942,52 @@ export interface ApprovalFlowLoopNode {
   rotation: RotationSpec
   /** 卡片内部的子流程：每个组各走一遍（审批 / 分支 / 提醒；数据查询在建单期更早展开） */
   steps: ApprovalFlowStep[]
+  /**
+   * 卡片级走向：所有组都轮完、**一直没有跳出轮询** 时去哪（不配 = 继续卡片后面那个环节）。
+   * 详见 ApprovalFlowStep.afterLoop 的说明 —— 两种形态共用同一个字段语义。
+   */
+  afterLoop?: { stepId: string }
 }
 
-export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode
+/**
+ * 流程节点：**引用模板** —— 把另一个模板的流程整段搬到这里。
+ *
+ * 与「组间轮询」卡片同属"建单期展开成普通步骤"，但搬的是**外部模板**：
+ *   · 模板里只存 `refTemplateId`（不复制内容）⇒ 源模板改了，之后新建的单自动用新版；
+ *   · **建单期**读源模板的 flow、给所有 id 加前缀后拼进本流程（见 utils/templateRef），
+ *     之后 probe / loop 展开、角色解析都照常作用在这段内容上；
+ *   · 因为单据快照自包含（`approval_chain.chain.flow`），**已建的单不受源模板改动影响**。
+ *
+ * 为什么不让它留在流程里到运行期再解析：`rebuildChain` 是纯同步函数、被反复调用，
+ * 且历史单必须"同一份 decisions 永远算出同一条链"（理由与 ProbeSpec / RotationSpec 同源）。
+ */
+export interface ApprovalFlowRefNode {
+  id: string
+  type: 'ref'
+  /** 引用卡片的名字（时间线 / 报错里显示，取源模板名） */
+  name?: string
+  /** 源模板 id（`app_chain` 记录 id） */
+  refTemplateId: string
+  /**
+   * 「按结论分流」的出线（画布上接了 **≥2 条出线** 时才写它）。
+   *
+   * 语义：接哪条线，由**这一段最后办出来的那个结论**决定 —— 引擎每办完一环就把结论写进
+   * 下游的 `result`（见 formOf），引用段落里最后被办理的那个结论就是它。
+   * 每条线的 `conditions` 写 `result = 结论码`（编辑器里就是「上一环节的审批结论」那一套），
+   * 允许留**一条无条件主线**兜底（与审批结果分支同一口径：一条主干 + 若干结论线）。
+   *
+   * 不写这个字段 = 老语义：**这一段走完，继续卡片后面那个环节**（单出线，"穿过去"）。
+   *
+   * ⚠️ 所以**单出线时不要给那条线配结论条件**：那样写本意是"只在这个结论才往下走"，
+   *    可这条线之外没有"否则"可走 —— `graphToFlowFrom` 会当场报错，不静默忽略。
+   *
+   * `branches[].steps` 装的是**本模板自己的下游环节**（不是源模板的），
+   * 所以建单期展开时这部分**不做 id 前缀** —— 与搬进来的那一段正好相反（见 utils/templateRef）。
+   */
+  branches?: ApprovalBranch[]
+}
+
+export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode | ApprovalFlowRefNode
 
 /** 完整审批流：顺序节点，支持分支 */
 export type ApprovalFlow = ApprovalFlowNode[]
@@ -795,6 +1018,30 @@ export interface LoopNodeData {
     edges: any[]
     viewport?: { x: number, y: number, zoom: number }
   }
+  /**
+   * 卡片级走向（画布上存**目标节点的 id**，与内部连线的 `edge.data.exitTo` 同一写法）：
+   * 所有组都轮完、一直没跳出轮询时去哪个环节。
+   * 空 = 继续卡片后面那个环节。转成 flow 时会被包成 `afterLoop: { stepId }`，见 ApprovalFlowLoopNode。
+   */
+  afterLoop?: string
+}
+
+/**
+ * 画布上「引用模板」卡片节点的 data（graphToFlowFrom 读它转成 ApprovalFlowRefNode）。
+ *
+ * 与 `LoopNodeData` 的差别：卡片内部**不存画布**，只存一个指向源模板的引用 ——
+ * 内容只有一份（在源模板里），这正是"复用而不是复制"的关键。
+ */
+export interface RefNodeData {
+  /** 卡片名（可改，默认取源模板名） */
+  title: string
+  /** 源模板 id（`app_chain` 记录 id）；未选时为空串，保存期报错 */
+  refTemplateId: string
+  /**
+   * 源模板名（**冗余存一份，仅供显示**）：源模板被删/改名后卡片上还能看出原本引的是谁；
+   * 真正解析流程时只认 `refTemplateId`（见 utils/templateRef）。
+   */
+  refTemplateName?: string
 }
 
 // ===== Vue Flow 画布节点 data =====
@@ -1084,6 +1331,114 @@ export function matchBranch (branches: ApprovalBranch[], form: Record<string, un
   return fallback
 }
 
+/* ==================== 回退（驳回）目标：跳过"同一个人" ==================== */
+
+/** 驳回的结论码（保存期 `ensureRejectLoopBack` 注入的「回退上一级」分支绑的就是它） */
+const REJECT_RESULT = 'reject'
+
+/** 见 collectRejectTargets */
+export interface RejectBackInfo {
+  /** stepId → 回退**真正该退到**的环节（已跳过同一个人）；undefined = 没得退 */
+  byStep: Record<string, string | undefined>
+  /** 分支组 id → 这个组归属于哪个环节（回退的主语）；rebuildChain 在分支组处用它查目标 */
+  stepOfGroup: Record<string, string>
+}
+
+/**
+ * 每个环节「回退」真正该退到哪一环 —— **跳过同一个人**。
+ *
+ * 口径（业务方 2026-10 确认，实测反馈过"在自己这两步之间来回退"）：
+ * 回退退到**前一个节点**。而同一个人的相邻环节在时间线上本来就是**同一条节点**
+ * （见 utils/approvalRuntime 的 groupApproverSteps，判定用的就是 mainOf/sameApprover）——
+ * 所以"前一个节点" = 上一个**别人**办的环节：同一审批人的上一环要一路往前跳过。
+ * 一路都是同一个人（或本环节就是首环节）→ **没得退**，办理端据此不显示「回退」
+ * （与"首环节不注入回退分支"同一口径：点了也只会退回自己）。
+ *
+ * 起点不另算"上一环"，而是读保存期注入的那条分支（`loopBackTo`）—— 注入逻辑在
+ * utils/approvalFlow（分支组内 / 轮询卡片内的"上一环"各有口径），这里再实现一份必然漂。
+ *
+ * 两个返回值各有用处：
+ *   · `byStep`     —— 选项收集（没得退就不出现「回退」）与 rebuildChain（真正往哪退）；
+ *   · `stepOfGroup` —— rebuildChain 在**分支组**处反查"这是哪个环节的分支"，
+ *     回退时才有主语可比。
+ */
+export function collectRejectTargets (flow: ApprovalFlow): RejectBackInfo {
+  const byStep: Record<string, string | undefined> = {}
+  const stepOfGroup: Record<string, string> = {}
+  /** 有审批人的环节（审批节点 / 审批步骤）。飞书提醒没有成员，不在表里 —— 回退时要越过去 */
+  const membersOf = new Map<string, ApprovalChainItem[]>()
+  /** stepId → 紧跟它的那个分支组的 branches（注入的回退分支就在里面） */
+  const groupAfterOf = new Map<string, ApprovalBranch[]>()
+
+  /**
+   * 扫一层（顶层节点 / 分支组内的步骤 / 轮询卡片内的步骤）：
+   * 记下"谁有分支组跟在后面"，并递归进各组 / 卡片内部。
+   *
+   * ⚠️ 成员字段**两种形状**：顶层审批节点是 `nodes`（见 ApprovalFlowApprovalNode），
+   * 分支内的步骤是 `members`（见 ApprovalFlowStep）—— 与 rebuildChain 收集 membersById 时同一口径。
+   */
+  type LayerItem = {
+    id: string
+    type?: string
+    nodes?: ApprovalChainItem[]
+    members?: ApprovalChainItem[]
+    branches?: ApprovalBranch[]
+    steps?: ApprovalFlowStep[]
+  }
+  const scan = (items?: LayerItem[]) => {
+    for (let i = 0; i < (items?.length ?? 0); i++) {
+      const cur = items![i]
+      const next = items![i + 1]
+      if (cur.type === 'branch') {
+        for (const b of cur.branches ?? []) {
+          scan(b.steps as LayerItem[] | undefined)
+        }
+        continue
+      }
+      if (cur.type === 'loop') {
+        scan(cur.steps as LayerItem[] | undefined)
+        continue
+      }
+      /*
+       * 审批环节：顶层节点 type='approval'，而**分支内的步骤可以缺省 type**
+       * （见 ApprovalFlowStep 的说明）—— 缺省同样算审批步骤，否则回退会把它当成
+       * "没有审批人的环节"越过去。
+       * notify / probe 不给成员：前者没有审批人（回退时本来就该越过），后者在建单期已展开。
+       */
+      if (cur.type === 'approval' || cur.type === undefined) {
+        membersOf.set(cur.id, cur.nodes ?? cur.members ?? [])
+      }
+      if (next?.type === 'branch' && next.branches?.length) {
+        groupAfterOf.set(cur.id, next.branches)
+        stepOfGroup[next.id] = cur.id
+      }
+    }
+  }
+  scan(flow as LayerItem[])
+
+  /** 该分支组里那条「回退」分支指向谁（注入的分支就是唯一的 loopBackTo 来源） */
+  const injectedTarget = (branches?: ApprovalBranch[]): string | undefined =>
+    branches?.find(b => !!b.loopBackTo && firstResultValueOf(b) === REJECT_RESULT)?.loopBackTo?.stepId
+
+  for (const [id, mine] of membersOf) {
+    const seen = new Set<string>()
+    let target = injectedTarget(groupAfterOf.get(id))
+    let hit: string | undefined
+    while (target && !seen.has(target)) {
+      seen.add(target)
+      const members = membersOf.get(target)
+      // 不是审批环节（飞书提醒这类没有审批人的）→ 越过它继续往前找
+      if (members && !sameApprover(mainOf(mine), mainOf(members))) {
+        hit = target
+        break
+      }
+      target = injectedTarget(groupAfterOf.get(target))
+    }
+    byStep[id] = hit
+  }
+  return { byStep, stepOfGroup }
+}
+
 /**
  * 收集每个审批环节「可选的审批结论」：取自它后面那个分支组里各分支绑定的 result 条件。
  *
@@ -1106,6 +1461,31 @@ export function collectStepResultOptions (flow: ApprovalFlow): Record<string, st
 }
 
 /**
+ * 按当前上下文过滤「该摆给办理人的选项」—— 只认 `offerWhen`（见 ApprovalBranch.offerWhen）。
+ *
+ * 为什么在**渲染层**过滤而不是收集层（collectStepOptionItems）：收集是纯函数、没有运行期上下文，
+ * 而且它的输出还被 `collectStepResultOptions` 当"这一环能选哪些结论"用 —— 在收集层过滤会让
+ * 两处口径分叉（一个少选项、一个没少），而且 `allowed-results` 缩水会连带影响别的判断。
+ *
+ * ⚠️ 只影响**渲染**，不参与选路：选路由提交后的 `matchBranch` 按 `conditions` 决定。
+ * ⚠️ **全被过滤光时退回原列表**：宁可多摆一个选项，也不能让人无路可走
+ *    （那会卡在"没有可选项、也提交不了"）。
+ * ⚠️ 多条 `offerWhen` 之间是 **and**（都满足才显示）。
+ *
+ * @param ctx 求值上下文：业务快照 + `result`（上一环节结论），见 utils/approvalFlow 的 optionContextOf
+ */
+export function filterOfferedOptions (
+  options: ApprovalNodeOption[],
+  ctx: Record<string, unknown>,
+): ApprovalNodeOption[] {
+  if (options.length === 0) {
+    return options
+  }
+  const kept = options.filter(o => (o.offerWhen ?? []).every(c => evalConditionExpr(c, ctx)))
+  return kept.length > 0 ? kept : options
+}
+
+/**
  * 每个审批环节的**选项数组** —— 办理下拉框直接拿它渲染，前端不再自己造词。
  *
  * `result` = 提交上去的结论码（决定后面走哪条线）；`text` = **模板里给那条线起的名字**。
@@ -1125,8 +1505,11 @@ export function collectStepOptionItems (
   const map: Record<string, ApprovalNodeOption[]> = {}
   /** 主线（无条件分支）对应的结论码 */
   const MAIN_RESULT = 'pass'
-  /** 驳回的结论码（保存期注入的「驳回 → 回退上一环」分支绑的就是它） */
-  const REJECT_RESULT = 'reject'
+  /**
+   * 回退目标（已跳过"同一个人"）：**没得退的环节不显示「回退」** ——
+   * 那种「回退」只会退回自己（见 collectRejectTargets）。
+   */
+  const rejectInfo = collectRejectTargets(flow)
 
   /**
    * 从分支组提取选项：**每条出线就是一个走动方向**。
@@ -1171,17 +1554,19 @@ export function collectStepOptionItems (
        * 而每个一级选项的 `link` 才是真正提交的链路码 —— 见 ApprovalNodeOption。
        */
       const groups = normalizeOptionGroups(b.optionGroups)
+      // 这条线的「办理选项条件」：原样带到选项上，由办理端按上下文过滤（见 offerWhen 的说明）
+      const offerWhen = b.offerWhen && b.offerWhen.length > 0 ? b.offerWhen : undefined
       if (groups.length > 0) {
-        list.push({ result, text: name || result, groups })
+        list.push({ result, text: name || result, groups, ...(offerWhen ? { offerWhen } : {}) })
         continue
       }
       const texts = normalizeOptionTexts(b.options)
       if (texts.length > 0) {
         for (const t of texts) {
-          list.push({ result, text: t })
+          list.push({ result, text: t, ...(offerWhen ? { offerWhen } : {}) })
         }
       } else {
-        list.push({ result, text: name || result })
+        list.push({ result, text: name || result, ...(offerWhen ? { offerWhen } : {}) })
       }
     }
     // 去重按「文案 + 结论码」：不按结论码合并 —— 同一条线的多个选项本来就共用一个码，
@@ -1271,11 +1656,22 @@ export function collectStepOptionItems (
     step: ApprovalFlowStep | ApprovalFlowApprovalNode,
     branches: ApprovalBranch[],
   ): ApprovalNodeOption[] {
+    /*
+     * **没得退的「回退」整条去掉**：本环节与上一环是同一个人、再往前也没有别人时，
+     * 回退只会退回自己（同一个人相邻环节在时间线上本来就是同一条节点）→ 干脆不出现。
+     * 判定见 collectRejectTargets。
+     * ⚠️ 带 loopBackTo 的分支**都是**保存期注入的（编辑器画不出这种分支），按它过滤是安全的。
+     * 连 `canReject` 也一起受影响（它就是从 branches 上算的）——没得退就不补那个「驳回」。
+     */
+    const usable = rejectInfo.byStep[step.id] === undefined
+      ? branches.filter(b => !(b.loopBackTo && firstResultValueOf(b) === REJECT_RESULT))
+      : branches
+
     const shared = normalizeOptionGroups(step.optionGroups)
     // 树没覆盖到的结果分支同样补回来，保证每条画出来的线都有人能选到（见 leftoverGroups）
     return shared.length > 0
-      ? nodeLevelOptionsOf([...shared, ...leftoverGroups([shared], branches)], branches)
-      : optionsOf(branches)
+      ? nodeLevelOptionsOf([...shared, ...leftoverGroups([shared], usable)], usable)
+      : optionsOf(usable)
   }
 
   /** 分支内的步骤序列：branch 步骤归属于它前面那个审批步骤 */
@@ -1410,6 +1806,112 @@ export function buildBranchTerminalMap (graph?: FlowGraph | null): BranchTermina
 }
 
 /**
+ * 流程**为什么停下**：由 rebuildChain 在每条"终止 / 卡住"的出口上写下来，
+ * 供时间线在**流转的最后**展示（用户看到链路突然就没了，得知道依据是什么）。
+ *
+ * 与 `outcome`（判定通过 / 驳回，用于 status）分工不同：这个只解释"停下的原因"。
+ */
+export interface FlowEndInfo {
+  /**
+   * 停止类型：
+   *   · closed   —— 命中终结类结论（CLOSE_FLOW_RESULTS，如「选择接收组别」）；
+   *   · exit     —— 分支直达结束节点（连线画到「结束」）；
+   *   · finished —— 所有环节都办完了；
+   *   · stuck    —— 没分支命中 / 兜底主线缺失 / 疑似成环，**流程卡住**（异常，要人查模板）。
+   */
+  kind: 'closed' | 'exit' | 'finished' | 'stuck'
+  /** 一句话依据（给办理人看） */
+  reason: string
+  /** 支撑依据的细节（命中的结论 / 分支），没有就不显示 */
+  detail?: string
+}
+
+/**
+ * 把「数量类」入参认成数字：空 / 认不出返回 undefined。
+ *
+ * 为什么不直接 `Number(v)`：`Number('')` 是 **0**、`Number('—')` 是 NaN ——
+ * 直接转会把"没有这个值"当成"数量 0"，接收数量的上限与剩余就会悄悄算错（真出现过的坑类型）。
+ */
+function qtyNum (v: unknown): number | undefined {
+  if (v === undefined || v === null) {
+    return undefined
+  }
+  const raw = String(v).trim()
+  if (raw === '') {
+    return undefined
+  }
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : undefined
+}
+
+/**
+ * 按办理流水累计「已接收 / 剩余接收数量」。
+ *
+ * 只统计**接收类结论**（`RECEIVE_RESULTS`）的 `extra.qty`，并顺手处理掉两个坑：
+ *   · **同一环节办过多次**（驳回回退后重审）以**最后一次**为准 —— 重办一次不该把数量算两遍；
+ *   · 总库存数量取**建单快照**（单据 `context` 里的那一列）。快照里没有它（老单 / 没关联产品）
+ *     就算不出剩余，`remaining` 返回 undefined，调用方退回「按总库存数量」的老口径（不把人卡住）。
+ *
+ * ⚠️ 这份口径被三处复用：rebuildChain 注入条件上下文（分支条件按"还剩多少"分流）、
+ * 办理端显示与校验上限（页面下发）、办完写进结论 extra 的那笔账（见 receiptLedgerAfter）。
+ * 所以实现只此一处，别处都调它 —— 各写一份必然漂。
+ */
+export function receivedQuantities (
+  decisions: NodeDecision[] = [],
+  ctx?: Record<string, unknown> | null,
+): { received: number, total?: number, remaining?: number } {
+  // stepId → 该环节**最后一次**接收的数量（回退重审时覆盖，不叠加）
+  const byStep = new Map<string, number>()
+  for (const d of decisions) {
+    if (!RECEIVE_RESULTS.includes(d.result)) {
+      continue
+    }
+    const n = qtyNum(d.extra?.qty)
+    if (n !== undefined) {
+      byStep.set(d.stepId, n)
+    }
+  }
+  let received = 0
+  for (const n of byStep.values()) {
+    received += n
+  }
+
+  const total = qtyNum(ctx?.[STOCK_QTY_FIELD])
+  if (total === undefined) {
+    return { received }
+  }
+  return { received, total, remaining: Math.max(0, total - received) }
+}
+
+/**
+ * 本环节办完之后这笔接收账（办理端写进结论的 extra，供时间线展示与日后统计）：
+ *
+ *   received  = 总库存数量 − 本环节**之前**的剩余 + 本环节接收量
+ *   remaining = 本环节之前的剩余 − 本环节接收量（不小于 0）
+ *
+ * 与 receivedQuantities 用的是同一套「总库存数量 / 剩余」（都由页面按建单快照下发），
+ * 所以记录里写下的数，与下一步条件「剩余接收数量 > 0」算出来的数**必然一致**。
+ * 三个入参有一个认不出（老单 / 没关联产品）就返回 null —— 宁可什么都不写，
+ * 也不要在记录里留半截假数字（那种数最难发现）。
+ */
+export function receiptLedgerAfter (
+  totalQty: unknown,
+  remainingBefore: unknown,
+  thisQty: unknown,
+): { received: number, remaining: number } | null {
+  const total = qtyNum(totalQty)
+  const before = qtyNum(remainingBefore)
+  const q = qtyNum(thisQty)
+  if (total === undefined || before === undefined || q === undefined) {
+    return null
+  }
+  return {
+    received: Math.max(0, total - before) + q,
+    remaining: Math.max(0, before - q),
+  }
+}
+
+/**
  * 由「模板 flow + 办理流水 decisions」重建运行时 chain。
  *
  * 纯函数：同样的 (flow, decisions) 必得同样的 chain。因此驳回回退、分支选路、重审
@@ -1433,6 +1935,8 @@ export function rebuildChain (
   done: boolean
   /** 终态：pending 进行中 / approved 通过 / rejected 驳回 */
   outcome: 'pending' | 'approved' | 'rejected'
+  /** 流程为什么停下（见 FlowEndInfo）；正常进行中的单是 undefined */
+  end?: FlowEndInfo
 } {
   const chain: ApprovalChain = []
   // chain 下标 → 步骤 id，办理时据此把结论记到正确的 stepId 上
@@ -1450,6 +1954,15 @@ export function rebuildChain (
   }
   // stepId → 已展开次数，用于取「第几轮」结论（重审 = 第二轮）
   const round = new Map<string, number>()
+
+  /**
+   * 已被这条链路**消费掉**的接收类结论（按推进顺序）。
+   *
+   * 已接收 / 剩余由它算出（见 withReceivedQuantities）—— 不能直接拿全部 decisions 去算：
+   * 那会把"还没走到"的环节填过的数量也算进来，剩余数量在时间线上就成了**未来值**。
+   * 同一环节回退重审会 push 两次，receivedQuantities 按 stepId 取最后一次，正好覆盖。
+   */
+  const consumedReceiveDecisions: NodeDecision[] = []
 
   // stepId → 成员（顶层节点 + 所有嵌套分支内步骤），回退重审时要据此重建环节
   const membersById = new Map<string, ApprovalChainItem[]>()
@@ -1483,7 +1996,17 @@ export function rebuildChain (
           collect(b.steps)
         }
       } else {
-        membersById.set(s.id, s.members ?? [])
+        /*
+         * 成员取 `stepMembersOf`（nodes / members 都认）。
+         * ⚠️ 只读 `s.members` 会让「引用模板」搬进来的那一类步骤变成**空环节** ——
+         *    它们在源模板里是顶层审批节点，带的是 `nodes`（且 `members` 为空数组），
+         *    时间线上于是没有人可显示（见 stepMembersOf 的说明）。
+         */
+        membersById.set(s.id, stepMembersOf(s))
+        // 旧式线性子步骤 / 轮询卡片内部步骤：与 flowToChain 一样递归下去
+        if (s.steps) {
+          collect(s.steps)
+        }
       }
       containerById.set(s.id, { steps: steps!, index: i })
     }
@@ -1498,6 +2021,27 @@ export function rebuildChain (
 
   /** stepId → 飞书提醒配置。这类环节**不产生待办**，到达即穿过（见 pushNotify） */
   const notifyById = collectNotifySteps(flow)
+
+  /**
+   * 回退目标（**已跳过同一个人**）与「分支组 → 它归属的环节」：见 collectRejectTargets。
+   *
+   * 回退不再是字面上的"上一环"，而是"上一个**别人**办的环节" —— 同一个人的相邻环节在
+   * 时间线上本来就是同一条节点，退回到自己那一步等于原地打转（实测反馈过：
+   * 一个弹窗里 A→B 来回退自己）。所以顶层与分支内都从这张表查目标。
+   */
+  const rejectInfo = collectRejectTargets(flow)
+
+  /**
+   * 命中「回退」分支时真正退到哪一环。
+   *
+   * 分支组自己不带主语，所以先反查"这是哪个环节的分支"，再取它的回退目标；
+   * 查不到（老数据 / 异常）就按分支自己写的目标退 —— 宁可退回上一环，也不把单据卡住
+   * （那种"没得退"的情形办理端已经不显示「回退」，正常不会走到这里）。
+   */
+  function loopBackTarget (groupId: string, b: ApprovalBranch): string {
+    const owner = rejectInfo.stepOfGroup[groupId]
+    return (owner ? rejectInfo.byStep[owner] : undefined) ?? b.loopBackTo!.stepId
+  }
 
   /**
    * 把一个「飞书提醒」环节写进 chain。
@@ -1529,6 +2073,28 @@ export function rebuildChain (
   let terminalBranch: ApprovalBranch | null = null
   /** 最后一个已办理环节的结论：终止分支未绑定结论时用它兜底判定 */
   let lastResult: string | undefined
+  /** 流程为什么停下：见 FlowEndInfo（只在"终止 / 卡住"的出口赋值，进行中的单没有） */
+  let endInfo: FlowEndInfo | undefined
+
+  /** 记录"流程为什么停了"：各条终止 / 卡住的出口都调它，别各处自己拼文案 */
+  function markEnd (kind: FlowEndInfo['kind'], reason: string, detail?: string) {
+    endInfo = { kind, reason, ...(detail ? { detail } : {}) }
+  }
+
+  /** 结论码 → 目录文案（如 receive → 接收）；依据文案里用得到 */
+  function resultLabelOf (result?: string) {
+    return result ? (APPROVAL_RESULTS.find(r => r.value === result)?.label ?? result) : ''
+  }
+
+  /** 分支展示名：优先分支名，其次它绑定的结论，最后兜底"兜底主线" */
+  function branchNameOf (b: ApprovalBranch) {
+    const name = String(b.name ?? '').trim()
+    if (name) {
+      return name
+    }
+    const v = firstResultValueOf(b)
+    return v ? resultLabelOf(v) : '兜底主线'
+  }
 
   /** 该分支是否为流程出口（连线直达结束节点）。
      *  优先取转换时写入的 isEnd；旧数据没有该字段才回查画布快照。
@@ -1585,20 +2151,37 @@ export function rebuildChain (
     * 不带上它就没法按组分流（见 CURRENT_GROUP_FIELD）。它排在 extra **之前** ——
     * 办理人填的值才是本次的即时事实，保持最高优先级。
     */
+  /**
+   * 把「已接收 / 剩余接收数量」补进条件求值上下文 —— 模板就是靠它分流的：
+   * 一批货被某个组部分接收后，「剩余接收数量 > 0」就走其他组/团队接手的那条线。
+   *
+   * 排在 extra **之后**：这是引擎按流水算出来的事实，不允许被办理人填的同名字段顶掉。
+   * 总库存数量取不到时**不放**剩余字段 —— 条件「剩余接收数量 > 0」会因此不命中
+   * （未知不当成成立，与 deriveFlowFields 里 null 的口径一致），模板里请把它配在兜底主线一侧。
+   */
+  function withReceivedQuantities (form: Record<string, unknown>): Record<string, unknown> {
+    const { received, remaining } = receivedQuantities(consumedReceiveDecisions, context)
+    return {
+      ...form,
+      [RECEIVED_QTY_FIELD]: received,
+      ...(remaining === undefined ? {} : { [REMAINING_QTY_FIELD]: remaining }),
+    }
+  }
+
   function formOf (d: NodeDecision, stepId: string): Record<string, unknown> {
     const group = groupOf(stepId)
-    return {
+    return withReceivedQuantities({
       ...context,
       result: d.result,
       ...(group ? { [CURRENT_GROUP_FIELD]: group } : {}),
       ...d.extra,
-    }
+    })
   }
 
   /**
    * 该结论是否**终结流程**（见 CLOSE_FLOW_RESULTS）。
    * 命中就不再往后展开：后面的环节不进 chain、也就没人有权限办 ——
-   * 「选择接收团队」就是这种：接收方是结果，不是下一环的审批人。
+   * 「选择接收组别」就是这种：接收方是结果，不是下一环的审批人。
    */
   function closesFlow (d: NodeDecision | undefined): boolean {
     return !!d && CLOSE_FLOW_RESULTS.includes(d.result)
@@ -1610,6 +2193,10 @@ export function rebuildChain (
     const step = (membersById.get(stepId) ?? []).map(m => ({ ...m }))
     if (d) {
       lastResult = d.result
+      // 接收类结论：记进"已走到的接收流水"，后续环节的 已接收/剩余 由它算
+      if (RECEIVE_RESULTS.includes(d.result)) {
+        consumedReceiveDecisions.push(d)
+      }
       // 结论记在审批人上，ApprovalNode 读 manager 的这些字段来展示
       const target = step.find(i => i.type === 'manager') ?? step[0]
       if (target) {
@@ -1640,6 +2227,7 @@ export function rebuildChain (
     if (closesFlow(d)) {
       done = true
       terminalBranch = null
+      markEnd('closed', `重审时选了终结类结论「${resultLabelOf(d.result)}」，流程到此结束`, '后面的环节不再展开，也没有人需要办理')
       return false
     }
     const form = formOf(d, stepId)
@@ -1683,6 +2271,7 @@ export function rebuildChain (
   function walkSteps (steps: ApprovalFlowStep[], form: Record<string, unknown>): boolean {
     for (const s of steps) {
       if (guard++ > 500) {
+        markEnd('stuck', '流转中止：流程疑似成环（回退 + 同一结论反复命中），被安全阀拦下', '请检查模板里的回退分支是否又把流程送回了同一个环节')
         return false
       } // 防御：回退 + 同样的结论会形成死循环
       /*
@@ -1701,9 +2290,18 @@ export function rebuildChain (
       if (s.type === 'loop') {
         throw new Error('流程里的「组间轮询」卡片没有在建单时展开，单据数据不完整（见 utils/approvalRotation）')
       }
+      /*
+       * 「引用模板」同理：源模板的内容是**建单期**搬进来的（见 utils/templateRef）。
+       * 走到这里说明单据数据不完整 —— 静默跳过的表现是"引用进来的一整段流程凭空消失、
+       * 单子却继续往下走"，与 loop 一样是最难查的那种失败，所以直接抛错。
+       */
+      if (s.type === 'ref') {
+        throw new Error('流程里的「引用模板」步骤没有在建单时展开，单据数据不完整（见 utils/templateRef）')
+      }
       if (s.type === 'branch' && s.branches?.length) {
         const b = matchBranch(s.branches, form)
         if (!b) {
+          markEnd('stuck', '流转中止：这个结论没有命中任何一条分支，也没配兜底主线', '单据停在当前环节 —— 请检查模板里该结论绑到了哪条线上')
           return false
         }
         // 跳出循环优先于回退：两者都是"跳转"，但 exitTo 表示向前跳出本段循环
@@ -1711,7 +2309,7 @@ export function rebuildChain (
           return exitTo(b.exitTo.stepId, form)
         }
         if (b.loopBackTo) {
-          return loopBackTo(b.loopBackTo.stepId)
+          return loopBackTo(loopBackTarget(s.id, b))
         }
         // steps 为空只说明该分支没独占环节，不等于终止 —— 是否终止看出口表
         if (b.steps.length > 0 && !walkSteps(b.steps, form)) {
@@ -1720,6 +2318,7 @@ export function rebuildChain (
         if (isExit(b)) {
           done = true // 连线直达结束节点
           terminalBranch = b
+          markEnd('exit', `按「${branchNameOf(b)}」这条线走到结束节点，流程结束`, `分支结论：${resultLabelOf(firstResultValueOf(b)) || '无（兜底分支）'}`)
           return false
         }
         continue
@@ -1738,6 +2337,7 @@ export function rebuildChain (
       if (closesFlow(d)) {
         done = true
         terminalBranch = null
+        markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`, '后面的环节不再展开，也没有人需要办理')
         return false
       }
       form = formOf(d, s.id)
@@ -1750,6 +2350,7 @@ export function rebuildChain (
     let i = start
     while (i < flow.length) {
       if (guard++ > 500) {
+        markEnd('stuck', '流转中止：流程疑似成环（回退 + 同一结论反复命中），被安全阀拦下', '请检查模板里的回退分支是否又把流程送回了同一个环节')
         return false
       }
       const node = flow[i]
@@ -1771,6 +2372,10 @@ export function rebuildChain (
       if (node.type === 'loop') {
         throw new Error('流程里的「组间轮询」卡片没有在建单时展开，单据数据不完整（见 utils/approvalRotation）')
       }
+      // 「引用模板」同上：内容必须在建单期搬进来，残留即数据不完整（见 utils/templateRef）
+      if (node.type === 'ref') {
+        throw new Error('流程里的「引用模板」节点没有在建单时展开，单据数据不完整（见 utils/templateRef）')
+      }
 
       // 飞书提醒：只记一环、不停留；后续走向不受它影响
       // （出线唯一性由 graphToFlowFrom 保证 —— 它没有结论也没有条件，多条出线无从选择）
@@ -1785,10 +2390,11 @@ export function rebuildChain (
           currentStep = chain.length - 1
           return false
         }
-        // 终结类结论（如「选择接收团队」）：这一步办完流程即结束，后面接的环节不会生效
+        // 终结类结论（如「选择接收组别」）：这一步办完流程即结束，后面接的环节不会生效
         if (closesFlow(d)) {
           done = true
           terminalBranch = null
+          markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`, '这个结论本身就是结果（如"谁接收"），后面的环节不再展开、也没有人需要办理')
           return false
         }
         form = formOf(d, node.id)
@@ -1808,6 +2414,7 @@ export function rebuildChain (
            * （与分支步骤里的口径一致，见 walkSteps 的 `if (!b) return false`。）
            */
           console.warn('[rebuildChain] 没有分支命中且无兜底主线，单据停在当前环节而非判为通过')
+          markEnd('stuck', '流转中止：这个结论没有命中任何一条分支，也没配兜底主线', '单据停在当前环节 —— 请检查模板里该结论绑到了哪条线上')
           currentStep = chain.length - 1
           return false
         }
@@ -1816,7 +2423,7 @@ export function rebuildChain (
           return exitTo(b.exitTo.stepId, form)
         }
         if (b.loopBackTo) {
-          return loopBackTo(b.loopBackTo.stepId)
+          return loopBackTo(loopBackTarget(node.id, b))
         }
         // steps 为空可能是「直接汇聚到下一个节点」，只有出口表认定为终止才停
         if (b.steps.length > 0 && !walkSteps(b.steps, form)) {
@@ -1825,6 +2432,7 @@ export function rebuildChain (
         if (isExit(b)) {
           done = true
           terminalBranch = b
+          markEnd('exit', `按「${branchNameOf(b)}」这条线走到结束节点，流程结束`, `分支结论：${resultLabelOf(firstResultValueOf(b)) || '无（兜底分支）'}`)
           return false
         }
         i++
@@ -1833,6 +2441,7 @@ export function rebuildChain (
       i++
     }
     done = true
+    markEnd('finished', '所有环节都已办完，流程结束', lastResult ? `最后一个环节的结论：${resultLabelOf(lastResult)}` : undefined)
     return true
   }
 
@@ -1852,8 +2461,10 @@ export function rebuildChain (
   }
 
   // 起始表单也要带上业务上下文：第一个环节之前若有条件节点，它同样要能按业务数据分流
-  walkFlow(0, { ...context })
-  return { chain, stepIds, currentStep, done, outcome: outcomeOf() }
+  // （已接收/剩余同样补上：还没人办过时 = 0 / 总库存数量）
+  walkFlow(0, withReceivedQuantities({ ...context }))
+  // end：流程为什么停下（见 FlowEndInfo）；正常在办的（停在待办环节等人办）没有依据可讲
+  return { chain, stepIds, currentStep, done, outcome: outcomeOf(), end: endInfo }
 }
 
 // ===== Vue Flow 画布持久化快照 =====
@@ -1932,7 +2543,15 @@ export function flowToChain (flow: ApprovalFlow): ApprovalChain {
     if (step.type === 'notify') {
       return
     }
-    pushMembers(step.members)
+    /*
+     * 「引用模板」步骤：模板里只存引用，内容在建单期才从源模板搬进来（见 utils/templateRef）。
+     * 这个函数是**同步**的、保存期就会跑，读不到源模板 —— 所以跳过（见下面顶层同款说明）。
+     */
+    if (step.type === 'ref') {
+      return
+    }
+    // 同 rebuildChain 的 collect：步骤上的人员可能是 nodes（引用模板搬进来的段落），见 stepMembersOf
+    pushMembers(stepMembersOf(step))
     for (const sub of step.steps ?? []) {
       walkStep(sub)
     }
@@ -1959,6 +2578,19 @@ export function flowToChain (flow: ApprovalFlow): ApprovalChain {
       for (const step of node.steps) {
         walkStep(step)
       }
+      continue
+    }
+    /*
+     * 「引用模板」节点：跳过。
+     *
+     * 模板里只有引用，没有内容（内容在源模板里、**建单期**才搬进来）——
+     * 所以模板记录里这份拍平的 `chain` 不含引用段落。这是"近似"，
+     * 与 loop 卡片"按组复制前的近似"同一个态度。
+     *
+     * ⚠️ 但**订单**的 chain 不从这里来近似：建单期先展开引用再拍平
+     * （见 pages/workStream 的 createTaskForRow），那是完整的。
+     */
+    if (node.type === 'ref') {
       continue
     }
     const first = node.branches.find(isDefaultBranch) ?? node.branches[0]

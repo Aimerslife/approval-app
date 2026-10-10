@@ -106,6 +106,14 @@
         for (const s of n.steps) walkStep(s)
         continue
       }
+      /*
+       * 「引用模板」：被引用的那段流程**不在本图里**（内容只有一份，在源模板里），
+       * 所以这条小地图上看不到它的环节 —— 与轮询卡片"按组展开前"同一个态度。
+       * 建单后的单据快照里它已经被展开成普通环节，那时看单据的流程图是完整的。
+       */
+      if (n.type === 'ref') {
+        continue
+      }
       const def = n.branches.find(b => !b.conditions?.length && !b.condition) ?? n.branches[0]
       if (def) walkBranch(def)
     }

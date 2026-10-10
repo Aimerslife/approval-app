@@ -1,8 +1,10 @@
 import type { ApprovalChainItem, ApprovalFlow } from '@/types/approval'
+import { sendFeishuCard } from '@/api/api'
 import { collectNotifySteps } from '@/types/approval'
+// 测试闸门（⚠️ 临时，见该文件头）：只发给指定姓名的那一个人
+import { applyNotifyTestGate, NOTIFY_TEST_GATE } from '@/utils/notifyGate'
 // 纯函数单独成模块（不依赖 PB 客户端），这样它能被 tsx 直接跑断言，见该文件顶部说明
 import { renderNotifyText } from '@/utils/notifyText'
-import { sendFeishuCard } from '@/api/api'
 
 /** 一轮「到达提醒」的发送结果 */
 export interface NotifySendResult {
@@ -10,6 +12,8 @@ export interface NotifySendResult {
   sent: string[]
   /** 发不出去 / 发送失败的说明（只收集，不抛错） */
   failed: string[]
+  /** 按测试闸门**故意跳过**的说明（见 NOTIFY_TEST_GATE；正式上线后应恒为空） */
+  skipped: string[]
   /** 这一轮实际发出的消息条数 */
   messages: number
 }
@@ -43,7 +47,7 @@ export async function sendArrivedNotifies (opts: {
   orderNo?: string
   context?: Record<string, unknown>
 }): Promise<NotifySendResult> {
-  const out: NotifySendResult = { sent: [], failed: [], messages: 0 }
+  const out: NotifySendResult = { sent: [], failed: [], skipped: [], messages: 0 }
   const notifySteps = collectNotifySteps(opts.flow)
   // 一个提醒环 id 只会出现一次；用它顺便去重，防止同一轮里重复进入
   const arrived = new Set<string>()
@@ -70,6 +74,25 @@ export async function sendArrivedNotifies (opts: {
       continue
     }
 
+    /*
+     * ⚠️ 测试闸门（NOTIFY-TEST-GATE）：只放行指定姓名的那一个人，其余跳过。
+     * 跳过时把"本环节实际的提醒对象"打出来 —— 姓名对不上时能一眼看出该填哪个名字。
+     */
+    const { allowed, blocked } = applyNotifyTestGate(to)
+    if (allowed.length === 0) {
+      const names = to.map(m => m.name || m.email).join('、')
+      const why = `「${title}」按测试闸门跳过：只发给「${NOTIFY_TEST_GATE.onlyToName}」，`
+        + `而这一环的提醒对象是 ${names}`
+      out.skipped.push(why)
+      console.info(`[notify-test-gate] ${why}`)
+      continue
+    }
+    if (blocked.length > 0) {
+      const names = blocked.map(m => m.name || m.email).join('、')
+      out.skipped.push(`「${title}」只发给 ${NOTIFY_TEST_GATE.onlyToName}，跳过了 ${names}`)
+      console.info(`[notify-test-gate] 「${title}」按测试闸门跳过 ${names}`)
+    }
+
     const body = renderNotifyText(info.content || '', ctx)
     const text = [
       `【审批提醒】${title}`,
@@ -78,7 +101,7 @@ export async function sendArrivedNotifies (opts: {
     ].filter(Boolean).join('\n')
 
     let ok = 0
-    for (const m of to) {
+    for (const m of allowed) {
       try {
         await sendFeishuCard({
           receive_id: m.email,

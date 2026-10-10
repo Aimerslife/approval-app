@@ -1,15 +1,4 @@
 <template>
-  <!--
-    审批单表格的筛选条（home.vue 两个 tab + mine.vue 共用）。
-    下拉由 SELECT_FILTERS 驱动（与 setDatas / workStream 同一套写法），
-    加条件是"加一行定义"的事，模板不用动。
-
-    两个刻意的取舍：
-      · **搜索框要点「确认」才生效**（下拉与日期仍是即点即生效）：表格几百行时，
-        每敲一个字就重筛一次会让人输入发涩；有没有未提交的改动由父组件算
-        （见 useApprovalTable 的 filtersDirty），只用在按钮的 title 上；
-      · flex-wrap —— 条件变多后在窄屏折行，不会挤成一团。
-  -->
   <div class="p-2 d-flex flex-wrap items-center gap-3">
     <v-text-field
       class="filter-input w-[220px]"
@@ -100,42 +89,3 @@
     reset: []
   }>()
 </script>
-<style lang="scss" scoped>
-.filter-input {
-  :deep(.v-field) {
-    --v-field-padding-top: 2px;
-    --v-field-padding-bottom: 1px;
-    --v-input-control-height: 25px;
-    font-size: 12px;
-  }
-
-  :deep(.v-field__input) {
-    min-height: 28px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-
-  :deep(.v-label) {
-    font-size: 12px;
-  }
-
-  :deep(.v-field__append-inner) {
-    align-self: center;
-    padding-top: 0;
-  }
-
-  :deep(.v-field__prepend-inner) {
-    margin-top: 0;
-    padding-top: 1px;
-
-    .v-icon {
-      font-size: 14px;
-    }
-  }
-
-  :deep(.v-input__details) {
-    padding-top: 0;
-    min-height: 0;
-  }
-}
-</style>

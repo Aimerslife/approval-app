@@ -76,6 +76,16 @@ export function collectProbes (flow: ApprovalFlow): Array<{ id: string, label: s
       }
       if (s.type === 'probe' && s.probe) {
         note(s.id, s.probe)
+        /*
+         * ⚠️ **进它自己的分支**：数据查询是可以**链式**的 —— 第一个查"存在"之后，
+         * 命中的那条分支里还能再放一个查询节点。
+         * 不往里走的话内层查询收集不到 → 建单时不取数、也不展开 → 快照里残留 probe，
+         * 一直要等到办到那一环提交时才报「没有在建单时展开」（踩过这个坑）。
+         * 被丢弃那条分支里的查询同样会被取一次数 —— 与"分支里的查询一律在建单期求值"同一口径。
+         */
+        for (const b of s.branches ?? []) {
+          walkSteps(b.steps)
+        }
       }
       walkSteps(s.steps)
     }
@@ -84,6 +94,10 @@ export function collectProbes (flow: ApprovalFlow): Array<{ id: string, label: s
   for (const node of flow) {
     if (node.type === 'probe') {
       note(node.id, node.spec)
+      // 同上：查询可以链式，它自己两条分支里的查询也要收集
+      for (const b of node.branches ?? []) {
+        walkSteps(b.steps)
+      }
       continue
     }
     /*
@@ -155,8 +169,14 @@ export function expandProbes (
       }
       if (s.type === 'probe' && s.probe) {
         const hit = pick(s.id, s.probe, s.branches ?? [])
-        // 展开不了就原样保留（issues 非空 → 该条建单失败）
-        return hit ? { id: s.id, name: s.name, type: 'branch' as const, branches: hit } : s
+        /*
+         * 展开不了就原样保留（issues 非空 → 该条建单失败）。
+         * ⚠️ 命中那条分支的 steps 要**接着 map**：查询可以链式 ——
+         * 「存在」分支里还能再放一个查询节点；不接着走，内层就留在快照里没展开。
+         */
+        return hit
+          ? { id: s.id, name: s.name, type: 'branch' as const, branches: hit.map(b => ({ ...b, steps: mapSteps(b.steps) })) }
+          : s
       }
       // 组间轮询步骤（卡片放在分支链里）：内部的查询同样先展开（见 collectProbes 的说明）
       if (s.type === 'loop') {
@@ -169,7 +189,10 @@ export function expandProbes (
   for (const node of flow) {
     if (node.type === 'probe') {
       const hit = pick(node.id, node.spec, node.branches ?? [])
-      nodes.push(hit ? { id: node.id, type: 'branch', branches: hit } : node)
+      // 同上：命中分支里的步骤（可能还有下一个查询）要继续展开
+      nodes.push(hit
+        ? { id: node.id, type: 'branch', branches: hit.map(b => ({ ...b, steps: mapSteps(b.steps) })) }
+        : node)
       continue
     }
     if (node.type === 'branch') {

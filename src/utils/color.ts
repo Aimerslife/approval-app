@@ -216,3 +216,24 @@ export function pickColorStep (scale: ColorStep[], index: number): ColorStep {
   }
   return scale[Math.min(Math.max(0, index), scale.length - 1)]
 }
+
+/** 弃置段每往下一环，圆点亮度抬高多少（HSL 的 L，百分点） */
+export const DISCARD_LIGHTEN_STEP = 8
+
+/**
+ * 弃置段的圆点颜色：与主链（色阶越往后越深）**方向相反** —— 进入这一段起**逐环变浅**。
+ *
+ * 起点直接取**主链在本环节的颜色** `base`：段首那一环与主链无缝衔接（不会突变成一个全新颜色），
+ * 之后每一环抬高一点亮度，到色阶最浅档（L_SHALLOWEST）封顶 —— 与「圆点逐环缩小」同一套递减节奏
+ * （见 ApprovalNode 的 inDiscardSegment）。
+ *
+ * 文字色随之重算（withReadableText）：底变浅之后要换深字，否则白字糊在浅蓝上。
+ *
+ * @param base  主链在本环节的圆点色（见 pickColorStep）
+ * @param index 该环在弃置段内的序号（0 起）
+ */
+export function discardColorStep (base: string, index: number): ColorStep {
+  const { h, s, l } = hexToHsl(base)
+  const nextL = Math.min(L_SHALLOWEST, l + Math.max(0, index) * DISCARD_LIGHTEN_STEP)
+  return withReadableText(hslToHex(h, s, nextL))
+}

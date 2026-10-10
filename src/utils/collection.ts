@@ -1,10 +1,14 @@
 import type { ApprovalAttachment, ApprovalChain, ApprovalFlow, ApprovalModal, ApprovalOrder, FlowGraph } from '@/types/approval'
-import type { Flow2Template } from '@/types/flow2'
 // 只要类型：组别→默认审批人的"覆盖记录"形状（合并口径见 utils/groupApprovers）
 import type { GroupApproverOverride } from '@/utils/groupApprovers'
+import type { WarehouseRow } from '@/utils/warehouse'
 import pb from '@/pocketbase.ts'
 import { APPROVAL_STATUS, buildBranchTerminalMap, rebuildChain } from '@/types/approval'
 import { sendArrivedNotifies } from '@/utils/notifySteps'
+// 「引用模板」的引用关系收集（纯逻辑，只依赖类型）：删除模板前查"有没有别的模板引用了它"
+import { collectTemplateRefs } from '@/utils/templateRef'
+// 仓库清单的取舍口径是纯逻辑（PB 有记录就全用它，否则回落默认值），放在 utils/warehouse 里
+import { normalizeWarehouses, resolveWarehouses, warehouseKey } from '@/utils/warehouse'
 
 export interface DocumentModel {
   collectionId: string
@@ -166,6 +170,10 @@ async function notifyOnCreate (
     if (res.failed.length > 0) {
       console.warn('[createApprocalModel] 建单提醒未全部发出:', res.failed.join('；'))
     }
+    // 测试期闸门跳过的那些也留个痕（见 utils/notifyGate）；闸门关掉后这里恒为空
+    if (res.skipped.length > 0) {
+      console.info('[createApprocalModel] 建单提醒按测试闸门跳过:', res.skipped.join('；'))
+    }
   } catch (error) {
     console.warn('[createApprocalModel] 建单提醒异常（不影响建单）:', error)
   }
@@ -301,75 +309,6 @@ export async function getApprovalFirstByFilter (filter: string): Promise<Approva
   }
 }
 
-/* ==================== 流程编排 v2 的模板（app_chain2） ==================== */
-
-/*
- * v2 模板与 v1 模板是**两张表、两套读法**（见 types/flow2.ts 的说明）：
- *   · v1（app_chain）：chain = { chain, flow, graph }，给 createStream 的画布用；
- *   · v2（app_chain2）：spec = { entry, nodes }，节点是运行期执行的函数。
- * 这里只提供最小 CRUD，与上面那批 v1 函数并列但互不影响。
- */
-
-/** v2 模板记录（app_chain2） */
-export interface Flow2Model {
-  id: string
-  name: string
-  status: number
-  spec: Flow2Template
-  created?: string
-  updated?: string
-}
-
-/** 集合还没建好时的提示（迁移未应用）。调用方据此给出可操作的提示，而不是抛裸错 */
-export const FLOW2_MIGRATION_HINT
-  = '模板集合 app_chain2 还不存在：重启一次 PocketBase（yarn dev:pb）让它应用 1790600000 那条迁移'
-
-export async function getFlow2List (): Promise<Flow2Model[]> {
-  try {
-    const res = await pb.collection('app_chain2').getList<Flow2Model>(1, 50, { sort: '-updated' })
-    return res.items
-  } catch (error) {
-    console.error(error)
-    return []
-  }
-}
-
-export async function getFlow2One (id: string): Promise<Flow2Model | undefined> {
-  try {
-    return await pb.collection('app_chain2').getOne<Flow2Model>(id)
-  } catch (error) {
-    console.error(error)
-    return undefined
-  }
-}
-
-export async function addFlow2 (name: string, status: number, spec: Flow2Template): Promise<Flow2Model> {
-  return await pb.collection('app_chain2').create<Flow2Model>({ name, status, spec })
-}
-
-export async function updateFlow2 (id: string, data: Partial<Flow2Model>): Promise<Flow2Model> {
-  return await pb.collection('app_chain2').update<Flow2Model>(id, data)
-}
-
-export async function deleteFlow2 (id: string): Promise<void> {
-  await pb.collection('app_chain2').delete(id)
-}
-
-/** 最近 N 条审批单（试算面板拿它们的链条快照当输入） */
-export async function getRecentOrders (limit = 30): Promise<ApprovalOrder[]> {
-  try {
-    // 带 expand：老单没有 chain.context 快照时，flowContextOfOrder 会退化为读实时关联数据
-    const res = await pb.collection('approval_chain').getList<ApprovalOrder>(1, limit, {
-      sort: '-created',
-      expand: 'relation',
-    })
-    return res.items
-  } catch (error) {
-    console.error(error)
-    return []
-  }
-}
-
 // 获取一条产品数据
 export async function getProduct () {
   try {
@@ -379,6 +318,68 @@ export async function getProduct () {
   } catch (error) {
     console.error(error)
     return undefined
+  }
+}
+
+/**
+ * 读「引用模板」的**源模板流程**（建单期用，见 utils/templateRef）。
+ *
+ * ⚠️ 读不到（被删 / id 写错）返回 `null`，**不抛错**：调用方会把它变成
+ * "这一条建单失败，并报出是哪张卡片" —— 与"静默少一段流程"相比，当场失败才是安全的那一边。
+ *
+ * 只返回 `flow`、不返回 `graph`：引用搬的是**流程**（画布只用于编辑器还原）。
+ */
+export async function getTemplateFlowForRef (
+  templateId: string,
+): Promise<{ id: string, name?: string, flow: ApprovalFlow } | null> {
+  try {
+    const rec = await pb.collection('app_chain').getOne<ApprovalModal>(templateId)
+    const flow = rec?.chain?.flow
+    if (!flow?.length) {
+      console.warn('[templateRef] 源模板没有流程（或流程为空）:', templateId)
+      return null
+    }
+    return { id: rec.id, name: rec.name, flow }
+  } catch (error) {
+    console.warn('[templateRef] 读取源模板失败:', templateId, error)
+    return null
+  }
+}
+
+/**
+ * 取全部模板的**精简列表**（编辑器里给「引用模板」卡片选源模板用）。
+ *
+ * 与 `getApproval` 的区别：那个只取 10 条（模板管理页第一页够用），
+ * 这里要能选到**任意**一张模板，所以取全量并按名字排（模板数量级是几十，没有负担）。
+ * 读失败返回空数组 —— 编辑器据此显示"没有可选模板"，而不是把页面搞崩。
+ */
+export async function getApprovalOptions (): Promise<{ id: string, name: string, status: number }[]> {
+  try {
+    const res = await pb.collection('app_chain').getFullList<ApprovalModal>({ sort: 'name' })
+    return res.map(r => ({ id: r.id, name: String(r.name ?? ''), status: Number(r.status ?? 0) }))
+  } catch (error) {
+    console.error('[collection] 读取模板列表失败:', error)
+    return []
+  }
+}
+
+/**
+ * 找出**引用了**指定模板的那些模板（删除前的安全检查）。
+ *
+ * 为什么删除前要查：模板之间按 id 引用，删掉被引用的那张，引用它的模板会在
+ * **下一次建单时**才失败 —— 那时痛点已经从"改配置"变成"单据建不出来"。
+ * 现查一遍（几十条模板、纯内存匹配）比维护一张引用计数表更简单，也不会失真。
+ */
+export async function findTemplatesUsing (templateId: string): Promise<{ id: string, name: string }[]> {
+  try {
+    const list = await pb.collection('app_chain').getFullList<ApprovalModal>()
+    return list
+      .filter(rec => rec.id !== templateId)
+      .filter(rec => collectTemplateRefs(rec.chain?.flow).some(u => u.refTemplateId === templateId))
+      .map(rec => ({ id: rec.id, name: String(rec.name ?? '') }))
+  } catch (error) {
+    console.error('[collection] 查引用关系失败:', error)
+    return []
   }
 }
 
@@ -590,5 +591,109 @@ export async function deleteGroupApproverOverride (group: string): Promise<void>
 
   if (existing) {
     await pb.collection(GROUP_APPROVER_COLLECTION).delete(existing.id)
+  }
+}
+
+/* ==================== 仓库（仓位）清单 ==================== */
+
+/**
+ * 在「角色设置 → 仓库设置」里维护的仓库清单。
+ *
+ * 与「组别 → 默认审批人」的差别：那边是**逐行覆盖**（默认值为主、只换个人），
+ * 这里是**整表替换** —— 仓库要能新增、改名、删除，逐行覆盖表达不了"删掉某一项"。
+ * 所以口径是：本表有记录就完全以它为准；一条都没有就回落到 `utils/warehouse.ts` 的默认值。
+ */
+const WAREHOUSE_COLLECTION = 'warehouses'
+
+type WarehouseRecord = WarehouseRow & { id: string }
+
+/**
+ * 写失败时的报错：集合不存在（PB 还没应用 1790700000 迁移）是**最常见**的一种，
+ * 而 PocketBase 默认只给一句 "The requested resource wasn't found."，对用户毫无指向性。
+ * 这里换成"该做什么"，其余错误原样抛出（读那边则相反 —— 回落默认值，见 loadWarehouses）。
+ */
+function warehouseWriteError (error: unknown): Error {
+  if ((error as { status?: number } | null)?.status === 404) {
+    const e = new Error('仓库维护表还没建：请重启 PocketBase 以应用迁移 1790700000_created_warehouses')
+    // 打个标记：调用方据此决定"把这句话原样给用户看"还是换成通用文案（见 WAREHOUSE_SETUP_ERROR）
+    e.name = WAREHOUSE_SETUP_ERROR
+    return e
+  }
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+/** 上面那种"环境没准备好"的错误名：界面据此直接展示原因，而不是笼统的"保存失败" */
+export const WAREHOUSE_SETUP_ERROR = 'WarehouseSetupError'
+
+export interface WarehouseList {
+  /** 本次要用的清单（已清洗、去重、排好序） */
+  rows: WarehouseRow[]
+  /** true = 用的是维护表里的那份；false = 回落到文件默认（界面据此显示"默认 / 已自定义"） */
+  custom: boolean
+}
+
+/**
+ * 读取本次要用的仓库清单。
+ *
+ * ⚠️ 与 `getGroupApproverOverrides` 一样，**读失败返回默认值**而不是抛错：
+ *    集合可能还没建（PB 没应用 1790700000 迁移），那种情况下界面应当照常显示默认清单。
+ */
+export async function loadWarehouses (): Promise<WarehouseList> {
+  let overrides: WarehouseRow[] = []
+  try {
+    overrides = await pb
+      .collection(WAREHOUSE_COLLECTION)
+      .getFullList<WarehouseRecord>({ sort: 'parent,name' })
+  } catch (error) {
+    console.warn('[warehouse] 读取维护表失败（多半是还没应用迁移），先用默认清单:', error)
+  }
+  return { rows: resolveWarehouses(overrides), custom: overrides.length > 0 }
+}
+
+/**
+ * 把整份清单写回维护表（**整表对齐**）：表里多的删掉、少的建出来、同键的不动。
+ *
+ * 为什么不是"逐条 upsert"：改名/换分类都会让身份键变掉，逐条写会留下旧行；
+ * 这里先删后建，天然不会撞上唯一索引，也不会残留孤儿行。
+ * 失败**向上抛**（与读取相反）：这是"改数据"的动作，静默失败会让用户以为改好了。
+ */
+export async function saveWarehouses (rows: readonly WarehouseRow[]): Promise<void> {
+  // 只用 normalizeWarehouses（不看默认值）：传空数组的语义是"清空"，
+  // 若走 resolveWarehouses 会被默认清单又填满（那正是"恢复默认"要的另一件事）
+  const want = new Map<string, WarehouseRow>()
+  for (const row of normalizeWarehouses(rows)) {
+    want.set(warehouseKey(row), row)
+  }
+
+  try {
+    const existing = await pb.collection(WAREHOUSE_COLLECTION).getFullList<WarehouseRecord>()
+
+    // 先删：改名/改分类 = 键变了，旧行必须先走，否则后面的 create 会撞唯一索引
+    for (const rec of existing) {
+      const key = warehouseKey(rec)
+      if (!want.has(key)) {
+        await pb.collection(WAREHOUSE_COLLECTION).delete(rec.id)
+        continue
+      }
+      want.delete(key) // 已经在表里且内容一致：不动它（避免无意义的写入）
+    }
+
+    for (const row of want.values()) {
+      await pb.collection(WAREHOUSE_COLLECTION).create({ parent: row.parent, name: row.name })
+    }
+  } catch (error) {
+    throw warehouseWriteError(error)
+  }
+}
+
+/** 恢复默认：清空维护表（之后 `loadWarehouses` 会回落到 utils/warehouse.ts 的默认清单） */
+export async function resetWarehouses (): Promise<void> {
+  try {
+    const existing = await pb.collection(WAREHOUSE_COLLECTION).getFullList<WarehouseRecord>()
+    for (const rec of existing) {
+      await pb.collection(WAREHOUSE_COLLECTION).delete(rec.id)
+    }
+  } catch (error) {
+    throw warehouseWriteError(error)
   }
 }
