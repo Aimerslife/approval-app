@@ -1022,6 +1022,13 @@ export interface LoopNodeData {
    * 卡片级走向（画布上存**目标节点的 id**，与内部连线的 `edge.data.exitTo` 同一写法）：
    * 所有组都轮完、一直没跳出轮询时去哪个环节。
    * 空 = 继续卡片后面那个环节。转成 flow 时会被包成 `afterLoop: { stepId }`，见 ApprovalFlowLoopNode。
+   *
+   * ## 与"两条出线"的关系（见 FlowGraphEdge.data.loopExit）
+   * 想让「轮完」和「提前跳出」各走各的路线时，画布上给卡片接**两条出线**：
+   *   · 标了 `loopExit: 'early'` 的那条 = 「提前跳出」→ 环内「提前结束轮询」的缺省目标；
+   *   · 没标（或标 `'done'`）的那条 = 「轮完」→ 它就是卡片的后继（= 这里 `afterLoop` 想表达的那条路）。
+   * 所以两条出线时这一项**必须留空**（两处都配会报"轮完走向配了两处"）；
+   * 只有一条出线时它照旧是"改这条去路"的入口（老行为，没配 = 走那条线）。
    */
   afterLoop?: string
 }
@@ -2496,6 +2503,17 @@ export interface FlowGraphEdge {
     conditions?: ConditionExpr[]
     /** 多条件组合方式，默认 and */
     logic?: 'and' | 'or'
+    /**
+     * **「组间轮询」卡片**的出线走向：`'early'` = 「提前跳出」那条线（某一组接了、
+     * 提前结束轮询，剩下几组不再轮），省略 / `'done'` = 「轮完」那条线
+     * （所有组都轮完、一直没人跳出轮询）。
+     *
+     * 卡片最多两条出线，靠这一项区分：没有它时"第几环走哪条"说不清，
+     * 两条都没标走向会在保存期报错（见 utils/approvalFlow 的 splitLoopOuts）。
+     * ⚠️ 只用在**卡片自己的出线**上；环内连线表达"提前结束轮询"用的是另一套
+     * 字段（`exitMode` + `exitTo`，见 utils/loopCardGraph），两者别混。
+     */
+    loopExit?: 'done' | 'early'
     /** 手动拖拽曲线（type=adjustable）的弯点；双击圆点可复位 */
     cp?: { x: number, y: number }
   }

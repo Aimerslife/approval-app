@@ -7,7 +7,9 @@
   <v-timeline-item :class="{ 'discard-zone': inDiscardSegment !== undefined }" class="mb-12"
     :dot-color="dotColor" :size="size" :style="discardZoneStyle">
     <template #icon>
-      <span :style="{ fontSize: iconFontSize, color: iconColor }">{{ initials }}</span>
+      <!-- 飞书提醒环节没有人可显示首字，圆点里放一个铃铛 -->
+      <v-icon v-if="isNotifyStep" :color="iconColor" size="14">mdi-bell-ring-outline</v-icon>
+      <span v-else :style="{ fontSize: iconFontSize, color: iconColor }">{{ initials }}</span>
     </template>
 
     <!-- 弃置段的**段首**：在整块背景的左上角标一句「进入弃置流程」（整段只有这一条有） -->
@@ -20,13 +22,22 @@
       <div class="d-flex align-center gap-2">
         <span v-if="deptName" class="text-[12px]">[{{ deptName }}]</span>
 
-        <v-avatar size="30px">
-          <v-img alt="Avatar" :src="manageDatas[0]?.avatar" />
-          <!-- <v-icon :color="message.color" :icon="message.icon"></v-icon> -->
-        </v-avatar>
+        <!-- 飞书提醒环节：没人可办，头部显示**提醒名称**（不是某人姓名），也没有头像 -->
+        <template v-if="isNotifyStep">
+          <v-icon color="primary" size="16">mdi-bell-ring-outline</v-icon>
+          <span class="text-body-small font-weight-medium">{{ notifyItem?.name || '飞书提醒' }}</span>
+          <v-chip color="info" label size="x-small" variant="tonal">飞书提醒</v-chip>
+        </template>
 
-        <span class="text-body-small" :class="{ 'text-medium-emphasis text-decoration-line-through': transferredTo }">
-          {{ manageDatas[0]?.name }}</span>
+        <template v-else>
+          <v-avatar size="30px">
+            <v-img alt="Avatar" :src="manageDatas[0]?.avatar" />
+            <!-- <v-icon :color="message.color" :icon="message.icon"></v-icon> -->
+          </v-avatar>
+
+          <span class="text-body-small" :class="{ 'text-medium-emphasis text-decoration-line-through': transferredTo }">
+            {{ manageDatas[0]?.name }}</span>
+        </template>
 
         <v-chip v-if="transferredTo" color="secondary" label size="x-small" variant="tonal">
           已转办 → {{ transferredTo }}
@@ -181,11 +192,6 @@
                       :rules="recycleAmountRules" single-line suffix="￥" variant="underlined" width="160px" />
                   </div>
 
-                  <div v-else-if="needScrapConfirm" class="d-flex align-center ga-2 mt-2">
-                    <v-btn append-icon="mdi-transfer-right" color="error" size="small" variant="tonal"
-                      @click="setClean = true">确认报废清仓</v-btn>
-                  </div>
-
                   <div v-else-if="needReason && pickedGroups.length === 0" class="mt-2">
               
                     <v-select v-model="reason" class="filter-select" density="compact" hide-details item-title="text"
@@ -304,6 +310,13 @@
         </span>
       </div>
     </div>
+
+    <!-- 飞书提醒环节的详情：**提醒对象**（这一环会通知谁）。建单期只把姓名快照进 chain，所以只列名字 -->
+    <div v-if="isNotifyStep && notifyTo.length > 0" class="mt-2 d-flex align-center flex-wrap gap-2">
+      <v-chip color="info" label size="x-small" variant="tonal">提醒对象</v-chip>
+      <span class="text-[12px] text-medium-emphasis">{{ notifyTo.join('、') }}</span>
+    </div>
+
     <!-- 已办理：渲染该审批人的选项 / 信息 / 文件 -->
     <template v-if="manager?.result">
       <v-sheet v-if="manager.opinion" class="py-2 px-3 text-body-small mt-1 w-fit" color="#F6F7F9" rounded="10">
@@ -611,6 +624,25 @@ const iconColor = computed(() => colorStep.value.fg)
 
 const manageDatas = computed(() => props.data.filter(item => item.type == 'manager'))
 
+/*
+ * ===== 「飞书提醒」环节（type: 'notify'，见 types/approval 的 notify）=====
+ * 它只通知、不办理：流程到达即穿过，**不会有结论、也不会成为 currentStep**（见 rebuildChain 的 pushNotify）。
+ * 所以时间线上不该给它「办理」按钮 —— 更不该退而显示"未到该环节"（那看着像卡住了）——
+ * 该显示的是**提醒名称**（chain 里 type='notify' 那条的 name）与**提醒对象**（notify.to）。
+ */
+function isNotifyStepData (data?: ApprovalChainItem[]) {
+  return !!data?.some(i => i.type === 'notify')
+}
+/** 本节点就是「飞书提醒」环节 */
+const isNotifyStep = computed(() => isNotifyStepData(props.data))
+/** 提醒环节那一条成员：name = 提醒名称，notify = { content, to } */
+const notifyItem = computed(() => props.data.find(i => i.type === 'notify'))
+/**
+ * 提醒对象（这一环会通知谁）。
+ * 建单期只把**姓名**快照进 chain（见 pushNotify），所以这里只有名字、没有头像/部门。
+ */
+const notifyTo = computed(() => notifyItem.value?.notify?.to ?? [])
+
 
 const initials = ref('')
 watch(
@@ -633,7 +665,14 @@ const actionSteps = computed(() => [
 ])
 
 
-const activeStep = computed(() => actionSteps.value.find(s => !mainOf(s.data)?.handled_at))
+/**
+ * 当前要办的那一环。
+ *
+ * ⚠️ 跳过「飞书提醒」环节：它没有办理人、也不会有 handled_at，
+ *    不跳过的话 `mainOf(提醒环)` 兜底取到那条 notify 成员、永远"未办理"，
+ *    于是弹窗会对着一个不需要办的环节显示「办理」（或"未到该环节"）。
+ */
+const activeStep = computed(() => actionSteps.value.find(s => !isNotifyStepData(s.data) && !mainOf(s.data)?.handled_at))
 
 /** 当前动作在组内的序号（从 1 起）与动作总数：>1 时弹窗里提示"办完自动接下一环" */
 const actionNo = computed(() => actionSteps.value.findIndex(s => s.index === activeStep.value?.index) + 1)
@@ -806,7 +845,6 @@ const doneActions = computed(() =>
 )
 
 const dialog = ref(false)
-const setClean = ref(false)
 const attachment = ref<File | null>(null)
 const fileInputRef = ref<{ click: () => void } | null>(null)
 const dialogs = ref(false)
@@ -838,7 +876,6 @@ function resetFormState () {
   reasonRemark.value = ''
   pickedMembers.value = {}
   picking.value = false
-  setClean.value = false
   opinion.value = ''
   attachment.value = null
   // 下一环的数据到了（或已经没得办）：解除"等待中"，按钮恢复可用
@@ -1160,7 +1197,7 @@ watch(
 const needRecycle = computed(
   () => selectedResult.value === 'recycle' || selectedResult.value === 'supplier_recycle',
 )
-const needScrapConfirm = computed(() => selectedResult.value === 'scrap')
+// 「报废清仓」不需要额外的表单：选中即确认（confirmed 在 collectResult 里写死 true）
 const needReason = computed(() => selectedResult.value === 'other_reason')
 /** 「选择接收组别」：需要当场选组别（见 PICK_MEMBERS_RESULT） */
 const needPickMembers = computed(() => selectedResult.value === PICK_MEMBERS_RESULT)
@@ -1169,7 +1206,14 @@ const needPickTeam = computed(() => selectedResult.value === PICK_TEAM_RESULT)
 /** 两条"当场指定接收方"的结论，界面共用一块（选择器按 needPickTeam 切模式） */
 const needPick = computed(() => needPickMembers.value || needPickTeam.value)
 
-const nodeTargets = computed(() => props.data.filter(item => item.type != 'manager'))
+/**
+ * 本环节的**抄送人**（type 不是 manager 的成员）。
+ *
+ * ⚠️ 排除「飞书提醒」那条：它是**环节本身**，不是抄送给谁的人，`name` 是环节名（如「提醒1」）。
+ *    以前它会落到这里被渲染成一个「抄送」标签 + 环节名，看着像"抄送了提醒1"这种没意义的东西；
+ *    提醒名称与提醒对象改由模板里的 notifyItem / notifyTo 显示。
+ */
+const nodeTargets = computed(() => props.data.filter(item => item.type != 'manager' && item.type !== 'notify'))
 
 const transferIn = computed(() => props.data.find(m => m.delegated_from))
 const transferredTo = computed(() => manageDatas.value[0]?.transferred_to)
@@ -1333,8 +1377,13 @@ function collectResult(): { result: string, result_label: string, extra: Record<
       extra.amount = recycleAmount.value
       return { result, result_label: '供应商回收', extra }
     }
-    case 'scrap': { // 报废清仓：确认标记
-      extra.confirmed = setClean.value
+    case 'scrap': {
+      /*
+       * 报废清仓：**选中即确认** —— 以前还要在表单里再点一次「确认报废清仓」按钮，
+       * 那个 `confirmed` 标记才有值（漏点就静默存成 false，流程里按它写条件的线永远不命中）。
+       * 现在直接置 true：结论本身就是"确认清仓"这个动作，没有第二个语义。
+       */
+      extra.confirmed = true
       return { result, result_label: '报废清仓', extra }
     }
     case 'rework': {
@@ -1468,8 +1517,8 @@ async function handleConfirm() {
   align-items: center;
   gap: 4px;
   margin-bottom: 6px;
-  padding: 1px 8px;
-  border-radius: 999px;
+  padding: 3px 8px;
+  border-radius: 5px;
   font-size: 12px;
   font-weight: 600;
   line-height: 18px;

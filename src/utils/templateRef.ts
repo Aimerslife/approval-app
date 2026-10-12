@@ -386,11 +386,18 @@ function firstRealStepId (nodes: any[]): string | undefined {
 }
 
 /**
- * 把**指向引用卡片**的回退目标（`loopBackTo` / `exitTo`）改写成本层记录的真实环节 id。
+ * 把**指向引用卡片**的跳转目标（`loopBackTo` / `exitTo` / `afterLoop`）改写成本层记录的真实环节 id。
  *
- * 只动这两个字段：它们是"按 id 跳转"的引用；`members`（审批人）、`conditions`（条件）、
+ * 只动这几个字段：它们是"按 id 跳转"的引用；`members`（审批人）、`conditions`（条件）、
  * `optionGroups`（选项树）一律不碰 —— 与 prefixFlow 同一份克制的口径。
  * 目标是**本层**的引用卡片，所以按传入的映射表精确匹配（引用卡片 id 由 uid 生成，不会撞）。
+ *
+ * ⚠️ 为什么 `afterLoop`（轮询卡片的「轮完走向」）也必须在这里换掉：
+ * 它和 `exitTo` 一样是"按 id 跳转"，只是**由轮询展开生成分支**（见 utils/approvalRotation 的
+ * loopEndBranchGroup）—— 那次生成发生在**本函数之后**（引用展开是最前一步，见
+ * utils/expandFlowForOrder 的顺序说明），生成出来的分支已经没人再给它重映射了。
+ * 漏掉它的表现：`afterLoop` 指着引用卡片 → 展开后那个 id 不存在 →
+ * 建单/办理时抛「跳出循环目标环节不存在」（与 `exitTo` 漏映射同一个坑，那里踩过）。
  */
 function remapRefTargets (nodes: any[], targets: Map<string, string>): void {
   if (targets.size === 0) {
@@ -415,6 +422,11 @@ function remapRefTargets (nodes: any[], targets: Map<string, string>): void {
       return
     }
     if (n?.type === 'loop') {
+      // 「轮完走向」（卡片级，存的是目标节点 id）：目标正是本层的引用卡片时换掉（理由见函数说明）
+      const after = String(n.afterLoop ?? '')
+      if (after && targets.has(after)) {
+        n.afterLoop = targets.get(after)!
+      }
       for (const s of n.steps ?? []) {
         visitStep(s)
       }

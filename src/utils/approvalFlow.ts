@@ -20,6 +20,8 @@ import { deriveFlowFields } from './biRowFields'
  * 但两处都只在函数体里调用，ESM 的循环依赖完全没问题（模块初始化时谁都不碰对方的值）。
  */
 import { cardGraphToSteps } from './loopCardGraph'
+// 「跳出循环 / 轮完走向」的候选类型（审批 / 提醒 / 引用模板 / 轮询）：与编辑器下拉**共用同一份**口径
+import { isExitTargetNode } from './exitTargets'
 // 团队表反查：「选择接收组别」的候选限定在本单所属团队内（纯数据模块，不参与成环）
 import { teamOfGroup } from './organazation'
 
@@ -65,6 +67,14 @@ export function graphToFlowFrom (
      * 语义上确实允许"引用外层"，所以在校验处放行、而不是另写一套转换器。
      */
     externalApprovalIds?: Set<string>
+    /**
+     * 环内那条线**没选目标**时的兜底目标（节点 id）—— 就是卡片上那条「提前跳出」出线的目标
+     * （见 utils/loopCardGraph 的 `defaultJumpTarget`）。
+     *
+     * 有它的意义：同一张卡片上"某组接了 → 提前结束轮询"的去向，在卡片上配**一次**就够，
+     * 不必进卡片内部逐条线重复选。环内那条线自己选了目标时仍以它为准（每个组可以跳到不同地方）。
+     */
+    defaultJumpTarget?: string
   } = {},
 ): {
   flow: ApprovalFlow
@@ -80,34 +90,154 @@ export function graphToFlowFrom (
 } {
   const nodesById = new Map(nodes.map(n => [n.id, n]))
   /**
-   * 本图内**可以当「跳出循环」目标**的环节 id：审批环节 + 飞书提醒。
+   * 本图内**可以当「跳出循环」目标**的环节 id。
    *
-   * 传给卡片内部图当「外部目标白名单」（卡片内部的分支可「提前结束轮询 → 跳到卡片外的环节」，
-   * 见 opts.externalApprovalIds）。
+   * 类型口径在 utils/exitTargets（审批 / 飞书提醒 / 引用模板 / 组间轮询 —— 四类都有"到达"这一步，
+   * 运行期也都能落到具体环节），**编辑器下拉走的是同一个函数** ——
+   * 以前两处各写一份 filter，于是"引用模板卡片不在下拉里、可它其实是合法目标"
+   * （建单期 remapRefTargets 就是为这种目标写的），用户配不出来。
    *
    * ⚠️ 这份口径必须与下面的**类型校验**一致：白名单先拦，拦下来报的是"目标环节已不存在" ——
    * 两边不一致时（比如这里只放审批、校验却允许提醒）就会出现"明明选了却报不存在"的假错。踩过。
    */
   const outerExitIds = new Set(
-    nodes.filter(n => n.type === 'approval' || n.type === 'notify').map(n => String(n.id)),
+    nodes.filter(n => isExitTargetNode(n)).map(n => String(n.id)),
   )
 
   /**
-   * 读卡片级「轮完走向」（`LoopNodeData.afterLoop`，存的是目标节点 id）并校验。
+   * 「跳出循环 / 提前跳出 / 轮完走向」**声明过的落点**（本图节点 id）。
    *
-   * 白名单用的就是上面那份 `outerExitIds` —— 与卡片内部「提前结束轮询」**同一份**：
-   * 两处都是"跳到卡片外的某个能到达的环节"，用两套口径只会让人配出选得下、跑不通的组合。
+   * 为什么单独收一份：这些线的落点**不画在主路径上也是合法的** ——
+   * "某组接了 → 提前结束轮询 → 先发个飞书提醒再结束"本来就是一条挂在旁边的支路，
+   * 它自然不在主路径上。主路径走完（到「结束」）之后，会从这些落点接着把支路走一遍
+   * （见下面 end 分支），它才不会在孤儿校验里被当成"没连接进主流程"。
+   *
+   * 三处都算：分支连线上的「跳出循环」、轮询卡片出线上的「提前跳出」、
+   * 卡片下拉里的「轮完走向」，以及**卡片内部**连线的「提前结束轮询」
+   * （那种线的落点也在这个图里，只是画在卡片里面）。
+   */
+  const jumpTargetIds = new Set<string>()
+  const addJumpTarget = (v: unknown) => {
+    const id = String(v ?? '').trim()
+    if (id) {
+      jumpTargetIds.add(id)
+    }
+  }
+  for (const e of edges) {
+    if (e?.data?.exitMode === 'jump') {
+      addJumpTarget(e.data.exitTo)
+    }
+    if (e?.data?.loopExit === 'early') {
+      addJumpTarget(e.target)
+    }
+  }
+  for (const n of nodes) {
+    if (n?.type !== 'loop') {
+      continue
+    }
+    const d = n.data as LoopNodeData | undefined
+    addJumpTarget(d?.afterLoop)
+    for (const ie of d?.graph?.edges ?? []) {
+      if (ie?.data?.exitMode === 'jump') {
+        addJumpTarget(ie.data.exitTo)
+      }
+    }
+  }
+
+  /**
+   * 读一个"跳出到本图某环节"的目标（存的是目标节点 id）并校验。
+   *
+   * 白名单用的就是上面那份 `outerExitIds` —— 卡片下拉的「轮完走向」、卡片上的
+   * 「提前跳出」出线、卡片内部连线的「提前结束轮询」**共用同一份**：
+   * 它们都是"跳到某个能到达的环节"，用两套口径只会让人配出选得下、跑不通的组合。
    * 返回 `error` 时调用方带上自己的 errorNodeId 返回（保存时能直接标红定位到卡片）。
    */
-  const readAfterLoop = (raw: unknown, label: string): { value?: { stepId: string }, error?: string } => {
+  const readExitTarget = (
+    raw: unknown,
+    label: string,
+    what: string,
+  ): { value?: { stepId: string }, error?: string } => {
     const id = String(raw ?? '').trim()
     if (!id) {
       return {}
     }
     if (!outerExitIds.has(id)) {
-      return { error: `卡片「${label}」的「轮完走向」目标环节已不存在，请重新选择（或清空这一项）` }
+      return { error: `卡片「${label}」的「${what}」目标环节已不存在，请重新选择（或清空这一项）` }
     }
     return { value: { stepId: id } }
+  }
+
+  /** 读卡片下拉里的「轮完走向」（`LoopNodeData.afterLoop`） */
+  const readAfterLoop = (raw: unknown, label: string) => readExitTarget(raw, label, '轮完走向')
+
+  /**
+   * 把一张「组间轮询」卡片的出线按**走向**拆开（见 `FlowGraphEdge.data.loopExit`）：
+   *   · 「轮完」（没标 / 标 `'done'`）= 所有组都轮完、一直没人跳出轮询 → 卡片的**后继**
+   *     （老语义：卡片唯一那条出线就是它）；
+   *   · 「提前跳出」（标 `'early'`）= 某一组接了、提前结束轮询 → 环内「提前结束轮询」的**缺省目标**。
+   *
+   * 为什么允许两条、又必须能区分：卡片要"每环复制一份"，多条出线在不看走向时说不清
+   * "第几环走哪条"（以前干脆一律拒绝）。标出走向之后两条各有明确含义，就不再歧义了 ——
+   * 老数据（一条线、什么都不标）完全不受影响：它就是「轮完」那条。
+   */
+  const splitLoopOuts = (outs: any[], title: string): { done?: any, early?: any, error?: string } => {
+    const early = outs.filter(e => e?.data?.loopExit === 'early')
+    const done = outs.filter(e => e?.data?.loopExit !== 'early')
+    if (early.length > 1) {
+      return { error: `卡片「${title}」只能有一条「提前跳出」出线（现在有 ${early.length} 条）` }
+    }
+    if (done.length > 1) {
+      return {
+        error: `卡片「${title}」有 ${done.length} 条出线、但都没标走向：请选中其中一条，`
+          + '在上面板把「本线走向」选成「提前跳出」（剩下那条就自动是「轮完」）',
+      }
+    }
+    return { done: done[0], early: early[0] }
+  }
+
+  /**
+   * 读轮询卡片的出线走向，产出转换/展开要的两样东西：
+   *   · `next`  —— 卡片的**后继**（「轮完」那条线的目标）；
+   *   · `early` —— 「提前跳出」那条线的目标（环内没选目标的分支落到它上面）。
+   *
+   * 顶层卡片与"分支里的卡片步骤"两处**共用这一份**，口径只写一次。
+   *
+   * @param afterLoopSet 卡片下拉里的「轮完走向」是否配了值：两条出线时两处都配就说不清走哪条，
+   *                     当场报错（不做静默取舍 —— 用户会以为是"配了没生效"）。
+   */
+  const readLoopOuts = (
+    outs: any[],
+    title: string,
+    afterLoopSet: boolean,
+  ): { next?: string, early?: { stepId: string }, error?: string } => {
+    const roles = splitLoopOuts(outs, title)
+    if (roles.error) {
+      return { error: roles.error }
+    }
+    let early: { stepId: string } | undefined
+    if (roles.early) {
+      const t = readExitTarget(roles.early.target, title, '提前跳出')
+      if (t.error) {
+        /*
+         * 这条线的目标就是"跳过去接着办"的环节（画布上直接连的），所以它必须是
+         * 开始/结束/条件分支/数据查询之外的节点 —— 那几类没有"到达"这一步
+         * （口径见 utils/exitTargets）。用户很容易把线拖到「结束」，这里说清楚。
+         */
+        return {
+          error: `卡片「${title}」的「提前跳出」出线接到了不能跳的目标：`
+            + '请把这条线改接到本图里的审批 / 飞书提醒 / 引用模板 / 组间轮询环节'
+            + '（开始 / 结束 / 条件分支 / 数据查询没有"到达"这一步）',
+        }
+      }
+      early = t.value
+    }
+    if (early && afterLoopSet) {
+      return {
+        error: `卡片「${title}」的「轮完」走向配了两处：卡片上的下拉与画布上的两条出线只能留一处`
+          + '（两条出线时，「轮完」就是那条没标「提前跳出」的线，请把下拉清空）',
+      }
+    }
+    return { next: (roles.done ?? roles.early)?.target, ...(early ? { early } : {}) }
   }
 
   /**
@@ -168,6 +298,14 @@ export function graphToFlowFrom (
   const mainVisited = new Set<string>()
   let hasMember = false
   let guard = 0
+  /**
+   * 当前正在走的是**哪条支路**的入口（空 = 走主路径）。
+   *
+   * 主路径走完到「结束」之后，会回头把「跳出循环 / 提前跳出」声明过的脱线支路也走一遍
+   * （见 end 分支）。走支路时"撞上已走过的环节"含义不同（那是"又绕回主干"），
+   * 要报清楚这句人话而不是笼统的"检测到环"。
+   */
+  let extraFrom = ''
 
   /**
      * 给错误补上「是哪个环节出错」。
@@ -505,7 +643,14 @@ export function graphToFlowFrom (
        * 否则只能等运行期 rebuildChain 抛错或静默跳过 —— 那时最难查（单据已经建出来了）。
        */
       const exitMode = be.data?.exitMode === 'jump' ? 'jump' : 'end'
-      const exitToId = exitMode === 'jump' && be.data?.exitTo ? String(be.data.exitTo) : ''
+      /*
+       * 目标优先用这条线自己选的；没选时落到**卡片上那条「提前跳出」出线**的目标
+       * （opts.defaultJumpTarget，只有卡片内部图会传）——"某组接了跳到哪"在卡片上配一次即可。
+       * 两个都没有才报错（下面那段）。
+       */
+      const exitToId = exitMode === 'jump'
+        ? (String(be.data?.exitTo ?? '').trim() || String(opts.defaultJumpTarget ?? '').trim())
+        : ''
       if (exitMode === 'jump' && !exitToId) {
         return {
           branches,
@@ -535,17 +680,19 @@ export function graphToFlowFrom (
           }
         }
         /*
-         * 目标可以是**审批环节**（跳过去接着办），也可以是**飞书提醒**：
-         * 提醒节点本身就是"到达即穿过"（不记结论、不停留，但会真的发一条通知），
-         * 所以"某个组做完先通知一下、再继续往下走"是有意义的跳法。
+         * 目标的类型由 utils/exitTargets 统一判定（与候选下拉同一份口径）：
+         *   · 审批环节：跳过去接着办；
+         *   · 飞书提醒：到达即穿过（会真发一条通知），"先通知一下再往下走"是有意义的跳法；
+         *   · 引用模板：建单期把源模板那一整段搬进来，跳过去从那一段的第一环接着走；
+         *   · 组间轮询：跳过去落在它展开后的第一环（见 utils/approvalRotation 的 firstOf）。
          * 开始 / 结束 / 分支 / 数据查询都没有"到达"这一步，仍然不允许。
          * 外部目标（卡片内部图引用的卡片外环节）的类型由外层图自己保证 —— 白名单就是照它们建的。
          */
-        if (target && !['approval', 'notify'].includes(String(target.type))) {
+        if (target && !isExitTargetNode(target)) {
           return {
             branches,
             territory,
-            error: `「${name}」的「跳出循环」目标必须是审批环节或飞书提醒`,
+            error: `「${name}」的「跳出循环」目标必须是审批环节、飞书提醒、引用模板或组间轮询`,
             errorEdgeId: be.id,
           }
         }
@@ -810,34 +957,31 @@ export function graphToFlowFrom (
             errorNodeId: p,
           }
         }
-        /*
-         * 卡片不接受多条出线：它的每一条出线都要按组复制一份，"第几环走哪条"说不清。
-         * 要按结论分流就把条件分支画进卡片内部（那里是按组各判一次的）。
-         */
-        if (outs.length > 1) {
-          return {
-            steps,
-            territory,
-            error: `卡片「${title}」只能有一条出线 —— 它本身就是"所有组都轮完"之后的去路；`
-              + '要改这条去路，请用卡片上的「轮完」下拉选目标环节。'
-              + '（"某一组接了 → 提前结束轮询"和"按审批结论分流"都画在卡片内部）',
-            errorNodeId: p,
-          }
-        }
         if (!visit(p)) {
           return { steps, territory, error: '流程中检测到环（节点被重复经过），请检查连线' }
-        }
-        // 卡片内部图允许「提前结束轮询」跳到**卡片外**的环节 → 把本图的审批环节当白名单传进去
-        const inner = cardGraphToSteps(d?.graph, { externalApprovalIds: outerExitIds })
-        if (inner.error) {
-          return { steps, territory, error: `卡片「${title}」内部：${inner.error}`, errorNodeId: p }
-        }
-        if (!d?.rotation) {
-          return { steps, territory, error: `卡片「${title}」还没有轮询配置，请点卡片填写「组字段」`, errorNodeId: p }
         }
         const afterLoop = readAfterLoop(d?.afterLoop, title)
         if (afterLoop.error) {
           return { steps, territory, error: afterLoop.error, errorNodeId: p }
+        }
+        /*
+         * 出线按走向拆：一条「轮完」（卡片的后继）、一条「提前跳出」
+         * （环内「提前结束轮询」没选目标时落到它上面）。见 readLoopOuts / splitLoopOuts。
+         */
+        const loopOuts = readLoopOuts(outs, title, !!afterLoop.value)
+        if (loopOuts.error) {
+          return { steps, territory, error: loopOuts.error, errorNodeId: p }
+        }
+        if (!d?.rotation) {
+          return { steps, territory, error: `卡片「${title}」还没有轮询配置，请点卡片填写「组字段」`, errorNodeId: p }
+        }
+        // 卡片内部图允许「提前结束轮询」跳到**卡片外**的环节 → 把本图的审批环节当白名单传进去
+        const inner = cardGraphToSteps(d?.graph, {
+          externalApprovalIds: outerExitIds,
+          ...(loopOuts.early ? { defaultJumpTarget: loopOuts.early.stepId } : {}),
+        })
+        if (inner.error) {
+          return { steps, territory, error: `卡片「${title}」内部：${inner.error}`, errorNodeId: p }
         }
         steps.push({
           id: pn.id,
@@ -847,7 +991,7 @@ export function graphToFlowFrom (
           steps: inner.steps,
           ...(afterLoop.value ? { afterLoop: afterLoop.value } : {}),
         })
-        p = outs[0].target
+        p = loopOuts.next
         continue
       }
 
@@ -935,6 +1079,20 @@ export function graphToFlowFrom (
     // 分支/主线汇聚之后，业务节点只允许被主路径经过一次；重复经过即存在环或反向回连
     if ((node.type === 'approval' || node.type === 'condition' || node.type === 'notify' || node.type === 'probe' || node.type === 'ref') && visited.has(cur)) {
       const t = String((node.data as ApprovalNodeData)?.title || '未命名环节')
+      /*
+       * 走「跳出循环 / 提前跳出」的支路时撞上走过的环节 = 这条支路**又绕回了主流程**。
+       * 这种写法在这套"线性链路"里表达不出来：跳过去之后只能一路走下去到「结束」，
+       * 绕回主干会让主干被重复经过（谁先谁后说不清）。所以给一句能照着改的提示。
+       */
+      if (extraFrom) {
+        return {
+          flow: [],
+          error: `「${t}」是「跳出循环 / 提前跳出」跳到的环节，但它后面又接回了主流程已经走过的环节：`
+            + '这种"跳出去再绕回主干"的接法跑不通（主干会被重复经过）。'
+            + '请把这一段自己接到「结束」节点，或把跳转落点改成主流程上的那个环节',
+          errorNodeId: cur,
+        }
+      }
       return {
         flow: [],
         error: `「${t}」被重复经过（流程中检测到环），请检查连线`,
@@ -943,6 +1101,20 @@ export function graphToFlowFrom (
     }
 
     if (node.type === 'end') {
+      /*
+       * 先把「跳出循环 / 提前跳出 / 轮完走向」声明过的**脱线支路**走完
+       * （见 jumpTargetIds）：
+       *   · "某组接了 → 提前跳出 → 先提醒一下再结束"这种支路本来就不在主路径上；
+       *   · 走完它，它的步骤才在 flow 里，运行期的 `exitTo` 才找得到落点
+       *     （否则会以为它"没连接进主流程"，或者建单那一刻才发现目标不存在）。
+       * 支路走到「结束」后回到这里，继续处理还没走过的落点。
+       */
+      const pending = [...jumpTargetIds].filter(id => !visited.has(id) && nodesById.has(id))
+      if (pending.length > 0) {
+        extraFrom = String((nodesById.get(pending[0])?.data as ApprovalNodeData)?.title || '未命名环节')
+        cur = pending[0]
+        continue
+      }
       // 校验：所有业务节点都必须挂在主路径上
       const orphans = nodes.filter(
         n => (n.type === 'approval' || n.type === 'condition' || n.type === 'notify' || n.type === 'probe' || n.type === 'ref') && !visited.has(n.id),
@@ -1067,18 +1239,37 @@ export function graphToFlowFrom (
       mainVisited.add(cur)
       const d = node.data as LoopNodeData
       const name = d?.title || '组间轮询'
-      // 同上：卡片内部图可以用「提前结束轮询」跳到卡片外的环节
-      const inner = cardGraphToSteps(d?.graph, { externalApprovalIds: outerExitIds })
-      if (inner.error) {
+      const nexts = out.get(cur) ?? []
+      if (nexts.length === 0) {
         return {
           flow: [],
-          error: `卡片「${name}」内部：${inner.error}`,
+          error: `卡片「${name}」没有出线，请从卡片下方拖出连线到下一步或结束`,
           errorNodeId: cur,
         }
       }
       const afterLoop = readAfterLoop(d?.afterLoop, name)
       if (afterLoop.error) {
         return { flow: [], error: afterLoop.error, errorNodeId: cur }
+      }
+      /*
+       * 出线按走向拆：一条「轮完」（卡片的后继）、一条「提前跳出」
+       * （环内「提前结束轮询」没选目标时落到它上面）。见 readLoopOuts / splitLoopOuts。
+       */
+      const loopOuts = readLoopOuts(nexts, name, !!afterLoop.value)
+      if (loopOuts.error) {
+        return { flow: [], error: loopOuts.error, errorNodeId: cur }
+      }
+      // 同上：卡片内部图可以用「提前结束轮询」跳到卡片外的环节
+      const inner = cardGraphToSteps(d?.graph, {
+        externalApprovalIds: outerExitIds,
+        ...(loopOuts.early ? { defaultJumpTarget: loopOuts.early.stepId } : {}),
+      })
+      if (inner.error) {
+        return {
+          flow: [],
+          error: `卡片「${name}」内部：${inner.error}`,
+          errorNodeId: cur,
+        }
       }
       flow.push({
         id: node.id,
@@ -1088,29 +1279,7 @@ export function graphToFlowFrom (
         steps: inner.steps,
         ...(afterLoop.value ? { afterLoop: afterLoop.value } : {}),
       })
-      const nexts = out.get(cur) ?? []
-      if (nexts.length === 0) {
-        return {
-          flow: [],
-          error: `卡片「${name}」没有出线，请从卡片下方拖出连线到下一步或结束`,
-          errorNodeId: cur,
-        }
-      }
-      /*
-       * 卡片是"一段子流程"，**不支持**多条出线（审批结果分流）：
-       * 它的每一条出线都要按组复制一份，语义上说不清"第几环走哪条"。
-       * 要按结论分流，请把分支画在卡片**内部**（那才是"每个组各自分流"）。
-       */
-      if (nexts.length > 1) {
-        return {
-          flow: [],
-          error: `卡片「${name}」只能有一条出线 —— 它本身就是"所有组都轮完"之后的去路；`
-            + '要改这条去路，请用卡片上的「轮完」下拉选目标环节。'
-            + '（"某一组接了 → 提前结束轮询"和"按审批结论分流"都画在卡片内部）',
-          errorNodeId: cur,
-        }
-      }
-      cur = nexts[0].target
+      cur = loopOuts.next
       continue
     }
 

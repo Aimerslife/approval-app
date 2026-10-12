@@ -20,7 +20,7 @@
            <v-icon-btn size="24" title="提醒设置" variant="text" @click="routerGo('/alarmSetting')">
             <v-icon size="15">mdi-alarm-check</v-icon>
           </v-icon-btn>
-          <v-icon-btn size="24" title="审批说明" variant="text" @click="routerGo('/logic')">
+          <v-icon-btn size="24" title="审批说明" variant="text" @click="routerGo('/knowledge')">
             <v-icon size="15">mdi-book-open-variant</v-icon>
           </v-icon-btn>
 
@@ -248,14 +248,6 @@
   }
   const route = useRoute()
   const isPublic = computed(() => route.meta.public === true)
-
-  /*
-   * 未审批单数角标（侧边栏「我的审批单」上的红点数字，口径见 stores/pending.ts）。
-   *
-   * 为什么 watch 登录态而不是挂载时拉一次：
-   * 登录可能发生在本次挂载**之后**（飞书 OAuth 是跳出去再回来），未登录时请求会被 PB 拒绝；
-   * 退出登录还要 stop() 清零，否则角标会留着上一个账号的数字。
-   */
   const pending = usePendingStore()
   watch(() => userStore.isLoggedIn, logged => {
     if (logged) {
@@ -266,11 +258,6 @@
     }
   }, { immediate: true })
 
-  /*
-   * 切页就刷新：审批、建单都发生在页面里，办完切页时把角标对齐到最新。
-   * （提交审批**那一刻**的刷新在 composables/useNodeSubmit 里 —— 那里是唯一改 status 的入口，
-   *   写在这里会漏掉"不切页就提交"的情况。）
-   */
   watch(() => route.path, () => {
     if (userStore.isLoggedIn) {
       void pending.refresh()

@@ -6,6 +6,9 @@ import http from 'node:http'
 import https from 'node:https'
 import * as lark from '@larksuiteoapi/node-sdk'
 import Database from 'better-sqlite3'
+// 推送规则（「提醒设置」页面配的那份）：默认值 + 记录→规则的映射，与前端**共用同一份**
+// （纯函数模块，服务端引它不会拖进任何前端依赖，见 utils/pushRules 的文件头）
+import { pushRulesFromRecord, type PushRules } from '../src/utils/pushRules'
 import { runBiSync, uploadRows } from './biSync'
 import { deleteApprovalOrder } from './orderDelete'
 import { purgeBiData as runPurgeBiData } from './purgeData'
@@ -394,10 +397,34 @@ async function orgAdmins (): Promise<Array<{ name?: string, email?: string }>> {
   return out
 }
 
-/** 跑一遍超时提醒（路由与定时任务共用） */
-function runReminderBatch (dryRun: boolean, now?: Date) {
+/**
+ * 读「提醒设置」页面保存的推送规则（取最新那条）。
+ *
+ * 读不到（表还没建、没配过、PB 抽风）→ 回落默认规则：超时提醒**绝不能**因为没有配置而停摆，
+ * 默认规则就是改造前的行为（工作日 48h 起、每天催当前审批人）。所以这里不抛错。
+ * 每次跑批现读、不缓存：跑批本来就不频繁，而"改了规则要等缓存过期才生效"属于最难排查的一类问题。
+ */
+async function readPushRules (): Promise<PushRules> {
+  try {
+    const { status, data } = await pbRequest(
+      'GET',
+      '/api/collections/push_rules/records?perPage=1&sort=-updated',
+    )
+    if (status !== 200 || !data?.items?.length) {
+      return pushRulesFromRecord(null)
+    }
+    return pushRulesFromRecord(data.items[0])
+  } catch (error: any) {
+    console.warn('[PushRules] 读取推送规则失败，按默认规则跑批:', error?.message ?? error)
+    return pushRulesFromRecord(null)
+  }
+}
+
+/** 跑一遍超时提醒（路由与定时任务共用）。规则现读现用，见 readPushRules */
+async function runReminderBatch (dryRun: boolean, now?: Date) {
+  const rules = await readPushRules()
   return runReminders(
-    { pbUrl: PB_URL, sendText: sendFeishuText, admins: orgAdmins, log: console.log },
+    { pbUrl: PB_URL, sendText: sendFeishuText, admins: orgAdmins, rules, log: console.log },
     { dryRun, ...(now ? { now } : {}) },
   )
 }
@@ -1075,6 +1102,11 @@ if (remindMin > 0) {
   const tick = async () => {
     try {
       const report = await runReminderBatch(!sending)
+      // 被规则挡掉时单独说一句：否则"记了几行日志但什么都没动"会被误读成没有超时单
+      if (report.gate) {
+        console.log(`[Reminders] 本轮按推送规则跳过：${report.gate}`)
+        return
+      }
       console.log(`[Reminders] 跑批：扫描 ${report.scanned}，应提醒 ${report.due}，已发 ${report.sent}`
         + `${report.skippedToday ? `，今日已发过 ${report.skippedToday}` : ''}`
         + `${report.errors.length > 0 ? `，错误 ${report.errors.length}` : ''}`)

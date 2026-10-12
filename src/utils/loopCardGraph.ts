@@ -51,7 +51,7 @@ export function cardGraphToSteps (
      */
     allowEmptyMembers?: boolean
     /**
-     * **卡片外**的审批环节 id 白名单。
+     * **卡片外**可作跳转目标的环节 id 白名单（口径见 utils/exitTargets）。
      *
      * 卡片内部的分支可以「提前结束轮询 → 跳到卡片外的环节」（面板上配，数据写在内部连线
      * 的 `data.exitMode/exitTo` 上，与主画布同一份格式）。那个环节不在内部图里，
@@ -59,6 +59,14 @@ export function cardGraphToSteps (
      * 目标不在名单里就是"外面那个环节被删了"，当场报错，而不是等建单时抛「目标环节不存在」。
      */
     externalApprovalIds?: Set<string>
+    /**
+     * 环内那条线**没选目标**时的兜底目标（节点 id）—— 卡片上那条「提前跳出」出线的目标
+     * （见 utils/approvalFlow 的 readLoopOuts）。
+     *
+     * 有兜底时"只标了提前结束轮询、没选目标"是**合法**的：去向在卡片上配一次就够；
+     * 没有兜底才报错（老口径）。
+     */
+    defaultJumpTarget?: string
   } = {},
 ): CardGraphResult {
   const nodes = graph?.nodes ?? []
@@ -91,15 +99,25 @@ export function cardGraphToSteps (
   /*
    * 「提前结束轮询」的**死目标**在保存期就拦下来（别留到建单那一刻 —— 那时单子已经建出来了）。
    * 能在这里拦，是因为外层环节清单就是调用方传进来的白名单：
-   *   · 选了「提前结束轮询」却没选目标 → 报错；
+   *   · 选了「提前结束轮询」却没选目标 → **有卡片级兜底时放行**（落到卡片上那条「提前跳出」出线），
+   *     否则报错并给出两条出路；
    *   · 目标不在白名单里 → 外面那个环节被删过了，报错。
    * 目标在名单里 = 合法，交给 graphToFlowFrom 原样写进 branch.exitTo。
    */
+  const fallback = String(opts.defaultJumpTarget ?? '').trim()
   const jumpEdges = edges.filter(e => e?.data?.exitMode === 'jump')
   for (const e of jumpEdges) {
     const to = e.data?.exitTo ? String(e.data.exitTo) : ''
     if (!to) {
-      return { steps: [], error: '有分支选了「提前结束轮询」但没选目标环节，请在连线下面板里选一个', errorEdgeId: e.id }
+      if (fallback) {
+        continue
+      }
+      return {
+        steps: [],
+        error: '有分支选了「提前结束轮询」但没选目标环节：请在连线下面板里选一个，'
+          + '或者在卡片上拉一条标着「提前跳出」的出线（那条线的目标就是它的去向）',
+        errorEdgeId: e.id,
+      }
     }
     if (!opts.externalApprovalIds?.has(to)) {
       return { steps: [], error: '有分支的「提前结束轮询」目标环节已不存在（卡片外的那个环节可能被删了），请重新选择', errorEdgeId: e.id }
@@ -108,6 +126,7 @@ export function cardGraphToSteps (
   const inner = graphToFlowFrom(nodes, edges, {
     allowEmptyMembers: opts.allowEmptyMembers ?? true,
     ...(opts.externalApprovalIds ? { externalApprovalIds: opts.externalApprovalIds } : {}),
+    ...(fallback ? { defaultJumpTarget: fallback } : {}),
   })
   if (inner.error) {
     return {

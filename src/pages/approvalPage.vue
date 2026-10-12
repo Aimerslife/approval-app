@@ -34,7 +34,7 @@
 
     <v-row gap="0">
       <v-col ref="leftColRef" class="relative" cols="4">
-        <v-container>
+        <v-container class="pb-10">
           <v-timeline density="compact" side="end" truncate-line="both" width="100%">
             <!--
               时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 stepGroups），

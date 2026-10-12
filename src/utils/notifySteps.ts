@@ -5,6 +5,9 @@ import { collectNotifySteps } from '@/types/approval'
 import { applyNotifyTestGate, NOTIFY_TEST_GATE } from '@/utils/notifyGate'
 // 纯函数单独成模块（不依赖 PB 客户端），这样它能被 tsx 直接跑断言，见该文件顶部说明
 import { renderNotifyText } from '@/utils/notifyText'
+// 推送规则里的白名单：名单内的人不推送 —— 与定时催办同一份规则、同一个过滤口径
+import { excludeWhitelist, type PushPerson } from '@/utils/pushRules'
+import { loadPushRules } from '@/utils/pushRulesStore'
 
 /** 一轮「到达提醒」的发送结果 */
 export interface NotifySendResult {
@@ -53,6 +56,16 @@ export async function sendArrivedNotifies (opts: {
   const arrived = new Set<string>()
   const beforeSet = new Set(opts.before)
 
+  /*
+   * 白名单（「提醒设置」里配的那份）只读一次：一轮里可能有好几个提醒环，但规则是同一份。
+   * 惰性读 —— 这一轮没有任何提醒环时不该白发一个请求。读失败会回落默认规则（空白名单），不抛。
+   */
+  let whitelistCache: PushPerson[] | undefined
+  async function whitelistOf (): Promise<PushPerson[]> {
+    whitelistCache ??= (await loadPushRules()).rules.whitelist
+    return whitelistCache
+  }
+
   for (const stepId of opts.after) {
     if (beforeSet.has(stepId) || arrived.has(stepId)) {
       continue
@@ -75,12 +88,29 @@ export async function sendArrivedNotifies (opts: {
     }
 
     /*
+     * 白名单（「提醒设置」里配的）：名单内的人**一条都不发**。
+     * 放在测试闸门**之前**：白名单是用户的明确意愿（免打扰），测试闸门只是上线前的临时收口。
+     * 全被白名单挡掉时要记一条 —— 否则现象是"流程走到了提醒环，却谁都没收到消息"，无从查起。
+     */
+    const allowedByWhitelist = excludeWhitelist(to, await whitelistOf())
+    if (allowedByWhitelist.length === 0) {
+      const names = to.map(m => m.name || m.email).join('、')
+      out.skipped.push(`「${title}」的提醒对象都在推送白名单里（${names}），未发送`)
+      continue
+    }
+    if (allowedByWhitelist.length < to.length) {
+      const kept = new Set(allowedByWhitelist.map(m => m.email))
+      const dropped = to.filter(m => !kept.has(m.email)).map(m => m.name || m.email).join('、')
+      out.skipped.push(`「${title}」按推送白名单跳过 ${dropped}`)
+    }
+
+    /*
      * ⚠️ 测试闸门（NOTIFY-TEST-GATE）：只放行指定姓名的那一个人，其余跳过。
      * 跳过时把"本环节实际的提醒对象"打出来 —— 姓名对不上时能一眼看出该填哪个名字。
      */
-    const { allowed, blocked } = applyNotifyTestGate(to)
+    const { allowed, blocked } = applyNotifyTestGate(allowedByWhitelist)
     if (allowed.length === 0) {
-      const names = to.map(m => m.name || m.email).join('、')
+      const names = allowedByWhitelist.map(m => m.name || m.email).join('、')
       const why = `「${title}」按测试闸门跳过：只发给「${NOTIFY_TEST_GATE.onlyToName}」，`
         + `而这一环的提醒对象是 ${names}`
       out.skipped.push(why)

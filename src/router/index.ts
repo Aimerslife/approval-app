@@ -97,6 +97,10 @@ const router = createRouter({
       path: '/alarmSetting',
       component: () => import('@/pages/alarmSetting.vue'),
     },
+    {
+      path: '/knowledge',
+      component: () => import('@/pages/knowledge.vue'),
+    },
   ],
   scrollBehavior () {
     return { top: 0 }

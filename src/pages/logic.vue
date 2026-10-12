@@ -21,35 +21,9 @@
     <v-row>
       <v-md-preview :text="data.content" />
     </v-row>
-
-    <v-navigation-drawer v-model="open" location="right" permanent :width="ifExpand?width:750">
-      <div
-        class="d-flex justify-between align-center sticky top-[0px] z-800 w-full"
-        style="background-color: rgb(var(--v-theme-surface))"
-      >
-        <v-icon-btn color="#727272" size="40" variant="text" @click="expand">
-          <v-icon size="20">{{ ifExpand ? 'mdi-unfold-less-vertical' : 'mdi-unfold-more-vertical' }}</v-icon>
-        </v-icon-btn>
-
-        <span class="text-[13px]">审批流程</span>
-
-        <v-icon-btn color="#727272" size="40" variant="text" @click="open = false">
-          <v-icon size="15">mdi-close</v-icon>
-        </v-icon-btn>
-      </div>
-
-      <v-divider />
-
-      <v-container>
-        <StreamPanel />
-      </v-container>
-    </v-navigation-drawer>
   </v-container>
 </template>
 <script setup lang="ts">
-  import { useWindowSize } from '@vueuse/core'
-  import StreamPanel from '@/components/StreamPanel.vue'
-  import { drawerSet } from '@/composables/useEditorFullscreen'
   import { type DocumentModel, getDocument } from '@/utils/collection'
   import { formatDate } from '@/utils/utils'
   const scrolled = ref(false)
@@ -57,12 +31,9 @@
     // 向上滚动（scrollTop > 0）时显示阴影
     scrolled.value = (window.scrollY || document.documentElement.scrollTop) > 4
   }
-  const { width } = useWindowSize()
   const open = ref(false)
   const data = ref<DocumentModel>({} as DocumentModel)
   const router = useRouter()
-  const aWidth = ref(750)
-  const ifExpand = ref(false)
   function goEdit () {
     router.push({
       path: '/editRule',
@@ -70,12 +41,6 @@
         id: data.value.id,
       },
     })
-  }
-  function expand () {
-    ifExpand.value = !ifExpand.value
-    drawerSet.value = !drawerSet.value
-    aWidth.value = aWidth.value === 750 ? 1000 : 750
-    console.log(width.value)
   }
   async function getDates () {
     const dates = await getDocument()
@@ -92,16 +57,6 @@
 </script>
 
 <style lang="scss" scoped>
-.v-navigation-drawer {
-  :deep(.v-navigation-drawer__content) {
-    scrollbar-width: none;          /* Firefox */
-    -ms-overflow-style: none;       /* IE/Edge */
-    &::-webkit-scrollbar {
-      display: none;                /* Chrome/Safari */
-    }
-  }
-}
-
 .tabs-scrolled {
   box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.15);
 }

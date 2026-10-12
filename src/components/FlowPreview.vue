@@ -105,6 +105,8 @@
   import RefCardNode from '@/components/flow/RefCardNode.vue'
   import StartEndNode from '@/components/flow/StartEndNode.vue'
   import { flowToChain, uid } from '@/types/approval'
+  // 「轮完走向」下拉的候选：与编辑器 / 保存期白名单共用同一份口径（见 utils/exitTargets 的文件头）
+  import { collectExitTargets } from '@/utils/exitTargets'
 
   const props = withDefaults(
     defineProps<{
@@ -130,16 +132,16 @@
   const edges = ref<any[]>([])
 
   /**
-   * 「组间轮询」卡片上「轮完走向」下拉的候选：与 createStream 同一口径
-   * （卡片外、能到达的审批 / 提醒环节）。
+   * 「组间轮询」卡片上「轮完走向」下拉的候选：与 createStream **同一份口径**
+   * （utils/exitTargets：审批 / 飞书提醒 / 引用模板 / 组间轮询 —— 候选清单宁可宽一点：
+   * 少一类节点，存过的目标就会显示成空框）。
    *
    * 预览态**并没有**交互（卡片 body 的 pointer-events 被关掉了），这里传候选只为一件事：
    * 那个下拉的值存的是**节点 id**，没有候选时它会显示成一个空框 ——
-   * 看着像"没配置"，其实人家配了。给了候选才能显示出环节名。
+   * 看着像"没配置"，其实人家配了。给了候选才能显示出环节名
+   * （引用模板那一项显示的是**模板名**，与编辑器里选的时候一致）。
    */
-  const outerApprovals = computed(() => nodes.value
-    .filter(n => n.type === 'approval' || n.type === 'notify')
-    .map(n => ({ id: String(n.id), label: String(n.data?.title ?? '未命名环节') })))
+  const outerApprovals = computed(() => collectExitTargets(nodes.value))
 
   /** 预览容器（测宿主是否还在缩放动画中，见 hostTransformed） */
   const rootEl = ref<HTMLElement | null>(null)

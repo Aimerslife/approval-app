@@ -697,3 +697,8 @@ export async function resetWarehouses (): Promise<void> {
     throw warehouseWriteError(error)
   }
 }
+
+/*
+ * 飞书推送规则（定时推送 / 推送人员 / 白名单）的读写**不在这里**，在 utils/pushRulesStore ——
+ * 到达提醒（utils/notifySteps）也要读白名单，而本文件已经 import 了它，放这里会成环。
+ */

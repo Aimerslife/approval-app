@@ -13,11 +13,30 @@
  *     用 updated 之类的不行：任何字段被改都会把计时清零，等于永不超时。
  *  3. **同一单同一级别每天最多提醒一次**（进程内记录）。到 5 个工作日时另外推给管理员。
  *
+ * 阈值、频率、收件人与白名单现在由「提醒设置」页面（src/pages/alarmSetting.vue）配置，
+ * 落库在 `push_rules`；**口径本身只有一份**（utils/pushRules，前端与服务端共用）：
+ *   · deps.rules 不传 / 表还是空的 → 用默认规则 = 改造前的行为（工作日 48h 起、每天催当前审批人）；
+ *   · 关了总开关 / 还没到推送时刻 / 今天不是推送日 → 这一轮什么都不发（report.gate 说明原因）。
+ *
  * 这里只放**纯逻辑 + 可注入的跑批**，飞书发送由 server/index.ts 注入 ——
  * 这样测试可以完全离线跑，也不会因为在测试里手滑就真给别人发消息。
  */
 
-/** 提醒阈值（工作日小时）：48 小时开始每天催；5 个工作日（按工作日计 120 小时）升级 */
+// 推送规则（页面配的那份）里的纯函数：到点判断、收件人解析、白名单过滤。
+// 跨端共用同一份口径（服务端是独立进程，引不了前端那些带副作用的模块，见 utils/pushRules 的文件头）。
+import {
+  DEFAULT_PUSH_RULES,
+  excludeWhitelist,
+  isWhitelisted,
+  resolveReceivers,
+  shouldPushNow,
+  type PushRules,
+} from '../src/utils/pushRules'
+
+/**
+ * 提醒阈值（工作日小时）：48 小时开始每天催；5 个工作日（按工作日计 120 小时）升级。
+ * 48 现在只是**默认值** —— 页面里改成别的，planReminders 就按那个算。
+ */
 export const DAILY_HOURS = 48
 export const ESCALATE_HOURS = 5 * 24
 
@@ -126,19 +145,29 @@ export interface ReminderTask {
   level: '48h' | '5d'
 }
 
-/** 该不该发、发哪一级（纯判断，便于测边界） */
-export function reminderLevelOf (hours: number): '48h' | '5d' | null {
+/**
+ * 该不该发、发哪一级（纯判断，便于测边界）。
+ *
+ * ⚠️ `'48h'` 只是**日常催办**这一级的内部标签（去重键、报告里都用它），
+ * 阈值本身现在由页面配（overdueHours，默认还是 48）—— 标签名不跟着改，
+ * 免得去重键与报告字段一改，历史行为对不上、查日志的人还得记住两套叫法。
+ */
+export function reminderLevelOf (hours: number, overdueHours = DAILY_HOURS): '48h' | '5d' | null {
   if (hours >= ESCALATE_HOURS) {
     return '5d'
   }
-  if (hours >= DAILY_HOURS) {
+  if (hours >= overdueHours) {
     return '48h'
   }
   return null
 }
 
-/** 把一串单子算成"该发哪些提醒"（不发消息，纯计算） */
-export function planReminders (orders: ReminderOrder[], now = new Date()): ReminderTask[] {
+/** 把一串单子算成"该发哪些提醒"（不发消息，纯计算）。overdueHours 由页面配置下发 */
+export function planReminders (
+  orders: ReminderOrder[],
+  now = new Date(),
+  overdueHours = DAILY_HOURS,
+): ReminderTask[] {
   const out: ReminderTask[] = []
   for (const order of orders) {
     const pending = pendingStepOf(order)
@@ -146,7 +175,7 @@ export function planReminders (orders: ReminderOrder[], now = new Date()): Remin
       continue
     }
     const hours = workingHoursBetween(pending.since, now)
-    const level = reminderLevelOf(hours)
+    const level = reminderLevelOf(hours, overdueHours)
     if (!level) {
       continue
     }
@@ -175,6 +204,11 @@ export interface ReminderDeps {
   sendText: SendText
   /** 升级（5 个工作日）推送对象，一般是组织管理员 */
   admins?: () => Promise<Array<{ name?: string, email?: string }>>
+  /**
+   * 「提醒设置」页面里的推送规则。不传 = 默认规则（改造前的行为）。
+   * 由调用方负责去 PB 把规则读出来（本模块保持纯逻辑，不碰库、不碰网络里除 sendText 外的东西）。
+   */
+  rules?: PushRules
   log?: (msg: string) => void
 }
 
@@ -196,6 +230,11 @@ export interface ReminderReport {
   escalated: number
   errors: string[]
   tasks: ReminderTask[]
+  /**
+   * 这一轮**根本没往下算**的原因（总开关关了 / 没到推送时刻 / 今天不是推送日）。
+   * 有值时上面所有计数都是 0 —— 接口与日志直接展示这句话，省得看的人以为"没有超时单"。
+   */
+  gate?: string
 }
 
 /**
@@ -209,8 +248,22 @@ export async function runReminders (
   const now = opts.now ?? new Date()
   const dryRun = opts.dryRun !== false
   const log = deps.log ?? (() => {})
+  const rules = deps.rules ?? DEFAULT_PUSH_RULES
   const report: ReminderReport = {
     scanned: 0, due: 0, sent: 0, skippedToday: 0, noEmail: 0, escalated: 0, errors: [], tasks: [],
+  }
+
+  /*
+   * 到点判断放在**最前面**（连查库都不做）：总开关关了 / 今天不是推送日 / 还没到推送时刻，
+   * 这一轮就不该有任何"看起来跑了"的动作。原因写进 report.gate，接口与日志直接展示 ——
+   * 否则看日志的人分不清"没有超时单"和"规则挡掉了"。
+   * ⚠️ dry-run 也拦：它本来就是给运维"看这轮会发什么"的，规则挡掉时更要说清楚。
+   */
+  const gate = shouldPushNow(rules, now)
+  if (!gate.ok) {
+    report.gate = gate.reason
+    log(`[提醒] 本轮跳过：${gate.reason}`)
+    return report
   }
 
   const url = `${deps.pbUrl}/api/collections/approval_chain/records?perPage=200&sort=created`
@@ -224,14 +277,15 @@ export async function runReminders (
   const orders = data?.items ?? []
   report.scanned = orders.length
 
-  report.tasks = planReminders(orders, now)
+  report.tasks = planReminders(orders, now, rules.overdueHours)
   report.due = report.tasks.length
   if (report.tasks.length === 0) {
     return report
   }
 
+  // 升级对象（组织管理员）同样要过白名单：被拉黑的人不该因为"是管理员"就收到
   const admins = report.tasks.some(t => t.level === '5d') && deps.admins
-    ? await deps.admins().catch(() => [])
+    ? excludeWhitelist(await deps.admins().catch(() => []), rules.whitelist)
     : []
 
   for (const task of report.tasks) {
@@ -245,11 +299,25 @@ export async function runReminders (
       continue
     }
 
-    const getters = task.waiting.filter(m => m.email)
-    report.noEmail += task.waiting.length - getters.length
+    /*
+     * 收件人 = 当前审批人 + 固定收件人（按页面配的口径取），白名单在 resolveReceivers 里已经剔掉。
+     * 所以"没人可发"有三种原因，报错文案要把三种都说出来，不然运维只能猜：
+     * 审批人没邮箱 / 被白名单排除了 / 口径选了"仅指定人员"但名单是空的。
+     */
+    const people = resolveReceivers(task.waiting, rules)
+    const getters = people.filter(m => m.email)
+    report.noEmail += people.length - getters.length
     if (getters.length === 0) {
-      report.errors.push(`${task.orderNo} 第${task.stepIndex}环没有人邮箱，发不出去`)
+      report.errors.push(
+        `${task.orderNo} 第${task.stepIndex}环没有可发的收件人（缺邮箱 / 被白名单排除 / 未配置指定人员）`,
+      )
       continue
+    }
+
+    // 有人在白名单里就记一条：白名单是"静默不发"，不记的话没人知道它起了作用
+    const blocked = task.waiting.filter(m => isWhitelisted(m, rules.whitelist))
+    if (blocked.length > 0) {
+      log(`[提醒] ${task.orderNo} 第${task.stepIndex}环：${blocked.map(m => m.name || m.email).join('、')} 在白名单里，跳过`)
     }
 
     const head = task.level === '5d'
