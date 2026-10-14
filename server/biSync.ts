@@ -15,21 +15,20 @@
  *    import 那个模块。**改一处必须同步改另一处**，否则前端显示的字段名和库里存的会对不上。
  */
 
-// ⚠️ 本模块在**顶层**读 process.env（下面那批 const 紧跟 import 之后执行）。
-// ESM 保证依赖先于使用者求值，所以这一行就能确保 .env.local 已加载 ——
-// 与 index.ts 里 import 的先后顺序无关。原来靠 index.ts 模块体里的 loadEnvFile，
-// 而模块体比 import 晚执行，导致这批 const 全部拿到空串。
-import './env'
+// 配置统一从 server/config.ts 取：所有 env 只在那里读一次、默认值只有那一份
+// （config 自己 import './env'，所以这里不必再 import —— 顺序问题在那一层解决）。
+import { config } from './config'
 import { BI_ROW_FIELD_BY_KEY, BI_ROW_FIELDS, makeSyncKey, SYNC_KEY_FIELDS } from '../src/utils/biRowFields'
 
-const BI_BASE = process.env.BI_BASE_URL || 'https://work.jiushuyun.com/decision'
-const BI_ACCESS_KEY_ID = process.env.BI_ACCESS_KEY_ID || process.env.VITE_ACCESSKEYID || ''
-const BI_ACCESS_KEY_SECRET = process.env.BI_ACCESS_KEY_SECRET || process.env.VITE_ACCESSKEYSECRET || ''
-const BI_COMPONENT_ID = process.env.BI_COMPONENT_ID || '0c356d17-3c48-4c3b-b133-e6406a88c5fe'
+// 下面这几个本地别名保留：文件里到处在用，展开成 config.xxx 只会把 diff 铺得到处都是
+const BI_BASE = config.bi.baseUrl
+const BI_ACCESS_KEY_ID = config.bi.accessKeyId
+const BI_ACCESS_KEY_SECRET = config.bi.accessKeySecret
+const BI_COMPONENT_ID = config.bi.componentId
 
-const PB_URL = process.env.PB_URL || 'http://127.0.0.1:8091'
-const PB_ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || ''
-const PB_ADMIN_PASSWORD = process.env.PB_ADMIN_PASSWORD || ''
+const PB_URL = config.pbUrl
+const PB_ADMIN_EMAIL = config.pbAdminEmail
+const PB_ADMIN_PASSWORD = config.pbAdminPassword
 
 /** 接口 pageSize 上限（与 api.ts 一致） */
 const BI_PAGE_SIZE = 500
@@ -250,7 +249,14 @@ async function mapWithConcurrency<T, R> (
 
 // ========== BI 拉取 ==========
 
-async function fetchBiToken (): Promise<string> {
+/**
+ * 用服务端的 BI 密钥换一个**短期 token**。
+ *
+ * 导出给 HTTP 路由用（`POST /api/bi/token`）：前端原来是自己拿 VITE_ACCESSKEY* 去换的，
+ * 而 VITE_ 变量会被**打进浏览器产物** —— 任何人打开 DevTools 就能拿到**永久**密钥。
+ * 现在密钥只留在服务端，前端拿到的是一次性 token。
+ */
+export async function fetchBiToken (): Promise<string> {
   if (!BI_ACCESS_KEY_ID || !BI_ACCESS_KEY_SECRET) {
     throw new Error('缺少 BI_ACCESS_KEY_ID / BI_ACCESS_KEY_SECRET 环境变量')
   }

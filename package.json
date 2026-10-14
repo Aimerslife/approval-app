@@ -9,6 +9,8 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:pb": "node server/pb.js",
     "pb": "pocketbase/pocketbase.exe serve --http=0.0.0.0:8091 --origins=http://localhost:3001",
+    "pb:linux": "pocketbase/pocketbase serve --http=127.0.0.1:8091",
+    "serve:server": "tsx server/index.ts",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",

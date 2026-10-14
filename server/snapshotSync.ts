@@ -1,11 +1,9 @@
 import { BI_ROW_FIELDS, makeSyncKey } from '../src/utils/biRowFields'
+// 配置（env 只在那里读一次；它自己 import './env'，所以下面再 import 也只是排序需要）
+import { config } from './config'
 // 管理员凭据 + 「调用者是不是超级管理员」：与其他特权操作**共用一份**
 // （见 server/pbAdmin.ts 的说明：这类校验最怕两处各写一遍）
 import { type AdminCaller, adminToken, assertSuperAdmin, PB_URL } from './pbAdmin'
-// 放在最后只是为了过 lint 的 import 排序（副作用导入排最后）——
-// 求值时机不受影响：ESM 里所有 import 都先于本模块模块体执行，
-// 而 pbAdmin 自己也 import 了 './env'，所以 .env.local 一定先加载好。
-import './env'
 
 /**
  * 「快照同步」——把 `bi_rows` 的**真实列**回填进 `data` 快照，**只写 `data` 这一个字段**。
@@ -70,8 +68,8 @@ import './env'
 
 /** PB 列表接口每页条数上限 */
 const PB_PAGE_SIZE = 500
-/** 默认 BI 组件（与 biSync / 前端 setDatas 的 COMPONENT_ID 同一套默认值） */
-const DEFAULT_COMPONENT_ID = process.env.BI_COMPONENT_ID || '0c356d17-3c48-4c3b-b133-e6406a88c5fe'
+/** 默认 BI 组件（取自 server/config.ts —— 与 biSync / 前端 setDatas 同一套默认值） */
+const DEFAULT_COMPONENT_ID = config.bi.componentId
 /** 同时发出的写请求数（本地 PB，10 足够把 8000 行压到几秒） */
 const CONCURRENCY = 10
 

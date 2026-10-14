@@ -1,0 +1,30 @@
+# app server（飞书长连接 + /api/* 里的特权接口）—— 放到 /etc/systemd/system/approval-app.service
+#
+# 配置来自 /etc/approval/env（600，属主是这里的 User）。
+# 日志：journalctl -u approval-app -f
+#
+# ⚠️ 工作目录必须是项目根：server/config.ts 里的 PB_DB 默认值是相对路径
+#    （pocketbase/pb_data/data.db），换目录会读不到库。
+[Unit]
+Description=Approval app server (Feishu WS + API)
+# PB 先起来（本服务启动时会去读推送规则/组织缓存）
+After=network-online.target approval-pb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=approval
+Group=approval
+WorkingDirectory=/opt/approval
+EnvironmentFile=/etc/approval/env
+# 生产跑 tsx（与开发同一个入口，不做编译）；better-sqlite3 是原生模块，
+# 所以安装依赖时**不能**用 --production（见 deploy/README.md）
+ExecStart=/usr/bin/env node --import tsx server/index.ts
+Restart=always
+RestartSec=5
+# 进程崩了先看日志：journalctl -u approval-app -n 100 --no-pager
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

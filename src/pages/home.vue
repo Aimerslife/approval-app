@@ -166,7 +166,7 @@
 
 <script setup lang="ts">
 import type { ApprovalChainItem, NodeSubmitPayload } from '@/types/approval'
-import { sendFeishuCard, type DeleteOrderSummary } from '@/api/api'
+import { type DeleteOrderSummary } from '@/api/api'
 import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
 import ApprovalNode from '@/components/ApprovalNode.vue'
 // 操作栏的「删除审批单」：按钮内置权限判断与确认框（两个页面共用同一个组件）
@@ -344,14 +344,6 @@ const selectedDiscardMarks = computed(() => discardMarksOf({
   flow: selectedOrder.value?.chain?.flow,
 }))
 
-function goCreate() {
-  sendFeishuCard({
-    receive_id: 'ou_6b6abc721d2c7421703b78dc4db51b4d',
-    receive_id_type: 'open_id',
-    msg_type: 'interactive',
-    content: '{"type":"template","data":{"template_id":"AAqWQlOTUraDJ","template_version_name":"1.0.0"}}',
-  })
-}
 const selectedIndex = computed(() =>
   selectedNode.value ? visibleRows.value.findIndex(r => r.id === selectedNode.value?.id) : -1,
 )

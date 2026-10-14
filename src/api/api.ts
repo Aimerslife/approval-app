@@ -215,23 +215,32 @@ export async function sendFeishuCard(params: SendCardParams) {
 // 获取数跨境问题
 
 const base = 'https://work.jiushuyun.com/decision'
+
+/**
+ * 取 BI 的访问 token。
+ *
+ * ⚠️ **必须走我们自己的服务端换**（`POST /api/bi/token`）：
+ * 原来这里直接拿 `VITE_ACCESSKEYID / VITE_ACCESSKEYSECRET` 去换 —— 而 `VITE_` 变量会被
+ * **打进浏览器产物**，部署到公网后任何人打开 DevTools 都能拿到**永久**密钥（accessKeySecret）。
+ * 现在密钥只留在服务端（`BI_ACCESS_KEY_ID/SECRET`，见 server/config.ts），
+ * 浏览器拿到的是一次性 token（过期即失效，也能在 BI 侧吊销）。
+ *
+ * 浏览器侧仍按小时缓存：token 由服务端签发，同一小时内的多次调用不必反复换。
+ */
 async function getToken(ifNew: boolean) {
   let token: string | null = localStorage.getItem('token')
   const tokenTime = localStorage.getItem('tokenTime')
   if (!ifNew && token && tokenTime && Date.now() - Number.parseInt(tokenTime) < 3600 * 1000) {
     return token
   }
-  const tokenRes = await fetch(
-    `${base}/api/v1/corp/oauth/token?accessKeyId=${encodeURIComponent(
-      import.meta.env.VITE_ACCESSKEYID)}&accessKeySecret=${encodeURIComponent(
-        import.meta.env.VITE_ACCESSKEYSECRET,
-      )}`,
-    { method: 'GET', headers: { 'Content-Type': 'application/json' } },
-  ).then((res: Response) => res.json())
-  if (!tokenRes.success || !tokenRes.data) {
-    throw new Error('获取 token 失败: ' + (tokenRes.errorMsg || tokenRes.message))
+  const tokenRes = await fetch('/api/bi/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  }).then((res: Response) => res.json())
+  if (!tokenRes?.data?.token) {
+    throw new Error('获取 token 失败: ' + (tokenRes?.msg || `HTTP ${tokenRes?.code ?? ''}`))
   }
-  token = tokenRes.data
+  token = tokenRes.data.token as string
   if (token) {
     localStorage.setItem('token', token)
     localStorage.setItem('tokenTime', Date.now().toString())

@@ -2,7 +2,7 @@
     <v-row class="h-100">
         <v-col cols="8" class="relative">
             <v-img class="h-100" cover gradient="to top right, rgba(100,115,201,.33), rgba(25,32,72,.7)"
-                :src="backgroud"></v-img>
+                :src="background"></v-img>
             <div class="absolute bottom-25 left-5">
                 <v-rating hover :length="5" :size="40" :model-value="4" active-color="#B6284E"
                     empty-icon="mdi-heart-outline" half-icon="mdi-heart-half-full" full-icon="mdi-heart" />
@@ -66,7 +66,9 @@
 </template>
 
 <script lang="ts" setup>
-import backgroud from '@/assets/backgroud.jpg'
+// 原来写的是 `@/assets/backgroud.jpg`（拼错）—— 仓库里没有这个文件，
+// 表现为**生产构建直接失败**（vite:asset ENOENT），开发时也只会静默缺一张图，很难发现。
+import background from '@/assets/background.jpg'
 import logo from '@/assets/logo.png'
 import { register } from '@/utils/collection'
 

@@ -47,6 +47,13 @@ pocketbase/pb_data/
 
 # PocketBase 可执行文件（31MB 二进制）：需要时从官网下载，别塞进 git
 pocketbase/pocketbase.exe
+# Linux 二进制同理（服务器上用；文件名与扩展名不同，单独列一行，别漏）
+pocketbase/pocketbase
+
+# 运行期/登录态文件（可能含凭据，绝不进版本库）
+/auth-state.json
+# 部署打包输出（deploy 脚本的产物）
+deploy/out/
 
 # ===== 排查/生成过程留下的临时文件（仓库根目录，不含 src 等正式代码）=====
 # 之前几轮排查 BI 同步、画布、PDF 时留下的探针脚本与输出，不该进首次提交。

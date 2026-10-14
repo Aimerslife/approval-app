@@ -1,4 +1,4 @@
-import './env'
+import { config } from './config'
 
 /**
  * 服务端的**管理员凭据**与**调用者身份校验**。
@@ -15,16 +15,16 @@ import './env'
  * 漏改一处就等于留了个后门。所以放这里，一处改、处处生效。
  */
 
-/** PocketBase 地址（与 biSync / reminders 同一套默认值） */
-export const PB_URL = process.env.PB_URL || 'http://127.0.0.1:8091'
+/** PocketBase 地址（取自 server/config.ts —— 默认值只有那一份，别在这里再写一遍） */
+export const PB_URL = config.pbUrl
 
 /**
  * 取管理员 token：PB 0.23+ 是 `/api/collections/_superusers/...`，更早是 `/api/admins/...`。
  * 两个都试一遍，避免因为版本不同整个功能不可用。
  */
 export async function adminToken (): Promise<string> {
-  const email = process.env.PB_ADMIN_EMAIL || ''
-  const password = process.env.PB_ADMIN_PASSWORD || ''
+  const email = config.pbAdminEmail
+  const password = config.pbAdminPassword
   const errors: string[] = []
   for (const path of [
     '/api/collections/_superusers/auth-with-password',

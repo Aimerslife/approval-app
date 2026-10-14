@@ -147,7 +147,10 @@ import {
   nextStepsOf,
   queueCursorOf,
   runtimeOf,
+  stepStartTimesOf,
 } from '@/utils/approvalRuntime'
+// 工作日小时（周末不计）：与表格「进度」列、服务端催办跑批共用同一份实现
+import { workingHoursBetween } from '@/utils/workingHours'
 // 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口，别自己读 record.data）
 import { toProductView } from '@/utils/biRowFields'
 import { getApprovalOrder, getApprovalOrderByNo, updateApprovalOrder } from '@/utils/collection'
@@ -223,9 +226,35 @@ function onNodeSelect(payload: NodeTarget) {
   nodeTargets.value.push(payload)
 }
 
-function sendMessage() {
+/**
+ * 「催办」：给**当前待办环节的审批人**发一条提醒卡片（点卡片上的链接直达本页）。
+ *
+ * ⚠️ 原来这里是测试代码：收件人写死成某个人的 open_id、内容也写死
+ * （"当前审批人：张 / 已耗时：15分钟"）—— 部署到云上，点这个按钮就会把**假内容**
+ * 发给那一个人。现在按真实数据发：
+ *   · 收件人 = 当前待办环节的办理人（**优先 open_id**，退邮箱）；两者都没有就当场提示，
+ *     不再"看起来发了、其实谁也没收到"；
+ *   · 内容 = 单号 + 当前审批人 + 本环节已等待的**工作日小时** + 直达链接。
+ */
+async function sendMessage() {
+  const order = orderDatas.value
+  const who = currentApprover.value
+  const receiveId = who?.open_id || who?.email || ''
+  if (!receiveId) {
+    showMsg('当前环节没有可发送的对象（缺 open_id 与邮箱），无法催办', 'warning')
+    return
+  }
   const base = import.meta.env.VITE_PUBLIC_BASE_URL || window.location.origin
   const link = `${base}/approvalPage?order_no=${encodeURIComponent(orderNo.value)}&from=feishu`
+  /*
+   * 已等待时长：与表格「进度」列、服务端催办跑批**同一套口径** —— 工作日小时（周末不计）。
+   * 这里只报数字、不给"超时 / 滞留"的结论：那两档要读「提醒设置」里配的阈值，
+   * 而本页拿不到那份规则，写死一个数就会和表格对不上。
+   */
+  const startedAt = order
+    ? (stepStartTimesOf(order, runtime.value.chain)[runtime.value.currentStep] ?? '')
+    : ''
+  const hours = startedAt ? workingHoursBetween(new Date(startedAt), new Date()) : 0
   const card = {
     config: { wide_screen_mode: true },
     header: {
@@ -237,16 +266,25 @@ function sendMessage() {
         tag: 'div',
         text: {
           tag: 'lark_md',
-          content: `**当前审批人：张**\n审批单号：${orderNo.value}\n已耗时：15分钟\n[👉 点击去处理](${link})`,
+          content: `**审批单号：**${orderNo.value}\n**当前审批人：**${who?.name ?? '—'}\n`
+            + `**本环节已等待：**${hours.toFixed(1)} 个工作日小时\n[👉 点击去处理](${link})`,
         },
       },
     ],
   }
-  sendFeishuCard({
-    receive_id: 'ou_6b6abc721d2c7421703b78dc4db51b4d',
-    msg_type: 'interactive',
-    content: JSON.stringify(card),
-  })
+  try {
+    await sendFeishuCard({
+      receive_id: receiveId,
+      // 有 open_id 就用它（换人/改名都不影响）；没有才退回邮箱
+      receive_id_type: who?.open_id ? 'open_id' : 'email',
+      msg_type: 'interactive',
+      content: JSON.stringify(card),
+    })
+    showMsg(`已催办：${who?.name ?? receiveId}`, 'success')
+  } catch (error) {
+    console.error('[催办] 发送失败:', error)
+    showMsg('催办消息发送失败，请稍后重试', 'error')
+  }
 }
 // 底部固定条同步左侧 v-col 的宽度与左偏移（fixed 脱离文档流，无法用百分比继承父容器宽度）
 const leftColRef = ref<{ $el: HTMLElement } | null>(null)

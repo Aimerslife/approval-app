@@ -1,7 +1,3 @@
-// ⚠️ 这一行必须留在最前面：它加载 .env.local（见 server/env.ts 顶部注释）。
-// 放在这里是为了让本文件模块体里的 process.env.* 读得到值；
-// biSync.ts 那批顶层 env 读取则由它**自己** import './env' 来保证，与本行位置无关。
-import './env'
 import http from 'node:http'
 import https from 'node:https'
 import * as lark from '@larksuiteoapi/node-sdk'
@@ -9,27 +5,27 @@ import Database from 'better-sqlite3'
 // 推送规则（「提醒设置」页面配的那份）：默认值 + 记录→规则的映射，与前端**共用同一份**
 // （纯函数模块，服务端引它不会拖进任何前端依赖，见 utils/pushRules 的文件头）
 import { pushRulesFromRecord, type PushRules } from '../src/utils/pushRules'
-import { runBiSync, uploadRows } from './biSync'
+import { fetchBiToken, runBiSync, uploadRows } from './biSync'
+// 全部配置统一从 server/config.ts 取（env 只在那里读一次、默认值只有一份、启动即校验）
+import { assertRequiredKeys, config, configSummary, optionalWarnings } from './config'
+// 本次实际加载到的 env 文件列表：启动日志打出来，省得"我改了怎么没生效"要靠猜
+import { loadedEnvFiles } from './env'
 import { deleteApprovalOrder } from './orderDelete'
 import { purgeBiData as runPurgeBiData } from './purgeData'
 import { runReminders } from './reminders'
 import { syncSnapshots } from './snapshotSync'
 
 /*
- * 飞书凭据**只从环境变量取**（.env.local，已被 .gitignore 忽略）。
+ * 飞书凭据**只从环境变量取**（本地 .env.local / 服务器 /etc/approval/env，见 server/env.ts）。
  *
- * 以前这里写了兜底值 —— 那等于把应用密钥写进源码：一旦推到远端就是泄密，
- * 而且密钥轮换后旧值还留在 git 历史里，很难清干净。
- * 与 scripts/*.ts 保持同一口径：缺了就明确报错停下，不要静默用一个"刚好能跑"的硬编码值。
+ * 校验统一在 server/config.ts：缺了必填项就打印"缺什么、去哪配"并退出 ——
+ * 绝不静默用一个"刚好能跑"的硬编码值（那等于把应用密钥写进源码，推到远端就是泄密，
+ * 而且密钥轮换后旧值还留在 git 历史里，很难清干净）。
  */
-const appId = process.env.FEISHU_APP_ID ?? ''
-const appSecret = process.env.FEISHU_APP_SECRET ?? ''
-if (!appId || !appSecret) {
-  console.error('❌ 缺少飞书应用凭据：请把 FEISHU_APP_ID / FEISHU_APP_SECRET 写进项目根目录的 .env.local')
-  console.error('   （该文件已被 .gitignore 忽略；不要把这些值写进代码）')
-  process.exit(1)
-}
+assertRequiredKeys()
 
+const appId = config.feishuAppId
+const appSecret = config.feishuAppSecret
 const client = new lark.Client({ appId, appSecret })
 
 const wsClient = new lark.WSClient({
@@ -38,11 +34,11 @@ const wsClient = new lark.WSClient({
   loggerLevel: lark.LoggerLevel.info,
 })
 
-const PORT = process.env.PORT ?? 3002
+const PORT = config.port
 const BASE_URL = `http://127.0.0.1:${PORT}`
-const PB_URL = process.env.PB_URL || 'http://127.0.0.1:8091'
+const PB_URL = config.pbUrl
 /** PB 的库文件（筛选选项直接走 SQL DISTINCT，不走 REST 分页） */
-const PB_DB_PATH = process.env.PB_DB || 'pocketbase/pb_data/data.db'
+const PB_DB_PATH = config.pbDbPath
 
 // ========== 类型 ==========
 interface FlatDeptItem {
@@ -895,6 +891,24 @@ http.createServer(async (req, res) => {
       return
     }
 
+    // ─── BI token（服务端代取，前端不再持有永久密钥）────
+    // POST /api/bi/token  用服务端的 BI_ACCESS_KEY_* 换一个短期 token 交给前端。
+    //
+    // 为什么必须由服务端换：前端原来读 `VITE_ACCESSKEYID/SECRET` —— VITE_ 变量会被
+    // **打进浏览器产物**，部署到公网后任何人打开 DevTools 就能拿到**永久**密钥
+    // （实测确认过：`src/api/api.ts` 的 getToken 原来就是这么写的）。
+    // 现在密钥不出服务端，浏览器拿到的是一次性 token（过期即失效，也能在 BI 侧吊销）。
+    if (pathname === '/api/bi/token' && req.method === 'POST') {
+      try {
+        const token = await fetchBiToken()
+        json(res, 200, { code: 0, data: { token } })
+      } catch (error: any) {
+        console.error('[biToken] 获取失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || '获取 BI token 失败' })
+      }
+      return
+    }
+
     // ─── BI 筛选选项（去重值） ─────────────────
     // GET /api/bi/facets?componentId=xxx&columns=platform,department,...
     //
@@ -1074,6 +1088,19 @@ http.createServer(async (req, res) => {
     json(res, 500, { code: -1, msg: error?.message || String(error) })
   }
 }).listen(PORT, () => {
+  /*
+   * 启动自检：把"配置从哪来、配没配"打出来。
+   * ⚠️ 只报有/无，**绝不打印值** —— 顺手 console.log(config) 就把飞书密钥、
+   * PB 管理员密码、BI accessKeySecret 全写进日志了（云上日志往往还转存）。
+   */
+  console.log(`[配置] ${configSummary()}`)
+  console.log(loadedEnvFiles.length > 0
+    ? `[配置] 已加载 env 文件：${loadedEnvFiles.join('、')}`
+    : '[配置] 未读到任何 env 文件（变量应来自进程环境，例如 systemd 的 EnvironmentFile）')
+  for (const warning of optionalWarnings()) {
+    console.warn(`[配置] ⚠️ ${warning}`)
+  }
+
   console.log(`服务端口: ${BASE_URL}`)
   console.log(`  缓存读取: GET /api/org-tree/cache`)
   console.log(`  刷新更新: POST /api/org-tree/refresh`)
@@ -1101,9 +1128,9 @@ http.createServer(async (req, res) => {
  *     间隔 = 同一单两次提醒之间至少隔多久（页面里配，默认 24h）。
  *     要让"每 4 小时催一次"准点，tick 必须明显小于 4 小时（比如 10~30 分钟）。
  */
-const remindMin = Number(process.env.REMINDER_INTERVAL_MIN ?? 0)
+const remindMin = config.reminder.intervalMin
 if (remindMin > 0) {
-  const sending = process.env.REMINDER_SEND === '1'
+  const sending = config.reminder.send
   const tick = async () => {
     try {
       const report = await runReminderBatch(!sending)

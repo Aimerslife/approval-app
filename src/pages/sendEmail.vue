@@ -5,7 +5,7 @@
         class="h-100"
         cover
         gradient="to top right, rgba(100,115,201,.33), rgba(25,32,72,.7)"
-        :src="backgroud"
+        :src="background"
       />
 
       <div class="absolute bottom-25 left-5">
@@ -88,7 +88,7 @@
 
 <script lang="ts" setup>
   import { resetPassword } from '@/api/api'
-  import backgroud from '@/assets/background.jpg'
+  import background from '@/assets/background.jpg'
   import logo from '@/assets/logo.png'
 
   const email = ref('')

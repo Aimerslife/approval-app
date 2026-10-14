@@ -1,0 +1,30 @@
+# PocketBase —— 放到 /etc/systemd/system/approval-pb.service
+#
+# ⚠️ 三个要点：
+#   1. `--origins` 必须写**生产域名**，否则浏览器直连 PB 的请求会被 CORS 挡掉
+#      （前端虽然走同源 + nginx 反代，但 PB 的 OAuth 回调与管理后台仍会用到它）；
+#   2. 工作目录必须是项目根：pb_data / pb_migrations 都按相对路径找；
+#   3. 二进制是**平台相关**的：Windows 下是 pocketbase.exe，Linux 要单独下
+#      （同版本：pocketbase_0.39.8_linux_amd64.zip，见 deploy/README.md）。
+#
+# 日志：journalctl -u approval-pb -f
+[Unit]
+Description=PocketBase (approval backend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=approval
+Group=approval
+WorkingDirectory=/opt/approval
+EnvironmentFile=/etc/approval/env
+# 只监听本机：公网流量统一从 nginx 进来（nginx 反代 /api、/_/、/files/）
+ExecStart=/opt/approval/pocketbase/pocketbase serve --http=127.0.0.1:8091 --origins=https://CHANGE-ME.你的域名
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
