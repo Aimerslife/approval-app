@@ -63,6 +63,8 @@ const ROUTE_ROLES: Record<string, AppRole[]> = {
   '/createStream': ADMIN_UP,
   '/editStream': ADMIN_UP,
   '/editRule': ADMIN_UP,
+  // 「审批类型」设置页（审批模板页的按钮进去）：只有管理员以上能看能编辑
+  '/approvalTypeSetting': ADMIN_UP,
 
   // 三档都能进
   '/': ALL_ROLES,
@@ -132,6 +134,18 @@ const ACTION_ROLES = {
    *   但没有"删行"的风险，所以与 `bi:purge`（清空）同档：超级管理员。
    */
   'bi:snapshot': ['superAdmin'],
+
+  /**
+   * 管理**所有**审批单（管理员及以上）：不受"这张单是不是我名下的"限制。
+   *
+   * 目前用在审批页右上角的「上一个 / 下一个」：一般员工只在自己名下的在办单里翻
+   * （见 pages/approvalPage 的 queueAnchor），管理员及以上则在**所有在办单**里翻 ——
+   * 需求口径是"管理员对所有的审批单有权限，不该有限制"。
+   *
+   * 为什么单列一个动作而不是并进 `approval:delete`：两者风险差着量级 ——
+   * 这个只影响"能翻到哪些单"（看 / 跳转），删单是**不可恢复**的业务记录操作。
+   */
+  'approval:manageAll': ADMIN_UP,
 
   /**
    * 删除审批单（整条 `approval_chain` + 它的附件）：只给超级管理员。

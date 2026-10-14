@@ -31,7 +31,11 @@
 
         <template v-else>
           <v-avatar size="30px">
-            <v-img alt="Avatar" :src="manageDatas[0]?.avatar" />
+            <!-- 老单成员自带 avatar 直显；新单快照不带头像，按 open_id / email 现查（见 stores/avatarDirectory），
+                 查不到退回首字（与抄送、接收人那两处同一口径） -->
+            <v-img v-if="memberAvatar(manageDatas[0])" alt="Avatar" :src="memberAvatar(manageDatas[0])"
+              @error="onAvatarError(manageDatas[0])" />
+            <span v-else class="text-[12px] font-weight-semibold">{{ manageDatas[0]?.name?.slice(0, 1) }}</span>
             <!-- <v-icon :color="message.color" :icon="message.icon"></v-icon> -->
           </v-avatar>
 
@@ -56,7 +60,7 @@
           <v-chip class="ms-0" color="success" label size="x-small">通过</v-chip>
         </template>
 
-        <span v-for="(t, ti) in receiveLedgerChips" :key="`ledger-${ti}`"
+        <span v-for="(t, ti) in ledgerChips" :key="`ledger-${ti}`"
           class="text-[11px] text-medium-emphasis">{{ t }}</span>
 
         <span v-if="activeStep && !canHandle" class="text-[11px] text-medium-emphasis">未到该环节</span>
@@ -184,7 +188,16 @@
                     </span>
                   </div>
 
-                  <div v-else-if="needRecycle" class="d-flex align-center ga-4 mt-2">
+                  <div v-else-if="needRecycle" class="d-flex align-center flex-wrap ga-4 mt-2">
+                    <!--
+                      回收的上限就是这批货本身，所以把**总件数 / 总金额**摆在最左边：
+                      办理人要照它决定回收几件、值多少钱。这两项**可以填到等于总库存**
+                      （整批回收是正常结果，口径见 atMost），跟接收那栏"必须小于上限"不一样。
+                    -->
+                    <span class="text-[11px] text-medium-emphasis">
+                      总件数 {{ stockQtyText || '—' }} 件<template v-if="stockAmountText">，总金额 ￥{{ stockAmountText }}</template>
+                    </span>
+
                     <v-text-field v-model="recycleQty" class="qty-input" density="compact" label="回收数量"
                       :rules="recycleQtyRules" single-line suffix="件" variant="underlined" width="160px" />
 
@@ -201,8 +214,6 @@
                         <span class="text-[11px]">原因</span>
                       </template>
                     </v-select>
-
-                
                     <v-select v-if="reason.belong === '开发类'" v-model="secondReason" class="filter-select"
                       density="compact" hide-details item-title="text" :items="secondApprovalModal" max-width="180"
                       :menu-props="{ contentClass: 'filter-menu' }" return-object single-line variant="outlined"
@@ -235,7 +246,7 @@
                       <v-chip closable size="small" @click:close="unpickMember" >
                         {{ pickedMembers.name }}
                         <!-- 选中信息 = 名字 + 负责人（团队级叫负责人、组级叫组长，都是落地联系的人） -->
-                        <span v-if="pickedMembers.manager" class="ml-1 text-[11px] opacity-70 mt-1">
+                        <span v-if="pickedMembers.manager" class="ml-1 text-[11px] opacity-70 mt-0.5">
                           {{ pickedMembers.manager }}
                         </span>
                       </v-chip>
@@ -358,10 +369,10 @@
 
       <div v-if="manager.files?.length" class="mt-1 d-flex align-center flex-wrap text-[11px]">
         <div v-for="f in manager.files" :key="f.id"
-          class="d-inline-flex align-center  cursor-pointer text-[#89898A] underline" :href="f.url" rel="noopener"
+          class="d-inline-flex align-center  cursor-pointer text-[#89898A]" :href="f.url" rel="noopener"
           @click="showPic(f.url)">
           <v-icon size="11">mdi-paperclip</v-icon>
-          <span class="mt-1">{{ f.name }}</span>
+          <span class="underline">{{ f.name }}</span>
         </div>
       </div>
     </template>
@@ -398,7 +409,7 @@
 
         <div v-for="(t, i) in nodeTargets" :key="i" class="d-flex align-center">
           <v-avatar class="mr-1" size="22">
-            <v-img v-if="t.avatar" cover :src="t.avatar" />
+            <v-img v-if="memberAvatar(t)" cover :src="memberAvatar(t)" @error="onAvatarError(t)" />
             <v-icon v-else size="13">mdi-account</v-icon>
           </v-avatar>
 
@@ -408,10 +419,15 @@
     </template>
   </v-timeline-item>
 
-  <v-overlay v-model="overlay" @click:outside="overlay = false">
-    <div class="d-flex align-center justify-center" style="width: 100vw; height: 100vh">
-      <v-img contain max-height="90vh" rounded="10" :src="imgUrl" :style="{ maxWidth: '90vw' }" :width="800" />
-    </div>
+  <!--
+    附件图片预览：**只给上限、不写死宽高**，图片按自身比例自适应 ——
+    大图缩到视口内放得下（四周留 5% 余量），小图保持原尺寸不被拉大。
+    原来是 v-img 写死了 max-height="6vh"（≈60px）又套在一个 60vh 的盒子里，
+    图被压成很小一条；v-img 在没有 aspect-ratio / 宽高时盒子高度本来就撑不起来，
+    所以这里直接用原生 img（自带尺寸，最省事也最稳）。
+  -->
+  <v-overlay v-model="overlay" class="d-flex align-center justify-center" @click:outside="overlay = false">
+    <img v-if="imgUrl" alt="附件预览" class="attachment-preview" :src="imgUrl" @click="overlay = false">
   </v-overlay>
 </template>
 
@@ -428,6 +444,8 @@ import { ensurePinyin, pinyinInitials } from '@/utils/pinyin'
 import { formatDate, formatTimeDiff, shareValueText } from '@/utils/utils'
 // 环节负责人口径（mainOf）与「连续同人环节」的类型都来自这里，别在组件里另写一套
 import { mainOf, type ApprovalNextStep } from '@/utils/approvalRuntime'
+// 头像目录：单据快照里不带成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
+import { useAvatarDirectory } from '@/stores/avatarDirectory'
 // 「选择接收组别」的候选：团队表（utils/organazation）——不是整棵飞书通讯录，见组件说明
 import TeamPicker from './TeamPicker.vue'
 
@@ -625,6 +643,37 @@ const iconColor = computed(() => colorStep.value.fg)
 const manageDatas = computed(() => props.data.filter(item => item.type == 'manager'))
 
 /*
+ * 头像取法：**老单成员自带 avatar 直显，新单按 open_id / email 现查**
+ * （快照里不再存头像，见 types/approval 的 slimFlowMembers）；都拿不到时模板里退回首字。
+ * 现查的结果按人缓存在 store 里，一个会话只发一次请求。
+ */
+const avatarDir = useAvatarDirectory()
+/*
+ * 贴图失败的地址（URL 过期 / 被拦）：记下来之后一律走首字，不再反复试同一个坏图。
+ * 飞书头像 URL 带签名的那些会过期，留着不管就是一排空圈。
+ */
+const failedAvatars = ref<Record<string, true>>({})
+function memberAvatar (m?: ApprovalChainItem) {
+  const url = m?.avatar || avatarDir.avatarOf(m)
+  return url && !failedAvatars.value[url] ? url : ''
+}
+function onAvatarError (m?: ApprovalChainItem) {
+  const url = m?.avatar || avatarDir.avatarOf(m)
+  if (url) {
+    failedAvatars.value[url] = true
+  }
+}
+/*
+ * 加载放在 watch 而不是 computed：这是"发请求 + 写缓存"的副作用，computed 里不该发请求。
+ * ensure 幂等（内部记忆化），所以这里跟着 data 变多调几次也没关系。
+ */
+watch(
+  () => props.data,
+  () => { void avatarDir.ensure() },
+  { immediate: true },
+)
+
+/*
  * ===== 「飞书提醒」环节（type: 'notify'，见 types/approval 的 notify）=====
  * 它只通知、不办理：流程到达即穿过，**不会有结论、也不会成为 currentStep**（见 rebuildChain 的 pushNotify）。
  * 所以时间线上不该给它「办理」按钮 —— 更不该退而显示"未到该环节"（那看着像卡住了）——
@@ -718,6 +767,9 @@ const EXTRA_LABELS: Record<string, string> = {
   // 接收类结论顺带写下的账（本环接收后累计收了多少、还剩多少给后面的组），见 receiptLedgerAfter
   received_qty: '已接收',
   remaining_qty: '剩余',
+  // 回收类结论顺带写下的账（这批货总共多少件 / 多少钱），见 withRecycleLedger
+  stock_qty: '总件数',
+  stock_amount: '总金额',
 }
 
 const EXTRA_HIDDEN_KEYS = /_target$|^option_/
@@ -805,19 +857,34 @@ const resultChips = computed(() =>
 )
 
 /**
- * 已办的接收类环节留下的账（「已接收 X · 剩余 Y 件」），渲染在时间线的节点头部。
+ * 已办环节留下的账（渲染在时间线的节点头部，紧跟结论胶囊）：
  *
- * 数据来自办理时写进结论 extra 的那两个字段（见 withReceiveLedger / receiptLedgerAfter）——
- * 所以历史单（那时还没有这笔账）不会显示，也不会影响任何求值。
+ *   · 接收：「已接收 X · 剩余 Y 件」—— 写进 extra 的 received_qty / remaining_qty
+ *     （见 withReceiveLedger / receiptLedgerAfter）；
+ *   · 回收：「总 Z 件 / ￥W」—— 写进 extra 的 stock_qty / stock_amount（见 withRecycleLedger）。
+ *     本次回收的件数 / 金额已经在结论标签里（「回收 300 件 / ￥8,000」），这里补的是**这批货本身**。
+ *
+ * 数据都来自办理时写下的字段，所以历史单（那时还没有这笔账）不会显示，也不影响任何求值。
+ * 两笔账各记各的：同一环节只会命中其中一条（结论不同）。
  */
-const receiveLedgerChips = computed(() =>
+const ledgerChips = computed(() =>
   actionSteps.value.flatMap((s) => {
     const extra = mainOf(s.data)?.extra
-    const remaining = extra?.remaining_qty
-    if (remaining === undefined || remaining === null || remaining === '') {
+    if (!extra) {
       return []
     }
-    return [`已接收 ${String(extra?.received_qty ?? '—')} · 剩余 ${String(remaining)} 件`]
+    const out: string[] = []
+    const remaining = extra.remaining_qty
+    if (remaining !== undefined && remaining !== null && remaining !== '') {
+      out.push(`已接收 ${String(extra.received_qty ?? '—')} · 剩余 ${String(remaining)} 件`)
+    }
+    const stockQty = extra.stock_qty
+    if (stockQty !== undefined && stockQty !== null && stockQty !== '') {
+      const amount = extra.stock_amount
+      const amountText = amount === undefined || amount === null || amount === '' ? '' : ` / ￥${String(amount)}`
+      out.push(`总 ${String(stockQty)} 件${amountText}`)
+    }
+    return out
   }),
 )
 
@@ -1107,9 +1174,9 @@ const receiveValueText = computed(() =>
 
 
 /**
- * 必须**小于** limit 的规则工厂（接收 / 回收的数量与金额共用）。
- * 用"小于"而不是"不超过"：这些数都是**部分**量 —— 接收要接全部就该选「全部接收」
- * （那条口径下数量由系统填 = 总库存数量），所以等于总库存数量本身不成立；回收同理。
+ * 必须**小于** limit 的规则工厂（**接收**的数量用）。
+ * 用"小于"而不是"不超过"：接收的数都是**部分**量 —— 要接全部就该选「全部接收」
+ * （那条口径下数量由系统填 = 剩余 / 总库存数量），所以等于上限本身不成立。
  * @param hint 追加在文案后面的引导语（如"要接全部请选「全部接收」"）
  */
 function lessThan (limit: string, name: string, unit: string, hint = '') {
@@ -1128,22 +1195,46 @@ function lessThan (limit: string, name: string, unit: string, hint = '') {
   }
 }
 
+/**
+ * 必须**不超过** limit 的规则工厂（**回收**的数量与金额用）。
+ *
+ * 与上面 lessThan 的唯一区别就是"能不能等于上限"，而这个区别是业务定的：
+ *   · 接收用"小于"—— 接收是"部分接收"的语义，要接全部得走「全部接收」；
+ *   · 回收用"不超过"—— 回收是"这批货要处置掉"，**整批回收**（件数与金额都等于总库存）
+ *     是完全正常的结果，卡在"必须小于"会让办理人填不进去（需求：件数和金额可以等于总库存）。
+ */
+function atMost (limit: string, name: string, unit: string) {
+  return (value: unknown) => {
+    const raw = String(value ?? '').trim()
+    const cap = Number(limit)
+    // 同上：没填交给 required，上限取不到就放行（不凭空拒绝）
+    if (raw === '' || limit === '' || !Number.isFinite(cap)) {
+      return true
+    }
+    const n = Number(raw)
+    if (!Number.isFinite(n)) {
+      return true
+    }
+    return n <= cap ? true : `不能大于${name}（${limit} ${unit}）`
+  }
+}
+
 const receiveQtyRules = computed(() => (receiveAll.value && hasReceiveCap.value
   ? [rules.required]
   : [rules.required, rules.isInteger, lessThan(receiveCapText.value, receiveCapName.value, '件', '；要接全部请选「全部接收」')]))
 
-/** 回收数量：正整数，且小于总库存数量（与部分接收同一口径） */
+/** 回收数量：正整数，**不超过**总库存数量（可以等于 —— 整批回收是正常结果） */
 const recycleQtyRules = computed(() => [
   rules.required,
   rules.isInteger,
-  lessThan(stockQtyText.value, '总库存数量', '件'),
+  atMost(stockQtyText.value, '总库存数量', '件'),
 ])
 
-/** 回收金额：金额格式，且小于总库存金额 */
+/** 回收金额：金额格式，**不超过**总库存金额（可以等于） */
 const recycleAmountRules = computed(() => [
   rules.required,
   rules.amount,
-  lessThan(stockAmountText.value, '总库存金额', '元'),
+  atMost(stockAmountText.value, '总库存金额', '元'),
 ])
 
 /** 提交时真正用的数量：接收上限优先（界面只读展示的也是它），拿不到才用用户填的 */
@@ -1163,6 +1254,41 @@ function withReceiveLedger (extra: Record<string, unknown>, thisQty: unknown): R
     extra.remaining_qty = String(ledger.remaining)
   }
   return extra
+}
+
+/**
+ * 回收类结论的账：把**这批货本身**（总件数 / 总金额）也写进结论 extra。
+ *
+ * 与接收台账（上面那个）同一个目的：让记录**自洽、可追溯** ——
+ * 时间线上要能一眼看出"回收多少、这批货总共多少"，日后统计也不必回头去翻建单快照
+ * （快照里有没有那一列、当时有没有关联产品，都不确定）。
+ *
+ * 只写**展示用的副本**，不动 `qty` / `amount` 这两个业务字段的语义
+ * （分支条件里写的 `qty` / `amount` 仍然是"本次填的回收数量 / 金额"）。
+ * 取不到就什么都不写 —— 宁可空着，也别在记录里留半截假数字（与接收台账同一条规矩）。
+ */
+function withRecycleLedger (extra: Record<string, unknown>): Record<string, unknown> {
+  if (stockQtyText.value !== '') {
+    extra.stock_qty = stockQtyText.value
+  }
+  if (stockAmountText.value !== '') {
+    extra.stock_amount = stockAmountText.value
+  }
+  return extra
+}
+
+/**
+ * 回收类结论的**显示标签**：把本次填的件数 / 金额写进标签，
+ * 与「部分接收 100 件」同一个口径 —— 时间线的结论胶囊、表格的「审批结论」列都直接读标签。
+ *
+ * 只拼填到的部分（理论上两项都必填，但老路径 / 异常值不该拼出「回收 / ￥」这种半截文案）。
+ */
+function recycleLabel (base: string): string {
+  const parts = [
+    String(recycleQty.value ?? '').trim() ? `${String(recycleQty.value).trim()} 件` : '',
+    String(recycleAmount.value ?? '').trim() ? `￥${String(recycleAmount.value).trim()}` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? `${base} ${parts.join(' / ')}` : base
 }
 
 
@@ -1367,15 +1493,15 @@ function collectResult(): { result: string, result_label: string, extra: Record<
       extra.qty = qty.value
       return { result, result_label: `部分接收 ${qty.value || 0} 件`, extra: withReceiveLedger(extra, qty.value) }
     }
-    case 'recycle': { // 回收：数量 + 金额
+    case 'recycle': { // 回收：数量 + 金额（另记一笔"这批货总共多少"，见 withRecycleLedger）
       extra.qty = recycleQty.value
       extra.amount = recycleAmount.value
-      return { result, result_label: '回收', extra }
+      return { result, result_label: recycleLabel('回收'), extra: withRecycleLedger(extra) }
     }
     case 'supplier_recycle': { // 供应商回收：与「回收」同一套填写，只是结论码不同（分开统计）
       extra.qty = recycleQty.value
       extra.amount = recycleAmount.value
-      return { result, result_label: '供应商回收', extra }
+      return { result, result_label: recycleLabel('供应商回收'), extra: withRecycleLedger(extra) }
     }
     case 'scrap': {
       /*
@@ -1621,5 +1747,21 @@ async function handleConfirm() {
     padding-bottom: 0;
     line-height: 26px;
   }
+}
+
+/*
+ * 附件图片预览：只设"上限"，宽高都 auto —— 这是能自适应的关键：
+ *   · 大图：等比缩到 max-width / max-height 之内（不会溢出屏幕）；
+ *   · 小图：原尺寸显示（url 图不会被拉伸糊掉）；
+ *   · 窄屏：90vw 让它横向也放得下，竖高的长图则由 90vh 收住。
+ * 视口单位而不是固定 px：弹窗尺寸随页面走，缩放浏览器窗口/手机上同样成立。
+ */
+.attachment-preview {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 10px;
+  cursor: zoom-out;
+  /* 深色遮罩下给白底图一点边界感，否则边缘会"糊"进背景 */
+  // box-shadow: 0 8px 40px rgb(0 0 0 / 45%);
 }
 </style>

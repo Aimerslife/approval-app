@@ -126,6 +126,14 @@
 
   /** 选中员工数据（含部门信息，与 ApprovalChainItem 兼容，可随对象展开存入审批链） */
   export interface OrgSelectedUser {
+    /**
+     * 飞书 open_id（= 树上该用户节点的 id）。
+     *
+     * 选人结果会随流程存进模板、再随单据快照存进单据。**单据快照里的成员不再带头像**
+     * （见 types/approval 的 slimFlowMembers），展示时按这个 id 现查头像
+     * （见 stores/avatarDirectory）—— 所以这里必须带上，否则头像查不到。
+     */
+    open_id: string
     name: string
     email: string
     avatar?: string
@@ -280,6 +288,8 @@
       emit('select', {
         type: 'user',
         user: {
+          // 树节点 id 就是 open_id（见 toTreeItems），单据快照靠它查头像、认人
+          open_id: user.id,
           name: user.title,
           email: user.subtitle,
           avatar: user.avatar,

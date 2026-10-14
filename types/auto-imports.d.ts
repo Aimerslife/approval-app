@@ -149,6 +149,7 @@ declare global {
   const useAsyncState: typeof import('@vueuse/core').useAsyncState
   const useAttrs: typeof import('vue').useAttrs
   const useAutoGrowInputWidth: typeof import('../src/composables/useAutoGrowInputWidth').useAutoGrowInputWidth
+  const useAvatarDirectory: typeof import('../src/stores/avatarDirectory').useAvatarDirectory
   const useBase64: typeof import('@vueuse/core').useBase64
   const useBattery: typeof import('@vueuse/core').useBattery
   const useBiDataStore: typeof import('../src/stores/biData').useBiDataStore
@@ -329,6 +330,9 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { AvatarLookup } from '../src/stores/avatarDirectory'
+  import('../src/stores/avatarDirectory')
   // @ts-ignore
   export type { UserInfo, UserPreferences } from '../src/stores/user'
   import('../src/stores/user')

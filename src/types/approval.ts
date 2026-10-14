@@ -42,7 +42,17 @@ export interface ApprovalAttachment {
 export interface ApprovalChainItem {
   name?: string
   email?: string
+  /**
+   * 头像 URL。
+   *
+   * **新单里不再有这一项**（见 slimFlowMembers）：它一个就 ~165 B，而同一份记录会被按环节
+   * （轮询还要按组）复制很多遍 —— 实测 97 个成员对象里只有 15 个人。
+   * 现在展示层按 `open_id`（退化用 `email`）现查（见 stores/avatarDirectory）；
+   * 老单自带这一项，照旧直显。两边都支持，所以读取方统一走 `avatar ?? 现查`。
+   */
   avatar?: string
+  /** 飞书 open_id：查头像 / 认人用的稳定标识（通讯录选人时带上，见 components/OrgTree.vue） */
+  open_id?: string
   is_tenant_manager?: boolean
   is_leader?: boolean
   type?: 'manager' | 'cc' | string
@@ -551,6 +561,14 @@ export const APPROVAL_STATUS = {
 export const REJECT_RESULTS: ReadonlyArray<string> = ['reject']
 
 /**
+ * 「待定」结论码（APPROVAL_RESULTS 里的 `pending`）。
+ *
+ * 它会**结束流程**，但既不是通过也不是驳回 —— 单据的展示状态据此单独分出「待定」一档
+ * （见 utils/approvalFilters 的 approvalStageOf）；模板里「待定（一个月）」那种走法就是这个。
+ */
+export const PENDING_RESULT = 'pending'
+
+/**
  * 命中即**终结流程**的结论：这一步办完流程就结束，后面的环节不再展开、也就没人有权限办。
  *
  * 目前是「选择接收组别」与「选择接收团队」两条：接收方是**结果**（哪个组 / 哪个团队接下这批货），
@@ -698,7 +716,8 @@ export interface ApprovalBranch {
   /** 是否为「出口」：该分支的连线直达结束节点，命中即整条流程终止。
      *  由 graphToFlowFrom 在转换时写入 —— 它算过分支终点，不必等运行时回查画布。
      *  为什么需要：分支汇到后续节点时 steps 同样为空，光看 steps 分不清「终止」和「继续」。
-     *  旧数据没有该字段时，运行时退化为查画布快照（buildBranchTerminalMap）。 */
+     *  旧数据没有该字段时，运行时退化为查单据快照的出口表（`branchTerminal`，
+     *  见 branchTerminalMapOf）；更老的单（快照里连出口表都没有）才现算画布。 */
   isEnd?: boolean
 }
 
@@ -1664,6 +1683,26 @@ export function collectStepOptionItems (
     branches: ApprovalBranch[],
   ): ApprovalNodeOption[] {
     /*
+     * **整组都是自动注入的**（模板没给这个环节配结果分支）→ 一组选项都不给，
+     * 让办理端回落到结论目录（与"注入这回事存在之前"完全一致）。
+     *
+     * 为什么必须整组丢掉、而不是只丢兜底那条：`rejectBackBranches` 造的是
+     * [回退, 无条件兜底] 两条 —— 兜底那条只是为了让 matchBranch 有路可走
+     * （不然非驳回结论会被判"无分支命中 → 流程终止"），**不是模板配的"处理方式"**；
+     * 而回退那条在这套老口径里本来也应走目录里的「驳回」（结论码同为 reject，
+     * 命中同一条注入分支），单摆一个「回退上一级」反而和别处不一致。
+     *
+     * 辨认口径：**该组恰好两条、一条是注入的回退、另一条无条件** —— 只可能是注入产物。
+     * 编辑器产出的结果分支组至少两条用户分支，之后 `appendRejectBack` 再补回退，所以 ≥3 条。
+     */
+    const injectedOnly = branches.length === 2
+      && branches.some(b => !!b.loopBackTo && firstResultValueOf(b) === REJECT_RESULT)
+      && branches.some(b => !b.loopBackTo && branchConditions(b).length === 0)
+    if (injectedOnly) {
+      return []
+    }
+
+    /*
      * **没得退的「回退」整条去掉**：本环节与上一环是同一个人、再往前也没有别人时，
      * 回退只会退回自己（同一个人相邻环节在时间线上本来就是同一条节点）→ 干脆不出现。
      * 判定见 collectRejectTargets。
@@ -1711,7 +1750,20 @@ export function collectStepOptionItems (
       for (const b of node.branches) {
         collectSteps(b.steps)
       }
+      continue
     }
+    /*
+     * 其余节点（飞书提醒 / 数据查询 / 循环卡片 / 引用模板）都**不是"能摆选项的环节"** ——
+     * 清掉 `prevTop`，别让紧跟它们的那个分支组被算到前面那个审批环节头上。
+     *
+     * 踩过（实测）：模板「审批 → 提醒 → 提醒」在保存时被 `ensureRejectLoopBack` 给两个
+     * 提醒也各注入了一个回退分支组（id 形如 `<提醒id>:reject-back`，里面是
+     * [回退上一级, 主线]）。旧写法遇到提醒不更新 `prevTop`，于是这两组被当成
+     * "第一个审批环节的结果分支"一遍遍覆盖它 —— 审批页上第一个环节的选项最后只剩一个
+     * 叫「主线」的（模板真正配的「通过 / 待定」被盖没了）。
+     * 提醒没有"办理结论"这一说，它后面那组选项本来就不该出现在任何环节里。
+     */
+    prevTop = undefined
   }
   return map
 }
@@ -1774,6 +1826,65 @@ export function collectNotifySteps (flow: ApprovalFlow): Record<string, NotifySt
   return out
 }
 
+/** 一个「审批」环节的配置（见 collectApprovalSteps） */
+export interface ApprovalStepInfo {
+  /** 环节名（模板上给这个节点起的名字；没配就是空串） */
+  name: string
+  /** 该环节的办理人（成员已在建单期由 resolveFlowRoles 解析成真人） */
+  members: ApprovalChainItem[]
+}
+
+/**
+ * 收集流程里所有**审批环节**：stepId → 环节名 + 办理人。
+ *
+ * 与 collectNotifySteps 是同一套遍历（都是"按 id 找环节"），用途见 utils/notifySteps：
+ * 流程推进到某个审批环节时，要按 id 找到"这一环该谁办"，发到达通知。
+ *
+ * 认的形状与 rebuildChain 一致：顶层节点 + 分支里的步骤 + 轮询卡片内部步骤都要递归到，
+ * 成员取 `stepMembersOf`（nodes / members 都认，见它的说明）。
+ */
+export function collectApprovalSteps (flow: ApprovalFlow): Record<string, ApprovalStepInfo> {
+  const out: Record<string, ApprovalStepInfo> = {}
+
+  const walkSteps = (steps?: ApprovalFlowStep[]) => {
+    for (const s of steps ?? []) {
+      if (s.type === 'branch') {
+        for (const b of s.branches ?? []) {
+          walkSteps(b.steps)
+        }
+        continue
+      }
+      if (s.type === 'loop') {
+        // 「组间轮询」卡片：建单期已按组展开成普通步骤，这里再兜一层（老数据可能还留着卡片）
+        walkSteps(s.steps)
+        continue
+      }
+      if (s.type === 'notify') {
+        continue
+      }
+      out[s.id] = { name: s.name ?? '', members: stepMembersOf(s) }
+    }
+  }
+
+  for (const node of flow) {
+    if (node.type === 'branch' || node.type === 'probe' || node.type === 'ref') {
+      for (const b of node.branches ?? []) {
+        walkSteps(b.steps)
+      }
+      continue
+    }
+    if (node.type === 'loop') {
+      walkSteps(node.steps)
+      continue
+    }
+    if (node.type === 'notify') {
+      continue
+    }
+    out[node.id] = { name: node.name ?? '', members: stepMembersOf(node) }
+  }
+  return out
+}
+
 /**
  * 分支 id → 是否为「出口」（该分支的连线直达结束节点）。
  *
@@ -1813,6 +1924,41 @@ export function buildBranchTerminalMap (graph?: FlowGraph | null): BranchTermina
 }
 
 /**
+ * 取**单据快照**里的分支出口表：优先用建单期存下的 `branchTerminal`，
+ * 旧单（那会儿还没有这一项）才回退到画布快照现算一遍。
+ *
+ * 为什么要单独存一份、而不是让运行期一直看画布：
+ * `graph` 是**编辑器**的东西（节点坐标、连线弯曲点、卡片内嵌的小画布、连线上的条件对象…）。
+ * 实测一张真实单据里它占了整体积的 47%（比整条流程还大），
+ * 而运行期只从它里面取一个布尔：「这条分支线是不是直达结束节点」。
+ * 所以建单那一刻算好带走（见 pages/workStream 的 taskPayloadOf），模板之后怎么改都不影响这一单。
+ *
+ * 新旧走**同一个算法**（还是 buildBranchTerminalMap），不会出现"新单按 A、老单按 B"。
+ */
+export function branchTerminalMapOf (
+  snapshot?: { branchTerminal?: BranchTerminalMap, graph?: FlowGraph | null } | null,
+): BranchTerminalMap {
+  return snapshot?.branchTerminal ?? buildBranchTerminalMap(snapshot?.graph)
+}
+
+/**
+ * 把出口表压成**稀疏表**（只留 `true`）—— 写入快照时用，省掉 `xxx: false` 那一长串。
+ *
+ * 语义完全等价：读的地方只问"这一条是不是出口"，而 `rebuildChain` 的 isExit 判的是
+ * `terminalMap[b.id] === true`（见本文件的 isExit）—— 没列出来就是"不是"。
+ * 实测 199 条连线的表压完从 ~7 KB 变成 ~0.2 KB。
+ */
+export function compactBranchTerminal (map: BranchTerminalMap): BranchTerminalMap {
+  const out: BranchTerminalMap = {}
+  for (const [id, isEnd] of Object.entries(map)) {
+    if (isEnd) {
+      out[id] = true
+    }
+  }
+  return out
+}
+
+/**
  * 流程**为什么停下**：由 rebuildChain 在每条"终止 / 卡住"的出口上写下来，
  * 供时间线在**流转的最后**展示（用户看到链路突然就没了，得知道依据是什么）。
  *
@@ -1831,6 +1977,25 @@ export interface FlowEndInfo {
   reason: string
   /** 支撑依据的细节（命中的结论 / 分支），没有就不显示 */
   detail?: string
+  /**
+   * 支撑这条依据的**具体事实**：谁、办的什么结论、什么时候。
+   *
+   * 为什么单列一份：`reason` 说的是"为什么停"（哪条线 / 哪类结论），
+   * 而人真正要核对的往往是"**凭什么**说它结束了" —— 光一句"流程结束"没有信息量。
+   * 由 rebuildChain 在终止出口处自动从**链上最后一条已办**取（见 markEnd 的 factsOf），
+   * 口径与表格的「审批结论」列同源（都是"最后一条已办"）。
+   */
+  facts?: FlowEndFacts
+}
+
+/** 「流程为什么结束」的具体事实（有哪项显示哪项） */
+export interface FlowEndFacts {
+  /** 最后一条已办的结论文案（如「通过」「选择接收团队」） */
+  resultLabel?: string
+  /** 最后一条已办是谁办的 */
+  byName?: string
+  /** 什么时候办的（ISO 字符串） */
+  at?: string
 }
 
 /**
@@ -2083,9 +2248,44 @@ export function rebuildChain (
   /** 流程为什么停下：见 FlowEndInfo（只在"终止 / 卡住"的出口赋值，进行中的单没有） */
   let endInfo: FlowEndInfo | undefined
 
-  /** 记录"流程为什么停了"：各条终止 / 卡住的出口都调它，别各处自己拼文案 */
+  /**
+   * 记录"流程为什么停了"：各条终止 / 卡住的出口都调它，别各处自己拼文案。
+   *
+   * 除了文案，还会自动带上**具体事实**（最后一条已办的结论 / 办理人 / 时间）——
+   * 展示层要回答的是"凭什么说它结束了"，光一句"流程结束"没有信息量（见 FlowEndNote）。
+   */
   function markEnd (kind: FlowEndInfo['kind'], reason: string, detail?: string) {
-    endInfo = { kind, reason, ...(detail ? { detail } : {}) }
+    endInfo = {
+      kind,
+      reason,
+      ...(detail ? { detail } : {}),
+      ...factsOf(),
+    }
+  }
+
+  /**
+   * 终止出口的具体事实：取**链上最后一条已办**（谁办的、什么结论、什么时候）。
+   *
+   * 为什么不在这里判定本轮的结论：各出口的判定依据不一样（命中终结类结论 / 走到结束线 /
+   * 全部办完），但"最后一次办理"这一事实对四种出口都成立、也都最有解释力 ——
+   * 与表格「审批结论」列取的是同一条（见 utils/approvalRuntime 的 lastHandledOf）。
+   */
+  function factsOf (): { facts?: FlowEndFacts } {
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const items: ApprovalChainItem[] = chain[i] ?? []
+      const m = items.find(x => x?.type === 'manager' && (x.handled_at || x.result))
+        ?? items.find(x => x.handled_at || x.result)
+      if (m) {
+        return {
+          facts: {
+            ...(m.result_label || m.result ? { resultLabel: m.result_label || m.result } : {}),
+            ...(m.name ? { byName: m.name } : {}),
+            ...(m.handled_at ? { at: m.handled_at } : {}),
+          },
+        }
+      }
+    }
+    return {}
   }
 
   /** 结论码 → 目录文案（如 receive → 接收）；依据文案里用得到 */
@@ -2234,7 +2434,7 @@ export function rebuildChain (
     if (closesFlow(d)) {
       done = true
       terminalBranch = null
-      markEnd('closed', `重审时选了终结类结论「${resultLabelOf(d.result)}」，流程到此结束`, '后面的环节不再展开，也没有人需要办理')
+      markEnd('closed', `重审时选了终结类结论「${resultLabelOf(d.result)}」，流程到此结束`)
       return false
     }
     const form = formOf(d, stepId)
@@ -2344,7 +2544,7 @@ export function rebuildChain (
       if (closesFlow(d)) {
         done = true
         terminalBranch = null
-        markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`, '后面的环节不再展开，也没有人需要办理')
+        markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`)
         return false
       }
       form = formOf(d, s.id)
@@ -2401,7 +2601,7 @@ export function rebuildChain (
         if (closesFlow(d)) {
           done = true
           terminalBranch = null
-          markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`, '这个结论本身就是结果（如"谁接收"），后面的环节不再展开、也没有人需要办理')
+          markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`)
           return false
         }
         form = formOf(d, node.id)
@@ -2524,6 +2724,81 @@ export interface FlowGraph {
   nodes: FlowGraphNode[]
   edges: FlowGraphEdge[]
   viewport: { x: number, y: number, zoom: number }
+}
+
+/**
+ * **建单期成员瘦身**：把 flow 里所有成员裁成"身份 + 展示"真正要用的那几个字段。
+ *
+ * 为什么要有这一步：成员对象来自通讯录选人（见 components/OrgTree.vue 的 OrgSelectedUser），
+ * 上面带着头像 URL（一个就 ~165 B）与 is_leader / is_tenant_manager 这类**只有选人界面**才看的标记。
+ * 而单据快照会把这**同一份**记录按环节复制很多遍（组间轮询还要按组各一份）——
+ * 实测一张单里 97 个成员对象，去重后只有 15 个人，其余全是重复。
+ *
+ * 裁掉头像之后展示层怎么显示：按 `open_id`（退化用 `email`）现查
+ * （见 stores/avatarDirectory）；老单自带 avatar 照旧直显。两种形状读取方都支持。
+ *
+ * 保留：`open_id`（查头像 / 发飞书通知都优先用它）、`name`、`email`、`type`、
+ * `department`、`department_path`（时间线要显示部门）、`role`（动态审批人来源，备查）。
+ * 办理信息（result / opinion / files…）本来就不在 flow 成员上 —— 那些由 rebuildChain 写进 chain。
+ *
+ * ⚠️ 只作用于**写进单据的那一份** flow：模板画布里的成员照旧带着头像等字段（编辑器要原样回显）。
+ *
+ * @param openIdOf 通讯录反查（见 utils/orgDirectory 的 memberOpenId）：老模板画布里的成员
+ *                 **只有邮箱/姓名、没有 open_id**，建单时按它补上 —— 否则发通知只能退回邮箱，
+ *                 没有邮箱的人就永远收不到（飞书发消息本来 open_id / email 都支持）。
+ */
+export function slimFlowMembers (
+  flow: ApprovalFlow,
+  openIdOf?: (member: ApprovalChainItem) => string,
+): ApprovalFlow {
+  const member = (m: ApprovalChainItem): ApprovalChainItem => {
+    const out: ApprovalChainItem = {}
+    const openId = m.open_id || openIdOf?.(m) || ''
+    if (openId) {
+      out.open_id = openId
+    }
+    if (m.name) {
+      out.name = m.name
+    }
+    if (m.email) {
+      out.email = m.email
+    }
+    if (m.type) {
+      out.type = m.type
+    }
+    if (m.department) {
+      out.department = m.department
+    }
+    if (m.department_path) {
+      out.department_path = m.department_path
+    }
+    if (m.role) {
+      out.role = m.role
+    }
+    return out
+  }
+  /*
+   * 节点 / 分支 / 步骤三种形状都有 members、nodes、branches、steps 这几样，
+   * 所以用一个递归器统一处理（写三份必然漏掉某一种嵌套）—— 与 utils/templateRef
+   * 处理引用树是同一个做法。
+   */
+  const node = (n: any): any => {
+    const out: any = { ...n }
+    if (n.members) {
+      out.members = n.members.map(member)
+    }
+    if (n.nodes) {
+      out.nodes = n.nodes.map(member)
+    }
+    if (n.branches) {
+      out.branches = n.branches.map(node)
+    }
+    if (n.steps) {
+      out.steps = n.steps.map(node)
+    }
+    return out
+  }
+  return flow.map(node)
 }
 
 /** 把带分支的流程拍平成线性 chain：分支节点优先取无条件默认分支（审批结果分支即主线），否则取第一个。
@@ -2653,13 +2928,29 @@ export interface ApprovalOrder {
      *  见 pocketbase/pb_migrations/1789660200_updated_approval_chain.js */
   sync_key?: string
   /** 审批链快照（json 字段）。
-     *  chain 为运行时链路（由 flow + decisions 重算得出，含已办轨迹与当前待办），
-     *  flow 为带分支的完整流程（模板，只读），graph 为画布快照，
-     *  decisions 为办理流水（按办理顺序追加，同一环节可有多条 = 驳回重审）。 */
+   *  chain 为运行时链路（由 flow + decisions 重算得出，含已办轨迹与当前待办），
+   *  flow 为带分支的完整流程（模板，只读），branchTerminal 为分支出口表，
+   *  decisions 为办理流水（按办理顺序追加，同一环节可有多条 = 驳回重审）。 */
   chain?: {
     chain: ApprovalChain
     flow?: ApprovalFlow
+    /**
+     * **画布快照：只有老单才有**，新单不再写它（见下面 branchTerminal）。
+     *
+     * 为什么新单不写：它是**编辑器**的数据（节点坐标、连线弯曲点、卡片内嵌的小画布、
+     * 连线上的条件对象…），实测在一张真实单据里占整份快照的 47%（120 KB / 252 KB），
+     * 而单据这一侧从来不画图 —— 运行期只从它里面取"这条分支线是不是直达结束节点"。
+     * 字段保留是为了老单照旧能读、也不必迁移历史数据（读取口见 branchTerminalMapOf）。
+     */
     graph?: FlowGraph
+    /**
+     * **分支出口表**（连线 / 分支的 id → 是不是直达「结束」节点），建单期从模板的画布算好存下。
+     *
+     * 谁在用：`rebuildChain` 判"命中这个分支是不是整单终止"（见 ApprovalBranch.isEnd 与
+     * 本文件的 isExit）。只存 `true` 项（稀疏），没列出来 = 非出口 —— 语义与整表等价，
+     * 但小得多（见 compactBranchTerminal）。
+     */
+    branchTerminal?: BranchTerminalMap
     decisions?: NodeDecision[]
     /** 运行时追加的成员（抄送/转办）：stepId → 成员列表。
          *  不能只写进 chain —— chain 是 flow+decisions 的重算结果，下次重算会丢失；

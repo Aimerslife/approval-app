@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import type { ApprovalChainItem } from '@/types/approval'
 import pb from '@/pocketbase.ts'
 import { resolveAvatar } from '@/utils/avatar'
 import { normalizeRole } from '@/utils/permissions'
@@ -77,6 +78,27 @@ export const useUserStore = defineStore('user', () => {
   const token = ref('')
 
   const isLoggedIn = computed(() => !!token.value && !!user.value)
+
+  /**
+   * 当前登录者 → **审批链成员的形状**（只带认人要用的 name / email / open_id）。
+   *
+   * 用途：判断"这张单是不是我的"（我的待办 / 我经手过，见 utils/approvalRuntime 的两个谓词）、
+   * 以及审批页右上角「上一个 / 下一个」按谁锚定队列。与链上成员**同一套比较口径**
+   * （name → email → open_id），所以别在页面里另拼一个对象。
+   *
+   * 未登录时返回 undefined —— 调用方按"不是我的"处理（fail-closed）。
+   */
+  const member = computed<ApprovalChainItem | undefined>(() => {
+    const u = user.value
+    if (!token.value || !u) {
+      return undefined
+    }
+    return {
+      ...(u.open_id ? { open_id: u.open_id } : {}),
+      ...(u.name ? { name: u.name } : {}),
+      ...(u.email ? { email: u.email } : {}),
+    }
+  })
   /**
    * 当前登录者的权限档位（已收敛，永远是三档之一）。
    * 菜单过滤与路由守卫都读它，不要在别处自己解析 `user.role`。
@@ -292,6 +314,7 @@ export const useUserStore = defineStore('user', () => {
     user,
     token,
     isLoggedIn,
+    member,
     appRole,
     displayName,
     avatar,

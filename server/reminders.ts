@@ -11,12 +11,16 @@
  *     ⚠️ 法定节假日没有排除（要接节假日日历才准，目前只排周末）。
  *  2. **计时起点 = 该环节上一条办理时间**，没有办理记录时用建单时间。
  *     用 updated 之类的不行：任何字段被改都会把计时清零，等于永不超时。
- *  3. **同一单同一级别每天最多提醒一次**（进程内记录）。到 5 个工作日时另外推给管理员。
+ *  3. **同一单同一级别按「推送间隔」重复提醒**（进程内记上次发送时刻，见 lastSentAt）：
+ *     超时之后每隔 `intervalHours` 小时再催一次，直到这一环办掉或升级。
+ *     默认 24 小时 = 改造前的"每天一条"；页面把间隔改成 4，就是超时后每 4 小时催一次。
+ *     到 5 个工作日时另外推给管理员。
  *
- * 阈值、频率、收件人与白名单现在由「提醒设置」页面（src/pages/alarmSetting.vue）配置，
+ * 阈值、频率、推送间隔、收件人与白名单现在由「提醒设置」页面（src/pages/alarmSetting.vue）配置，
  * 落库在 `push_rules`；**口径本身只有一份**（utils/pushRules，前端与服务端共用）：
  *   · deps.rules 不传 / 表还是空的 → 用默认规则 = 改造前的行为（工作日 48h 起、每天催当前审批人）；
- *   · 关了总开关 / 还没到推送时刻 / 今天不是推送日 → 这一轮什么都不发（report.gate 说明原因）。
+ *   · 关了总开关 / 还没到推送时刻 / 今天不是推送日 → 这一轮什么都不发（report.gate 说明原因）；
+ *   · 距上次提醒还没隔够 intervalHours → 这一单这一级别这一轮跳过（report.skippedInterval）。
  *
  * 这里只放**纯逻辑 + 可注入的跑批**，飞书发送由 server/index.ts 注入 ——
  * 这样测试可以完全离线跑，也不会因为在测试里手滑就真给别人发消息。
@@ -27,43 +31,30 @@
 import {
   DEFAULT_PUSH_RULES,
   excludeWhitelist,
+  intervalElapsed,
   isWhitelisted,
   resolveReceivers,
   shouldPushNow,
   type PushRules,
 } from '../src/utils/pushRules'
+/*
+ * 「工作日小时」的实现搬去了 src/utils/workingHours —— 前端表格的「进度」列
+ * （utils/approvalProgress）也要用它，两边必须算得一样，否则会出现
+ * "表格显示超时、提醒却还没发"这种对不上的情况。
+ * 这里 import 之后再导出：本模块对外仍然提供 workingHoursBetween，历史调用方不用改。
+ */
+import { workingHoursBetween } from '../src/utils/workingHours'
+export { workingHoursBetween }
 
 /**
  * 提醒阈值（工作日小时）：48 小时开始每天催；5 个工作日（按工作日计 120 小时）升级。
  * 48 现在只是**默认值** —— 页面里改成别的，planReminders 就按那个算。
+ *
+ * ⚠️ 与前端「进度」列的对应关系：48（可按页面配置变）= 表格里的「超时」，
+ * 5 个工作日 = 表格里的「滞留」（见 src/utils/approvalProgress 的 STAGNANT_HOURS）。
  */
 export const DAILY_HOURS = 48
 export const ESCALATE_HOURS = 5 * 24
-
-/**
- * 工作日小时数：逐天累计"落在周一~周五里的时长"，周末整天不计。
- * 不按"自然日 8 小时"折算 —— 业务说的是「工作日48h」，跨夜等待也要算进去。
- */
-export function workingHoursBetween (from: Date, to: Date): number {
-  if (!(to.getTime() > from.getTime())) {
-    return 0
-  }
-  let ms = 0
-  let cur = from.getTime()
-  let guard = 0
-  while (cur < to.getTime() && guard++ < 5000) {
-    const d = new Date(cur)
-    const dayEnd = new Date(cur)
-    dayEnd.setHours(24, 0, 0, 0)
-    const segEnd = Math.min(dayEnd.getTime(), to.getTime())
-    const dow = d.getDay()
-    if (dow !== 0 && dow !== 6) {
-      ms += segEnd - cur
-    }
-    cur = segEnd
-  }
-  return ms / 3_600_000
-}
 
 /** 只用到的那几个字段（服务端不引前端类型：server 是独立进程，见 dev:server 脚本） */
 export interface ChainMember {
@@ -212,24 +203,35 @@ export interface ReminderDeps {
   log?: (msg: string) => void
 }
 
-/** 单日去重键：同一单同一级别，一天只发一次（进程内） */
-const sentToday = new Map<string, string>() // `${orderId}:${level}` → 'YYYY-MM-DD'
-const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+/**
+ * 间隔去重：`${orderId}:${level}` → **上次给这一单这一级别发提醒的时刻**（毫秒时间戳，进程内）。
+ *
+ * 为什么记"时刻"而不是"今天发过没有"：间隔是页面可配的（utils/pushRules 的 intervalHours），
+ * 按天去重根本表达不了"每 4 小时催一次"。这里只负责**记**，该不该发交给纯函数 intervalElapsed
+ * —— 判定与记录分开，"隔多久算该发"就只有一处口径。
+ *
+ * ⚠️ 进程内记录：重启服务会忘掉（重启后可能提前发一条）。与改造前同一个取舍 ——
+ *    要做到严格跨重启，得把"上次提醒时刻"落库（每单一行），那是另一件事，先不引进来。
+ */
+const lastSentAt = new Map<string, number>()
 
 /** 只给测试/运维用：清掉去重记录（比如手工重跑） */
 export function resetReminderLog () {
-  sentToday.clear()
+  lastSentAt.clear()
 }
 
 export interface ReminderReport {
   scanned: number
   due: number
   sent: number
-  skippedToday: number
+  /** 距上次提醒还没隔够推送间隔、这一轮跳过的条数（**不是**"当天已发过"） */
+  skippedInterval: number
   noEmail: number
   escalated: number
   errors: string[]
   tasks: ReminderTask[]
+  /** 本轮生效的推送间隔（小时）—— 日志里带上它，"配了间隔却没发"时一眼能看出间隔是多少 */
+  intervalHours: number
   /**
    * 这一轮**根本没往下算**的原因（总开关关了 / 没到推送时刻 / 今天不是推送日）。
    * 有值时上面所有计数都是 0 —— 接口与日志直接展示这句话，省得看的人以为"没有超时单"。
@@ -250,7 +252,8 @@ export async function runReminders (
   const log = deps.log ?? (() => {})
   const rules = deps.rules ?? DEFAULT_PUSH_RULES
   const report: ReminderReport = {
-    scanned: 0, due: 0, sent: 0, skippedToday: 0, noEmail: 0, escalated: 0, errors: [], tasks: [],
+    scanned: 0, due: 0, sent: 0, skippedInterval: 0, noEmail: 0, escalated: 0, errors: [], tasks: [],
+    intervalHours: rules.intervalHours,
   }
 
   /*
@@ -290,11 +293,17 @@ export async function runReminders (
 
   for (const task of report.tasks) {
     const key = `${task.orderId}:${task.level}`
-    if (sentToday.get(key) === dayKey(now)) {
-      report.skippedToday++
+    /*
+     * 间隔去重：同一天内距上次提醒还没隔够 intervalHours 就跳过（默认 24h = 每天一条）；
+     * 跨自然日重新起算，所以每天的第一条仍由「不早于 sendTime」决定（见 intervalElapsed 的说明）。
+     * 用**这一单这一级别**的键：升级成 '5d' 之后是新键，会立刻发一次升级提醒 —— 那是有意为之，
+     * 「超时太久」这件事本身就该压过"刚催过"。
+     */
+    if (!intervalElapsed(lastSentAt.get(key), now, rules.intervalHours)) {
+      report.skippedInterval++
       continue
     }
-    // dry-run 不占用"今天已发"名额，也不记数 —— 它只是算一遍给你看
+    // dry-run 不占"上次发送时刻"的名额，也不记数 —— 它只是算一遍给你看
     if (dryRun) {
       continue
     }
@@ -339,7 +348,8 @@ export async function runReminders (
         }
         report.escalated++
       }
-      sentToday.set(key, dayKey(now))
+      // 记下"刚发过"：下一次是否再发由 intervalElapsed 按间隔判定（见上面的跳过分支）
+      lastSentAt.set(key, now.getTime())
       report.sent++
       log(`[提醒] ${task.orderNo} 第${task.stepIndex}环 ${task.hours}h → ${who}（${task.level}）`)
     } catch (error) {

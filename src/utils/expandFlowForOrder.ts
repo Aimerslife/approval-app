@@ -107,19 +107,19 @@ export async function expandFlowForOrder (
 
 /** 流程里残留的「数据查询」/「组间轮询」/「引用模板」（顶层、分支内、卡片内都看） */
 function leftoverFlowNodes (flow: ApprovalFlow): string[] {
-  const probes: string[] = []
-  const loops: string[] = []
-  const refs: string[] = []
+  const probes: Array<Record<string, any>> = []
+  const loops: Array<Record<string, any>> = []
+  const refs: Array<Record<string, any>> = []
   const walkSteps = (steps?: Array<Record<string, any>>) => {
     for (const s of steps ?? []) {
       if (s.type === 'probe') {
-        probes.push(s.id)
+        probes.push(s)
       }
       if (s.type === 'loop') {
-        loops.push(s.id)
+        loops.push(s)
       }
       if (s.type === 'ref') {
-        refs.push(s.id)
+        refs.push(s)
       }
       if (s.type === 'branch') {
         for (const b of s.branches ?? []) {
@@ -131,13 +131,13 @@ function leftoverFlowNodes (flow: ApprovalFlow): string[] {
   }
   for (const n of flow as unknown as Array<Record<string, any>>) {
     if (n.type === 'probe') {
-      probes.push(n.id)
+      probes.push(n)
     }
     if (n.type === 'loop') {
-      loops.push(n.id)
+      loops.push(n)
     }
     if (n.type === 'ref') {
-      refs.push(n.id)
+      refs.push(n)
     }
     if (n.type === 'branch') {
       for (const b of n.branches ?? []) {
@@ -148,13 +148,29 @@ function leftoverFlowNodes (flow: ApprovalFlow): string[] {
   }
   const out: string[] = []
   if (probes.length > 0) {
-    out.push(`「数据查询」节点（${probes.join('、')}）`)
+    out.push(`「数据查询」节点（${nameList(probes)}）`)
   }
   if (loops.length > 0) {
-    out.push(`「组间轮询」卡片（${loops.join('、')}）`)
+    out.push(`「组间轮询」卡片（${nameList(loops)}）`)
   }
   if (refs.length > 0) {
-    out.push(`「引用模板」卡片（${refs.join('、')}）`)
+    out.push(`「引用模板」卡片（${nameList(refs)}）`)
   }
   return out
+}
+
+/**
+ * 把残留节点列成**人能认出来的样子**：优先打名字（画布上的卡片名），没名字才退回 id。
+ *
+ * 为什么改：原来只列一串 uuid，用户在模板里根本对不上是哪张卡片 ——
+ * 而这句报错的作用就是"让人回去把那张卡片改掉"，对不上等于白报。
+ * 超过 5 处只列前 5 个 + 总数：一段流程几十处漏展开时，全列出来反而看不清重点。
+ */
+function nameList (nodes: Array<Record<string, any>>): string {
+  const label = (n: Record<string, any>) => {
+    const name = String(n.name ?? '').trim()
+    return name ? `「${name}」` : `id=${String(n.id ?? '')}`
+  }
+  const head = nodes.slice(0, 5).map(label).join('、')
+  return nodes.length > 5 ? `${head} 等 ${nodes.length} 处` : head
 }

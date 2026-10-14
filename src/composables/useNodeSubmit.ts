@@ -1,5 +1,6 @@
 import type {
   ApprovalAttachment,
+  ApprovalChain,
   ApprovalFlow,
   ApprovalOrder,
   NodeDecision,
@@ -8,7 +9,7 @@ import type {
 import { ref, type Ref } from 'vue'
 import {
   APPROVAL_STATUS,
-  buildBranchTerminalMap,
+  branchTerminalMapOf,
   PICK_MEMBERS_RESULT,
   PICK_TEAM_RESULT,
   rebuildChain,
@@ -35,15 +36,18 @@ function fireArrivedNotifies (args: {
   flow: ApprovalFlow
   /** 提交**前**的整份快照（只用它的 decisions 重算"推进前"到过哪些提醒环） */
   snapshot: ApprovalOrder['chain']
-  terminalMap: ReturnType<typeof buildBranchTerminalMap>
+  terminalMap: ReturnType<typeof branchTerminalMapOf>
   context: ReturnType<typeof flowContextOfOrder>
   afterStepIds: string[]
+  /** 推进后的链路（与 afterStepIds 同序）：到达通知里要据此取「上一轮审批信息」 */
+  afterChain?: ApprovalChain
   orderNo?: string
 }) {
   void sendArrivedNotifies({
     flow: args.flow,
     before: rebuildChain(args.flow, args.snapshot?.decisions ?? [], args.terminalMap, args.context).stepIds,
     after: args.afterStepIds,
+    afterChain: args.afterChain,
     orderNo: args.orderNo,
     context: args.context,
   }).catch(error => {
@@ -127,7 +131,7 @@ export function useNodeSubmit (options: {
     // stepId 由 flow + decisions **重算**得出，不从页面注入 ——
     // 注入的话，页面手里那份 stepIds 一旦和当前 decisions 不同步，
     // 结论就会被记到别的环节上（而且看不出来）。
-    const terminalMap = buildBranchTerminalMap(snapshot?.graph)
+    const terminalMap = branchTerminalMapOf(snapshot)
     // ⚠️ 业务上下文必须与展示侧**完全一致**：分支条件会按它选路，
     //    上下文不同 → 算出的 stepIds 不同 → 结论记到别的环节上
     const context = flowContextOfOrder(order)
@@ -198,11 +202,21 @@ export function useNodeSubmit (options: {
       options.onUpdated?.(updated)
 
       /*
-       * 6. 到达提醒：这一步办完**新到达**的「飞书提醒」环，发消息给它们的提醒对象。
+       * 6. 到达提醒：这一步办完**新到达**的环节都发消息 ——
+       *    「飞书提醒」环发给提醒对象；**审批环节**发给这一环的办理人，
+       *    正文含单号 + 上一轮审批信息（见 utils/notifySteps 与 utils/arrivalNotice）。
        * 抽成独立函数（见文件下方 fireArrivedNotifies）：本函数的圈复杂度已经贴着上限，
        * 而且发送是"副作用尾巴"，独立出来后主流程一眼看得清。
        */
-      fireArrivedNotifies({ flow, snapshot, terminalMap, context, afterStepIds: rebuilt.stepIds, orderNo: order.order_no })
+      fireArrivedNotifies({
+        flow,
+        snapshot,
+        terminalMap,
+        context,
+        afterStepIds: rebuilt.stepIds,
+        afterChain: rebuilt.chain,
+        orderNo: order.order_no,
+      })
       options.onMessage?.('审批信息已保存', 'success')
       /*
        * 回传「下一环还是不是同一个人办」：是的话弹窗**先不关** ——

@@ -130,8 +130,10 @@ import { toFlowContext } from '@/utils/approvalFlow'
 import { expandFlowForOrder } from '@/utils/expandFlowForOrder'
 // 动态审批人（角色）：模板里配「部门负责人」，建单时按组织架构解析成真人（见 utils/approvalRoles）
 import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
+// 通讯录索引：建单期给"只有邮箱/姓名"的老成员补 open_id（发通知 / 查头像都优先用它）
+import { buildOrgDirectory, memberOpenId } from '@/utils/orgDirectory'
 import { fetchOrgTreeCache, type OrgTreeData } from '@/api/api'
-import { APPROVAL_STATUS, flowToChain, type ApprovalFlow, type ApprovalOrder } from '@/types/approval'
+import { APPROVAL_STATUS, branchTerminalMapOf, compactBranchTerminal, flowToChain, slimFlowMembers, type ApprovalFlow, type ApprovalOrder } from '@/types/approval'
 
 /** BI 组件 id */
 const COMPONENT_ID = '0c356d17-3c48-4c3b-b133-e6406a88c5fe'
@@ -139,7 +141,6 @@ const COMPONENT_ID = '0c356d17-3c48-4c3b-b133-e6406a88c5fe'
 const page = ref(1)
 const itemsPerPage = ref(20)
 const fullSceen = ref(false)
-const groupBy = [{ key: '主MODEL', order: 'asc' }] as const
 const rows = ref<Record<string, unknown>[]>([])
 
 const rawRows = ref<Record<string, Record<string, unknown>>>({})
@@ -209,13 +210,6 @@ function widthOf(key: string): number {
   return typeof saved === 'number' && saved >= MIN_COL_WIDTH ? saved : DEFAULT_WIDTHS[key]
 }
 
-/**
- * 导出用的列：与表格**同一份**口径 —— 当前顺序、当前显隐、当前标题与列宽。
- *
- * 不要直接把行对象丢给 xlsx：`json_to_sheet` 会拿**第一行对象的键顺序**当表头，
- * 那是 PB 记录的原始字段顺序（id / created / data / 中文列名…），与页面上看到的
- * 列顺序、显隐完全对不上，导出来就是"表头被随意排布"。
- */
 function exportColumns(): ExportColumn[] {
   return [
     ...visibleFields.value.map(f => ({ key: f.key, title: f.title, width: widthOf(f.key) })),
@@ -900,8 +894,61 @@ function showMsg(text: string, color: 'success' | 'warning' | 'error' = 'success
 }
 /* ==================== 开启任务（对当前页第一条数据建审批单） ==================== */
 
-const TASK_TEMPLATE_NAME = '美2组-前置审批'
+/**
+ * 模板名的后半段：**就是「模板」这两个字**，写死在代码里。
+ *
+ * 完整名字 = 这一行的**组别** + `模板`（直接拼，中间不加连字符、也不加别的字样）。
+ * 例：组别 `美2组` → 去审批模板里找那张叫 `美2组模板` 的模板。
+ *
+ * ✅ 一张模板对应一个组别，所以"用哪张模板"是**按行**算的 —— 一批里混着不同组别也各用各的
+ *    （以前写死一张模板，选到别的组别的行会全部建不出来）。
+ */
+const TASK_TEMPLATE_WORD = '模板'
 
+/**
+ * 这一行该用哪张审批模板：`<组别>模板`。
+ *
+ * 组别取的是行数据里的 `组别` 列（bi_rows 的中文列名，见 utils/biRowFields 的字段表）。
+ * 拿不到组别 → 返回 `''`，由调用方按"这一行用不了模板"报出来（不猜、也不静默换个模板）。
+ */
+function taskTemplateNameOf(row: Record<string, unknown>): string {
+    const group = String(row['组别'] ?? '').trim()
+    return group ? `${group}${TASK_TEMPLATE_WORD}` : ''
+}
+
+/** 行的展示标识（与 createTaskForRow 里报错/汇总用的 label 同口径，别再各写一份） */
+function rowLabelOf(row: Record<string, unknown>): string {
+    return String(row.SKU ?? row['库存SKU'] ?? row.id ?? '—')
+}
+
+/**
+ * 取某张模板的建单快照（流程 + 画布 + 拍平的 chain，作为单据快照的底子）。
+ *
+ * `flow` 是唯一事实源：**没配流程的模板不给建单**（与 utils/utils 的 generateApprovalChain 同口径），
+ * 找不到 / 没配置 → 返回 null，由调用方把原因归到**那一行**上（不再整批中断，
+ * 因为不同组别的行用的是不同模板）。
+ */
+async function taskPayloadOf(templateName: string): Promise<NonNullable<ApprovalOrder['chain']> | null> {
+    // 组别是数据里的值：用 JSON.stringify 生成带引号的字面量（顺带把引号 / 反斜杠转义好）
+    const template = await getApprovalFirstByFilter(`name=${JSON.stringify(templateName)}`)
+    const flow = template?.chain?.flow
+    if (!flow?.length) return null
+    /*
+     * 快照只带**运行期真正要用**的东西：flow（执行）+ branchTerminal（分支出口表）。
+     *
+     * **不再带模板的 `graph`**：那是编辑器的画布（节点坐标、连线弯曲点、卡片内嵌的小画布、
+     * 连线上的条件对象…），实测一份单里它占了整份快照的 47%（120 KB / 252 KB），
+     * 而单据这一侧从来不画图 —— 运行期只从里面取"这条分支线是不是直达结束节点"。
+     * 出口表就在建单这一刻算好带走（口径见 types/approval 的 branchTerminalMapOf），
+     * 模板之后怎么改都不影响已建的单（与 flow 同一承诺）。
+     */
+    return {
+        chain: flowToChain(flow),
+        flow,
+        branchTerminal: compactBranchTerminal(branchTerminalMapOf(template?.chain)),
+        decisions: [],
+    }
+}
 
 const PB_RECORD_ID_RE = /^[a-z0-9]{15}$/
 
@@ -975,12 +1022,6 @@ async function startTasks() {
         showMsg('请先勾选要开启任务的数据（表头复选框可全选当前页）', 'error')
         return
     }
-    /*
-     * 已有单（在流程中 / 已结束）的行从目标里剔掉。
-     * 它们的勾选框本来就被 `isRowSelectable` 禁用了，但**全选、Shift 连选、翻页前留下的勾选**
-     * 仍可能把它们带进来 —— 所以这里再筛一次，并把剔掉的条数交给汇总提示
-     * （只说"跳过 N 条"不说是为什么，用户会当成出错）。
-     */
     const targets = picked.filter(r => canStartTask(r.id))
     const lockedCount = picked.length - targets.length
     if (!targets.length) {
@@ -991,22 +1032,36 @@ async function startTasks() {
     starting.value = true
     const results: TaskResult[] = []
     try {
-        // 模板与流程快照全批只取一次
-        const template = await getApprovalFirstByFilter(`name="${TASK_TEMPLATE_NAME}"`)
-        const flow = template?.chain?.flow
-        if (!flow?.length) {
-            showMsg(`找不到可用的审批流模板「${TASK_TEMPLATE_NAME}」，或该模板没有配置流程`, 'error')
-            return
-        }
-        const payload: NonNullable<ApprovalOrder['chain']> = {
-            chain: flowToChain(flow), flow, graph: template?.chain?.graph, decisions: [],
-        }
+        /*
+         * 模板**按行**取：模板名 = 「组别」+「模板」（见 taskTemplateNameOf），
+         * 一批里不同组别各用各的模板。
+         * 同名只查一次（cache 里存"快照 or null"），同一组别的几十行不会重复打库。
+         */
+        const cache = new Map<string, NonNullable<ApprovalOrder['chain']> | null>()
 
         // 批内去重：同一个业务键在一次批量里只处理一次
         const seen = new Set<string>()
         for (let i = 0; i < targets.length; i++) {
             batchText.value = `处理中 ${i + 1}/${targets.length}`
-            results.push(await createTaskForRow(targets[i], payload, seen))
+            const row = targets[i]
+            const templateName = taskTemplateNameOf(row)
+            if (!templateName) {
+                // 没有组别就没法确定模板：报在这一行上，继续处理别的行
+                results.push({ kind: 'failed', label: rowLabelOf(row), detail: '这一行没有「组别」，无法确定用哪张审批模板' })
+                continue
+            }
+            if (!cache.has(templateName)) {
+                cache.set(templateName, await taskPayloadOf(templateName))
+            }
+            const payload = cache.get(templateName)
+            if (!payload) {
+                results.push({
+                    kind: 'failed', label: rowLabelOf(row),
+                    detail: `找不到审批模板「${templateName}」，或该模板没有配置流程`,
+                })
+                continue
+            }
+            results.push(await createTaskForRow(row, payload, seen))
         }
         selectedIds.value = []
         // 建完单立刻把状态刷成「进行中」，否则用户会以为没成功
@@ -1022,12 +1077,18 @@ async function startTasks() {
 }
 
 
+/**
+ * 对**一行**建单。
+ *
+ * `payload` 是**这张模板**的建单快照 —— 由调用方按该行的组别取好（见 taskPayloadOf）：
+ * 同一个批次里不同组别的行，`payload` 是不同的那张模板。
+ */
 async function createTaskForRow(
     row: Record<string, unknown>,
     payload: NonNullable<ApprovalOrder['chain']>,
     seen: Set<string>,
 ): Promise<TaskResult> {
-    const label = String(row.SKU ?? row['库存SKU'] ?? row.id ?? '—')
+    const label = rowLabelOf(row)
     // 只认 PB 记录 id（形如 15 位 [a-z0-9]）：relation 必须是真实记录 id，否则 PB 会拒
     const biRowId = String(row.id ?? '')
     if (!PB_RECORD_ID_RE.test(biRowId)) {
@@ -1083,10 +1144,20 @@ async function createTaskForRow(
                 flow = resolved.flow
             }
         }
+        /*
+         * ④ 成员瘦身 + **补 open_id**（见 types/approval 的 slimFlowMembers）：
+         *    · 快照只留"身份 + 展示"要用的字段；
+         *    · 老模板画布里的成员只有邮箱/姓名（那时还没存 open_id），按通讯录补上 ——
+         *      发飞书通知与查头像都优先用 open_id，没有邮箱的人也能收到。
+         * 必须排在**展开与角色解析之后** —— 角色解析会新增成员（把「部门负责人」换成真人），
+         * 提前做就管不到它们了。
+         */
+        const dir = buildOrgDirectory((await orgTree())?.tree)
+        const slim = flow ? slimFlowMembers(flow, m => memberOpenId(dir, m)) : undefined
         const order = await createApprocalModel(
             {
                 ...payload,
-                ...(flow ? { flow, chain: flowToChain(flow) } : {}),
+                ...(slim ? { flow: slim, chain: flowToChain(slim) } : {}),
                 context,
             },
             { relation: biRowId, syncKey },

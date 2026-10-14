@@ -236,10 +236,10 @@
   const links = computed(() => allLinks.filter(item => canAccess(userStore.appRole, item.to)))
   const drawer = computed(() => !isEditorFullscreen.value && drawerSet.value)
   const icons = [
-    'mdi-facebook',
-    'mdi-twitter',
-    'mdi-linkedin',
-    'mdi-instagram',
+    'mdi-vuetify',
+    'mdi-language-typescript',
+    'mdi-aws',
+    'mdi-vuejs',
   ]
   const router = useRouter()
   async function handleLogout () {

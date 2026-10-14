@@ -1,5 +1,5 @@
-import type { ApprovalChainItem, ApprovalNodeOption, ApprovalOrder } from '@/types/approval'
-import { buildBranchTerminalMap, mainOf, mergeExtraMembers, rebuildChain, sameApprover } from '@/types/approval'
+import type { ApprovalBranch, ApprovalChain, ApprovalChainItem, ApprovalFlow, ApprovalNodeOption, ApprovalOrder, FlowEndInfo } from '@/types/approval'
+import { APPROVAL_STATUS, branchTerminalMapOf, CLOSE_FLOW_RESULTS, firstResultValueOf, mainOf, mergeExtraMembers, rebuildChain, sameApprover } from '@/types/approval'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 
 /*
@@ -36,18 +36,204 @@ export function runtimeOf (order: ApprovalOrder) {
   const flow = snapshot?.flow
   if (!flow?.length) {
     const legacy = snapshot?.chain ?? []
-    // end: 旧单没有 flow、也就无从判断"为什么停" —— 显式给 undefined，保持返回形状一致
-    return { chain: legacy, stepIds: legacy.map((_, i) => `legacy-${i}`), currentStep: -1, done: false, end: undefined }
+    // 旧单没有 flow，引擎那套"为什么停"重算不了 —— 但同一套判定条件能从链路反推（见 legacyFlowEndOf）
+    return {
+      chain: legacy,
+      stepIds: legacy.map((_, i) => `legacy-${i}`),
+      currentStep: -1,
+      done: false,
+      end: legacyFlowEndOf(order),
+    }
   }
   const r = rebuildChain(
     flow,
     snapshot?.decisions ?? [],
-    buildBranchTerminalMap(snapshot?.graph),
+    branchTerminalMapOf(snapshot),
     flowContextOfOrder(order),
   )
   // 合并运行期追加的抄送/转办（转办会把被接替者标成「已转办」，实现见 mergeExtraMembers）
   mergeExtraMembers(r.chain, r.stepIds, snapshot?.extraMembers)
   return { ...r, done: r.done }
+}
+
+/**
+ * 链路里**最后一条已办**的记录（含办理人 / 结论 / 意见 / 时间）。
+ *
+ * @param endIndex 只看 `chain[0, endIndex)`：表格的「审批结论」列要的是整条链路的最后一条，
+ *                 「上一轮审批信息」（见 utils/arrivalNotice）要的是**当前环节之前**的那一条 ——
+ *                 同一份查找，两处都别自己写。
+ *
+ * 放在这里的原因：这是"从链路里认人 / 认结论"的口径，时间线、表格、飞书文案必须一致，
+ * 各处自己实现必然漂（有的取最后一个 manager、有的取最后一个有 handled_at 的）。
+ */
+export function lastHandledIn (
+  chain: ApprovalChain,
+  endIndex: number = chain.length,
+): ApprovalChainItem | undefined {
+  const end = Math.min(Math.max(endIndex, 0), chain.length)
+  for (let i = end - 1; i >= 0; i--) {
+    const items: ApprovalChainItem[] = chain[i] ?? []
+    // 优先取「办理人」那一条；飞书提醒环没有办理人，退到第一条有办理痕迹的
+    const hit = items.find(x => x?.type === 'manager' && hasHandledTrace(x))
+      ?? items.find(hasHandledTrace)
+    if (hit) {
+      return hit
+    }
+  }
+  return undefined
+}
+
+/** 整条链路的最后一条已办（表格的「审批结论」列用） */
+export function lastHandledOf (chain: ApprovalChain): ApprovalChainItem | undefined {
+  return lastHandledIn(chain)
+}
+
+/**
+ * 这张单**现在是不是压在他手上**：当前待办环节的负责人就是他。
+ *
+ * 「我的审批」页里"当前待办"那一档的"自己名下"口径 —— 注意与下面的 orderHandledBy 是**两回事**：
+ * 这一条只认"还没办的那一环归谁"，办结的单一律 false。
+ *
+ * @param who 登录者（userStore.member）；没登录时调用方传 undefined，这里一律返回 false
+ */
+export function orderPendingOn (order: ApprovalOrder, who?: ApprovalChainItem | null): boolean {
+  if (!who) {
+    return false
+  }
+  const rt = runtimeOf(order)
+  if (rt.currentStep < 0) {
+    return false
+  }
+  return sameApprover(mainOf(rt.chain[rt.currentStep]), who)
+}
+
+/**
+ * 这张单他**经手过**：链路上有任一环节是他作为**审批人**办掉的
+ * （「我的审批」页里"历史审批"那一档的口径）。
+ *
+ * 为什么不是"最后一个环节是他"：单据办到一半换了人（转办）或他办完后又流转给别人时，
+ * 最后那位并不是他 —— 但那确实是他办过的单，历史里必须看得到（实测：
+ * 一张单他办完第 3 环、第 4 环由别人办结，按"最后一位"口径就漏了）。
+ *
+ * 只认**已办**的环节（有结论 / 办理时间）：未办环节上挂着的是"接下来该谁办"，不算经手；
+ * **只认审批人（type='manager'）**：抄送（cc）与飞书提醒环上挂的人并没有对这张单做决定，
+ * 认进来会让"我办过的单"里混进一堆只是被通知过的记录。
+ */
+export function orderHandledBy (order: ApprovalOrder, who?: ApprovalChainItem | null): boolean {
+  if (!who) {
+    return false
+  }
+  const rt = runtimeOf(order)
+  return rt.chain.some(step =>
+    (step ?? []).some(m => m?.type === 'manager' && hasHandledTrace(m) && sameApprover(m, who)),
+  )
+}
+
+/**
+ * 审批页右上角「上一个 / 下一个」该跳到哪两张单。
+ *
+ * 队列 = **某人名下的在办单**（按 `-created` 排，与首页表格同序，见 pages/approvalPage）。
+ *
+ * ## 为什么要单独一条口径（踩过）
+ *
+ * 当前打开的这一张**常常不在队列里**：刚办完一张，它要么已办结、要么流转给了下一位 ——
+ * 两种情况下"当前审批人"都不再是刚办完的人，队列里也就没有它。
+ * 而"我刚办完这一张，想接着办下一张"恰恰是最需要这两个按钮的时刻：
+ * 早先直接用"当前单在队列里的下标"取左右邻居，那时下标是 -1 → 两个箭头全灰、
+ * 整排按钮还会被当成"只有一张单"藏起来，表现就是**办完跳不动**。
+ *
+ * 所以这里按**建单时间**给当前单在队列里插一个站位（列表降序，插位处那张就是
+ * "列表里紧随其后的单"），让「下一个」仍然指向他接着该办的那张。
+ *
+ * @param orders  队列（**降序**：新 → 旧，与 getApprovalOrder 的 `-created` 同序）
+ * @param current 当前打开的那张单；不在队列里时按它的 `created` 插位
+ */
+export function queueCursorOf (
+  orders: ApprovalOrder[],
+  current?: ApprovalOrder | null,
+): { prev?: ApprovalOrder, next?: ApprovalOrder } {
+  const queue = orders ?? []
+  const no = current?.order_no ?? current?.id
+  const i = no ? queue.findIndex(o => (o.order_no ?? o.id) === no) : -1
+  // 在队列里：正常左右邻居
+  if (i >= 0) {
+    return {
+      prev: i > 0 ? queue[i - 1] : undefined,
+      next: i < queue.length - 1 ? queue[i + 1] : undefined,
+    }
+  }
+  // 队列为空：没有任何可跳的目标
+  if (queue.length === 0) {
+    return { prev: undefined, next: undefined }
+  }
+  const created = String(current?.created ?? '')
+  // 取不到建单时间：不敢乱插位，只把队首（最新那张）当作"下一个"
+  if (!created) {
+    return { prev: undefined, next: queue[0] }
+  }
+  const at = queue.findIndex(o => String(o.created ?? '') < created)
+  /*
+   * 没有比它更旧的单 → 在列表里它后面已经没有单了：只留「上一个」= 队尾（最旧那张）。
+   * 不能拿队尾当「下一个」，那等于指回队列里。
+   */
+  if (at === -1) {
+    return { prev: queue[queue.length - 1], next: undefined }
+  }
+  return {
+    prev: at > 0 ? queue[at - 1] : undefined,
+    next: queue[at],
+  }
+}
+
+/**
+ * **旧单**（快照里没有 flow）的结束依据 —— 引擎那套"为什么停"重算不了，
+ * 但按**同一套判定条件**能从链路 + 流水反推出来：
+ *
+ *   ① 单据还没结束（`status === PENDING`）→ 进行中，**不给依据**（与 rebuildChain 的 done=false 一致）；
+ *   ② 最后一条已办的结论属于**终结类结论**（CLOSE_FLOW_RESULTS，如「选择接收团队」）→ 它本身就是结果；
+ *   ③ 其余 → 所有环节都已办完（附最后一个环节的结论）。
+ *
+ * 与 rebuildChain 的 `markEnd` 同口径（同一份 CLOSE_FLOW_RESULTS、同样取"最后一条已办"），
+ * 所以旧单与新单在时间线上看到的是**同一种表述**。
+ * 旧单唯一的欠缺：拿不到"命中的是哪条分支线"（那要有 flow 才算得出来），所以不写 `exit` 那一类。
+ *
+ * ⚠️ 时间字段只认 `handled_at`（与全仓一致）；更老的记录若用别的字段名，这里就退化成不显示时间，
+ * 不影响"为什么结束"的判断。
+ */
+export function legacyFlowEndOf (order: ApprovalOrder): FlowEndInfo | undefined {
+  const chain = order.chain?.chain ?? []
+  // ① 还在流转：不编造"结束依据"，否则时间线上会给进行中的单挂一条假的结束说明
+  if (Number(order.status ?? APPROVAL_STATUS.PENDING) === APPROVAL_STATUS.PENDING) {
+    return undefined
+  }
+  const last = lastHandledOf(chain)
+  const result = last?.result
+  const label = last?.result_label || result || ''
+  const facts = {
+    ...(label ? { resultLabel: label } : {}),
+    ...(last?.name ? { byName: last.name } : {}),
+    ...(last?.handled_at ? { at: last.handled_at } : {}),
+  }
+  // ② 终结类结论收尾：这就是引擎里 `kind: 'closed'` 的判定条件
+  if (result && CLOSE_FLOW_RESULTS.includes(result)) {
+    return {
+      kind: 'closed',
+      reason: `本环节的结论「${label}」是终结类结论，流程到此结束`,
+      ...(Object.keys(facts).length ? { facts } : {}),
+    }
+  }
+  // ③ 其余按"所有环节都办完了"算：拿不到分支线，就不假装知道
+  return {
+    kind: 'finished',
+    reason: '所有环节都已办完，流程结束',
+    ...(label ? { detail: `最后一个环节的结论：${label}` } : {}),
+    ...(Object.keys(facts).length ? { facts } : {}),
+  }
+}
+
+/** 这条记录上有没有"办过"的痕迹（未办环节只有姓名，什么都没有） */
+function hasHandledTrace (m?: ApprovalChainItem): boolean {
+  return Boolean(m && (m.handled_at || m.result || m.result_label || m.opinion))
 }
 
 /**
@@ -187,38 +373,280 @@ export function stepStartTimesOf (order: ApprovalOrder, chain: ApprovalChainItem
 }
 
 /**
- * 「弃置审批段」在时间线上的起点（没进入弃置时返回 -1）。
+ * 「弃置审批段」在时间线上盖住**哪几环**。
  *
- * 口径（业务给定，**两个条件同时成立**）：
- *   ① 环节下标 ≥ `DISCARD_MIN_INDEX`（即"审批节点大于 3"，第 4 个环节起）；
- *   ② 这一环是**财务审批**。
- * 命中那一环就是弃置段的**第一环**，它之后的每一环都属于弃置段。
+ * ## 判据（可靠 → 兜底）
  *
- * 为什么这么定（而不是按环节名 / 引用卡片）：
- *   · **环节名在时间线上拿不到**：`ApprovalChainItem` 只有"人"，没有环节名；那段内容的环节名
- *     只存在源模板画布节点的 `data.title` 上（建单期搬进来的 flow 步骤本身不带 name），
- *     所以"财务"只能按**审批人的部门**认（本案财务环节的审批人在财务部门：财务BP组）；
- *   · **主链第 0 环往往也是财务**（财务初审），所以必须叠加"下标大于 3"才能唯一 —— 这正是业务口径。
+ * ① **语义**：画布上绑定**弃置流程入口结论**的那条分支（本项目是「建议弃置」= `result: discard`），
+ *    **它子树里的环节**就是弃置段。段在模板里本来就是"一条按结论进入的线"，
+ *    模板随便加一环、财务换个人都不会失效。
+ * ② **结构**：第一处「引用模板」搬进来的内容（id 带 `:ref:`，见 utils/templateRef 的 prefixFlow）——
+ *    本项目里那段就是弃置流程；老单快照里没有 flow 时靠它。
+ * ③ **兜底**（**只在没有任何结构可用时**才启用，很老的单据）：部门含"财务" 且 下标 ≥ `DISCARD_MIN_INDEX`。
  *
- * ⚠️ 改口径只改这里两处：`DISCARD_MIN_INDEX`（第几环起）与 `isFinanceStep`（怎么认财务）。
+ * ## 为什么是"id 集合"而不是"起点往后的都算"（踩过两次）
  *
- * 时间线据此把圆点从这一环起逐渐缩小、并把整段包进独立背景（见 ApprovalNode 的 inDiscardSegment）。
+ * · 第一次：判定完全落空，整段没有背景与标志 —— 那是 `DISCARD_MIN_INDEX = 4` 与
+ *   "第 4 个环节起"差一位（弃置段恰好从下标 3 开始）。
+ * · 第二次（本次）：判定**误报**。办到一半点「回退上一级」会把流程送回**这一段之前**的环节
+ *   （例如又一次财务审批），从那里重新往前走出来的环节**不是**弃置段的一部分；
+ *   按"起点往后全算"就会把它们一起染成弃置 —— 现象是"回退到财务，这里被判成弃置"。
  *
- * @param chain rebuildChain（或 runtimeOf）给出的链路，时间线上的分组与它同源
- * @returns 弃置段**第一环**在 chain 里的下标；没进入弃置 → -1
+ * 所以现在按**节点 id** 认：只有真的落在弃置子树里的环节才算（回退重新走过的那些自然不算）。
+ * 并且把它们归成**若干连续段** —— 一段被打断（回退出去又绕回来）就重新起一段，
+ * 每段各自算段首/段尾，背景圆角与「进入弃置流程」标志才落在对的地方。
+ *
+ * ⚠️ 以后改口径只改这三处：`DISCARD_ENTRY_RESULTS`（哪些结论算弃置入口）、
+ * `REF_STEP_MARK`、`DISCARD_MIN_INDEX` + `isFinanceStep`（兜底口径）。
  */
-export const DISCARD_MIN_INDEX = 4
+export const DISCARD_MIN_INDEX = 3
 
-export function discardSegmentStart (chain: ApprovalChainItem[][]): number {
-  return chain.findIndex((step, index) => index >= DISCARD_MIN_INDEX && isFinanceStep(step))
+/** 弃置段在时间线上的标注（见 discardMarksOf） */
+export interface DiscardMark {
+  /** 段内序号（0 起）：圆点缩小幅度、段首标志都按它算（见 ApprovalNode 的 inDiscardSegment） */
+  seq: number
+  /** 它所在的**这一段**有多长（同一段内相同）：用来认出"哪条是段尾"（背景圆角） */
+  size: number
 }
 
 /**
- * 这一环是不是"财务审批"。
+ * 弃置段的标注表：下标与 `runtime.chain` **一一对应**，不属于弃置段的位置是 `undefined`。
  *
- * 按**部门**认（`department` / `department_path` 里带"财务"）而不是按环节名 —— 理由见上。
- * 用 `some` 而不是只看负责人：会签时财务可能不是第一位（第 0 环就是「财务初审 + 抄送」那种）。
+ * @param runtime 运行期视图：chain / stepIds（`runtimeOf` 的返回值）+ 单据快照里的 flow
+ */
+export function discardMarksOf (
+  runtime: { chain: ApprovalChainItem[][], stepIds?: string[], flow?: ApprovalFlow | null },
+): Array<DiscardMark | undefined> {
+  const chain = runtime?.chain ?? []
+  const stepIds = runtime?.stepIds ?? []
+  const flags = discardFlags(chain, stepIds, runtime?.flow)
+  /*
+   * 把"属于弃置段"的环节归成**若干连续段**：每段各自从 0 编号 ——
+   * 段首挂「进入弃置流程」标志、段首段尾留圆角、中间的直角首尾相接拼成一整块背景
+   * （见 ApprovalNode 的 discardZoneStyle）。
+   */
+  const marks: Array<DiscardMark | undefined> = new Array(chain.length).fill(undefined)
+  for (let i = 0; i < flags.length; i++) {
+    if (!flags[i]) {
+      continue
+    }
+    let end = i
+    while (end + 1 < flags.length && flags[end + 1]) {
+      end++
+    }
+    const size = end - i + 1
+    for (let k = i; k <= end; k++) {
+      marks[k] = { seq: k - i, size }
+    }
+    i = end
+  }
+  return marks
+}
+
+/** 每一环是否属于弃置段（判据见 discardMarksOf 的说明） */
+function discardFlags (
+  chain: ApprovalChainItem[][],
+  stepIds: string[],
+  flow?: ApprovalFlow | null,
+): boolean[] {
+  if (flow?.length) {
+    /*
+     * ① 语义：弃置入口分支子树里的节点 id —— 再按**源模板标识**把同一份模板的其它入口一并认下
+     * （见 refSourceKeys 的说明：同一张引用卡片在模板里可能放在多处，每处卡片 id 都不同）。
+     */
+    const inside = discardSubtreeIds(flow)
+    if (inside.size > 0) {
+      const keys = refSourceKeysOf(inside)
+      return stepIds.map(id => inDiscardById(id, inside, keys))
+    }
+    // ② 结构：老单（没有 flow）看不到分支，只能拿**第一处**引用段认源模板，再按它认其余入口
+    const byRef = discardFlagsByRef(stepIds)
+    if (byRef) {
+      return byRef
+    }
+    /*
+     * 两条都不成立 = **这一单没有弃置段**（模板里就没配弃置入口，也没有引用段）。
+     * 这里必须直接返回空标记，**不能**顺手退到 ③ —— 见下面的说明。
+     */
+    return stepIds.map(() => false)
+  }
+  /*
+   * ③ 兜底：**只有连 flow 都没有的老单据**才走这里。
+   * "第几环之后的财务"是当初按模板形状定的近似口径 —— 拿它去判有 flow 的单，
+   * 就会把"回退到财务"这种正常环节误判成弃置（实测踩到），所以严格限定在无结构的情形。
+   */
+  const flags = stepIds.map(() => false)
+  const at = chain.findIndex((step, index) => index >= DISCARD_MIN_INDEX && isFinanceStep(step))
+  for (let i = at; i >= 0 && i < flags.length; i++) {
+    flags[i] = true
+  }
+  return flags
+}
+
+/**
+ * 「弃置流程」的入口结论 —— 画布上绑了这些结论的分支，其下游就是弃置段。
+ *
+ * 为什么不直接用 utils/approvalTypes 里那组「处置类」：
+ *   · 那组里有 `rework`（**返工**）—— 它与弃置是**并列**的两条线（真实模板就是
+ *     「建议返工 / 建议弃置」两分支），算进来会把返工那条线也标成弃置；
+ *   · `scrap`（报废清仓）、`supplier_recycle`（供应商回收）、`recycle` 出现在弃置段
+ *     **内部**，当成入口会在段内又找一个"起点"，段首标志跟着跑到中间去。
+ * 所以只列弃置流程**本身的入口**：`discard`（建议弃置）+ `lack_demand`（无需求走弃置）。
+ */
+const DISCARD_ENTRY_RESULTS = ['discard', 'lack_demand']
+
+/** 建单期从「引用模板」搬进来的内容，id 上带这个标记（见 utils/templateRef 的 prefixFlow） */
+const REF_STEP_MARK = ':ref:'
+
+/**
+ * 判定 ①：flow 里**每一处**绑了弃置入口结论的分支，收集**它们子树里的全部节点 id**。
+ *
+ * 为什么要"每一处"而不是"第一处"：多组模板里「建议弃置」是**按组各有一条**的（实测一家模板 12 处），
+ * 只认第一处的话，走其它组的单一个标都拿不到（弃置段整段不显示）。
+ * 一个单只会真正走进其中一条，其它几处的 id 不会出现在它的链路里，收全了也不会误标。
+ *
+ * 给集合而不是"第一环的下标"：同一段可能因为回退被重复经过，
+ * 而"从第一环往后全算"会把回退之后重新走过的普通环节也算进弃置段（见 discardMarksOf 的说明）。
+ */
+function discardSubtreeIds (flow: ApprovalFlow): Set<string> {
+  const out = new Set<string>()
+  /** 这一段（含嵌套分支组、轮询卡片内部）里的所有节点 id */
+  const addAll = (steps: any[] | undefined) => {
+    for (const s of steps ?? []) {
+      if (!s) {
+        continue
+      }
+      const id = String(s.id ?? '')
+      if (id) {
+        out.add(id)
+      }
+      for (const b of (s.branches ?? []) as ApprovalBranch[]) {
+        addAll(b?.steps)
+      }
+      addAll(s?.steps)
+    }
+  }
+  const walk = (nodes: any[] | undefined) => {
+    for (const node of nodes ?? []) {
+      /*
+       * **凡是有 branches 就往下走**，不是只认 type='branch'：
+       * 引用卡片自己、以及审批节点的按结论分流也都带 branches
+       * （同一个坑在 utils/templateRef 的展开里踩过一次 —— 那里的收集器也改成了看 branches）。
+       */
+      for (const b of (node?.branches ?? []) as ApprovalBranch[]) {
+        // 回退 / 跳出这类分支不是"往下走"，不算弃置入口
+        if (!b?.loopBackTo && !b?.exitTo && branchEntersDiscard(b)) {
+          addAll(b.steps)
+          // 已整段收下：段内不会再有"入口"（段内的回收 / 报废分支不在 entry 名单里）
+          continue
+        }
+        walk(b.steps)
+      }
+      walk(node?.steps)
+    }
+  }
+  walk(flow as unknown as any[])
+  return out
+}
+
+/**
+ * 从 id 里取出**源模板标识**：每个 `:ref:` 标记**之后**的那一段。
+ *
+ * 建单期搬进来的 id 形如 `` `${引用卡片id}:ref:${源模板标识}` ``（见 utils/templateRef 的 prefixFlow）：
+ *   · 标记**之前**是**卡片 id** —— 同一份源模板被放在模板的**多处**时，每处都不一样；
+ *   · 标记**之后**是**源模板**的标识 —— 同一份源模板处处相同。
+ *
+ * 所以"这一环是不是弃置段"要按**后面的**那一段认，不能按卡片 id 认（踩过：一张真实单据
+ * 走的入口不是我们找到的那几条分支，按卡片 id 判定就整段落空 → 没有背景也没有标志）。
+ * 嵌套引用会串出多段（`a:ref:b:ref:c`），这里把每一段都取出来，比对时命中任意一段即可。
+ */
+function refSourceKeys (raw: unknown): string[] {
+  const id = String(raw ?? '')
+  const keys: string[] = []
+  let at = id.indexOf(REF_STEP_MARK)
+  while (at >= 0) {
+    const key = id.slice(at + REF_STEP_MARK.length)
+    if (key) {
+      keys.push(key)
+    }
+    at = id.indexOf(REF_STEP_MARK, at + REF_STEP_MARK.length)
+  }
+  return keys
+}
+
+/** 一组 id 里出现过的全部源模板标识 */
+function refSourceKeysOf (ids: Iterable<string>): Set<string> {
+  const out = new Set<string>()
+  for (const id of ids) {
+    for (const key of refSourceKeys(id)) {
+      out.add(key)
+    }
+  }
+  return out
+}
+
+/**
+ * 这一环算不算弃置段：**直接**落在弃置子树里，或者**来自同一份源模板**。
+ *
+ * 后一条是实测补上的：同一个「引用模板」卡片在模板里可能放在多处（本案弃置模板就有 6+ 处入口，
+ * 还有一条走「数据查询 → 不存在 → 引用段」的线），只按子树里的 id 认会漏掉其它入口。
+ */
+function inDiscardById (raw: unknown, inside: Set<string>, keys: Set<string>): boolean {
+  const id = String(raw ?? '')
+  if (inside.has(id)) {
+    return true
+  }
+  return keys.size > 0 && refSourceKeys(id).some(k => keys.has(k))
+}
+
+/**
+ * 判定 ②（老单没有 flow，看不到分支）：拿**第一处**引用段认源模板，
+ * 再按同一份源模板认其余入口 —— 与判定 ① 的补充口径同源，只是少了"子树"那一半。
+ */
+function discardFlagsByRef (stepIds: string[]): boolean[] | undefined {
+  const first = stepIds.find(id => String(id ?? '').includes(REF_STEP_MARK))
+  if (!first) {
+    return undefined
+  }
+  const keys = refSourceKeysOf([String(first)])
+  if (keys.size === 0) {
+    return undefined
+  }
+  return stepIds.map(id => refSourceKeys(id).some(k => keys.has(k)))
+}
+
+/** 这条分支是不是"弃置流程的入口"（**顶层**结论条件命中弃置入口结论；口径同 firstResultValueOf） */
+function branchEntersDiscard (b: ApprovalBranch): boolean {
+  return DISCARD_ENTRY_RESULTS.includes(String(firstResultValueOf(b) ?? '').trim())
+}
+
+/**
+ * 这一环是不是"财务审批"（**兜底判定**用，见 discardMarksOf 的 ③）。
+ *
+ * 按**部门**认（`department` / `department_path` 里带"财务"）而不是按环节名：
+ * `ApprovalChainItem` 只有"人"、没有环节名，环节名只存在源模板画布节点上。
+ * 用 `some` 而不是只看负责人：会签时财务可能不是第一位。
  */
 function isFinanceStep (step: ApprovalChainItem[]): boolean {
   return step.some(m => /财务/.test(`${m.department ?? ''}${m.department_path ?? ''}`))
+}
+
+/**
+ * 某个（合并后的）时间线节点落在弃置段里吗 —— 落在就返回它的标注（段内序号 + 段长）。
+ *
+ * 口径集中在这里（原先 home / mine / approvalPage 三页各抄了一份）。
+ * 取组内**第一个落在段里**的环节：组可能跨段（同一人连着办，段前那一环 + 段首那一环被合并成一条），
+ * 以"在段里"的那一环为准 —— 否则整组会被漏掉，看起来"还是没背景"。
+ */
+export function discardMarkOf (
+  group: ApproverStepGroup,
+  marks: Array<DiscardMark | undefined>,
+): DiscardMark | undefined {
+  for (const i of group.indexes) {
+    const mark = marks[i]
+    if (mark) {
+      return mark
+    }
+  }
+  return undefined
 }

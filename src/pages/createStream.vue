@@ -695,7 +695,7 @@ import { appendWarehouseValue, applyWarehouseGroup, groupWarehouses, selectedWar
 
 const route = useRoute()
 const router = useRouter()
-const { setViewport, addSelectedEdges, setCenter, findNode } = useVueFlow()
+const { setViewport, addSelectedEdges, setCenter, findNode, updateNodeInternals } = useVueFlow()
 
 const isActive = ref(false)
 const status = ref(false)
@@ -1263,6 +1263,8 @@ function applySnapshot(s: { nodes: any[], edges: any[] }) {
   nodes.value = s.nodes.map(n => ({ ...n, position: { ...n.position } }))
   edges.value = s.edges.map(e => ({ ...e, markerEnd: arrowMarker }))
   selectedEdge.value = null
+  // 整批换图：同 loadGraph，补一次重量（撤销/重做后卡片内容会变高变矮）
+  remeasureNodes()
 }
 
 function undo() {
@@ -2038,6 +2040,8 @@ function resetAll() {
   editId.value = ''
   // 重置即新基准，撤销不会越过重置后的状态
   resetHistory()
+  // 整批换图：同 loadGraph，补一次重量
+  remeasureNodes()
 }
 
 function graphToFlow(): ReturnType<typeof graphToFlowFrom> {
@@ -2068,6 +2072,27 @@ function serializeGraph(): FlowGraph {
     })),
     viewport: { ...currentViewport.value },
   }
+}
+
+/**
+ * 让 vue-flow **重新量一遍**每个节点的连接点（handle）位置。
+ *
+ * 为什么必须手动补一次：vue-flow 只在"节点尺寸变化"时自动重量，而我们的图是
+ * **分两拍**渲染出来的 —— 先放节点（那会儿还没有连线，卡片上的选项行 / 「→ 结束」标记
+ * 都还没画），再放连线（选项行这才出现、卡片变高）。尺寸确实变了，但那次变化与
+ * vue-flow 的重量时机挤在同一轮渲染里，结果连线端点停在"卡片变高之前"的位置 ——
+ * 表现就是**刚进画布时线是偏的，随手点一下卡片（触发重渲染）才对上**。
+ *
+ * 所以下面几处"整批换图"的地方都补一次：加载模板 / 重置 / 撤销重做。
+ * `nextTick` + `requestAnimationFrame`：等这两帧 DOM 真画出来再量，否则量的还是旧尺寸
+ * （与 FlowPreview 里"等一帧再 fitView"同一个理由）。
+ */
+function remeasureNodes() {
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      updateNodeInternals(nodes.value.map(n => n.id))
+    })
+  })
 }
 
 async function loadGraph(id: string) {
@@ -2112,6 +2137,8 @@ async function loadGraph(id: string) {
   }
 
   if (graph.viewport) setViewport(graph.viewport)
+  // 节点 + 连线都到位了：补一次重量，否则连线停在「卡片变高之前」的位置（见 remeasureNodes）
+  remeasureNodes()
   // 加载完成即新基准，撤销不会越过「刚加载」状态
   resetHistory()
 }

@@ -8,15 +8,20 @@
       </div>
 
       <div class="text-[13px] d-flex align-center gap-2">
-        <span>当前审批人：{{ currentApprover?.name }}</span>
+        <!-- 办结后没有"当前审批人"了：显示最后经手的人（见 currentApprover 的说明），也不再提供催办 -->
+        <span v-if="orderPending">当前审批人：{{ currentApprover?.name }}</span>
+        <span v-else class="text-medium-emphasis">
+          已办结{{ lastHandler?.name ? `（最后由 ${lastHandler.name} 办理）` : '' }}
+        </span>
 
-        <v-btn class="mb-0.5" color="success" size="x-small" variant="tonal" @click="sendMessage"><span
-            class="text-[10px]">催办</span></v-btn>
+        <v-btn v-if="orderPending" class="mb-0.5" color="success" size="x-small" variant="tonal"
+          @click="sendMessage"><span class="text-[10px]">催办</span></v-btn>
       </div>
 
       <div class="text-[13px] d-flex align-center gap-1">
         <span>已耗时：<span class="text-[11px]  text-[#8B8B8B]">{{ formatTimeDiff(orderDatas?.created) }}</span></span>
-        <div class="d-flex align-center">
+        <!-- 该审批人只有这一张在办单时不显示（两个箭头必然是灰的），见 showQueueNav -->
+        <div v-if="showQueueNav" class="d-flex align-center">
           <v-btn :disabled="!prevOrder" size="x-small" :title="`上一个审批单 —— ${queueScope}`" variant="text" icon
             @click="gotoOrder(prevOrder)">
             <v-icon size="25">mdi-menu-left</v-icon>
@@ -42,19 +47,13 @@
             -->
             <ApprovalNode v-for="(g, gi) in stepGroups" :key="g.stepIds[0] || gi"
               :allowed-options="stepOptionItems[g.stepIds[0]]"
-              :allowed-results="stepResultOptions[g.stepIds[0]]" :data="g.steps[0]" :discard-segment-size="discardNodeCount"
-              :in-discard-segment="discardIndexOf(g)" :index="g.indexes[0]"
+              :allowed-results="stepResultOptions[g.stepIds[0]]" :data="g.steps[0]" :discard-segment-size="discardMarkOf(g, discardMarks)?.size"
+              :in-discard-segment="discardMarkOf(g, discardMarks)?.seq" :index="g.indexes[0]"
               :length="runtime.chain.length" :next-steps="nextStepsOf(g, stepOptionItems, stepResultOptions)"
               :option-context="optionContextOf(orderDatas, runtime.chain, g.indexes[0])"
               :prev-time="g.startTimes[0]" :receiver-team="receiverTeam" :start-time="orderDatas?.created"
               :remaining-qty="remainingQty" :stock-amount="stockAmount" :stock-qty="stockQty"
               @submit="onNodeSubmit" />
-
-            <!--
-              「选择接收组别 / 选择接收团队」的接收方单独成一个节点：
-              它命中终结类结论（CLOSE_FLOW_RESULTS），**不是** chain 里的审批人 ——
-              所以链路里没有它，只能在时间线上补一个节点才看得见。
-            -->
             <v-timeline-item v-if="receiver" class="mb-6" dot-color="#1055C9" size="small">
               <template #icon>
                 <v-icon color="white" size="14">mdi-inbox-arrow-down</v-icon>
@@ -71,11 +70,6 @@
                 </v-avatar>
 
                 <span class="text-[12px]">{{ receiver.name }}</span>
-                <!--
-                  接收方 = 名字 + 负责人（团队表选的；团队级叫负责人、组级叫组长）：
-                  负责人才是落地联系的人，比所属团队有用；
-                  历史单（那时选的是人）退回显示所属团队 / 邮箱。
-                -->
                 <span v-if="receiver.manager" class="text-[11px] text-medium-emphasis">
                   {{ receiver.pick === 'team' ? '负责人' : '组长' }} {{ receiver.manager }}
                 </span>
@@ -137,27 +131,30 @@ import SelectNode from '@/components/streamNodes/SelectNode.vue'
 import { useNodeSubmit } from '@/composables/useNodeSubmit'
 import {
   APPROVAL_STATUS,
-  buildBranchTerminalMap,
   collectStepOptionItems,
   collectStepResultOptions,
-  mergeExtraMembers,
-  rebuildChain,
   receivedQuantities,
   receiverOf,
 } from '@/types/approval'
 import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
 // 运行期视图（重算链路 / 环节负责人 / 连续同人环节合并 / 弃置段起点）：与首页表格同一口径
 import {
-  discardSegmentStart,
+  discardMarkOf,
+  discardMarksOf,
   groupApproverSteps,
+  lastHandledOf,
   mainOf,
   nextStepsOf,
+  queueCursorOf,
   runtimeOf,
-  type ApproverStepGroup,
 } from '@/utils/approvalRuntime'
 // 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口，别自己读 record.data）
 import { toProductView } from '@/utils/biRowFields'
 import { getApprovalOrder, getApprovalOrderByNo, updateApprovalOrder } from '@/utils/collection'
+// 登录用户：右上角「上一个 / 下一个」按他锚定队列（见 queueAnchor，需求口径是"自己名下的单"）
+import { useUserStore } from '@/stores/user'
+// 权限判定表：管理员及以上不受"我名下"限制（见 canManageAllOrders / utils/permissions）
+import { canAct } from '@/utils/permissions'
 import { generateMockData, PRODUCT_HEADERS } from '@/utils/mockProduct'
 import { formatTimeDiff } from '@/utils/utils'
 
@@ -266,30 +263,16 @@ function syncBottomBar() {
 }
 const orderDatas = ref<ApprovalOrder | null>(null)
 
-const terminalMap = computed(() => buildBranchTerminalMap(orderDatas.value?.chain?.graph))
-
-const runtime = computed(() => {
-  const snapshot = orderDatas.value?.chain
-  const flow = snapshot?.flow
-  // 旧数据（只有 chain 没有 flow）：原样沿用，保持兼容
-  if (!flow?.length) {
-    const legacy = snapshot?.chain ?? []
-    return {
-      chain: legacy,
-      stepIds: legacy.map((_, i) => `legacy-${i}`),
-      currentStep: -1,
-      done: false,
-      outcome: 'pending' as const,
-      // 旧单没有 flow，无从判断"为什么停" —— 显式给 undefined，与 rebuildChain 的返回形状一致
-      end: undefined,
-    }
-  }
-  // 业务上下文（关联数据的快照）参与条件选路；与提交侧取法必须一致（见 flowContextOfOrder）
-  const rebuilt = rebuildChain(flow, snapshot?.decisions ?? [], terminalMap.value, flowContextOfOrder(orderDatas.value))
-  // 合并运行时追加的抄送/转办成员（转办会把被接替者标成「已转办」，口径见该函数注释）
-  mergeExtraMembers(rebuilt.chain, rebuilt.stepIds, snapshot?.extraMembers)
-  return rebuilt
-})
+/**
+ * 运行期视图：**与首页 / 我的、以及提交侧共用同一份实现**（utils/approvalRuntime 的 runtimeOf）。
+ *
+ * 这里原先自己抄了一份（含"旧单没有 flow"的兜底分支）—— 三处一旦漂，同一张单在不同页面
+ * 就会显示不同的当前环节、不同的结束依据。改成共用之后，旧单的结束依据也一并有了
+ * （见 runtimeOf 的 legacyFlowEndOf）。
+ */
+const runtime = computed(() => (orderDatas.value
+  ? runtimeOf(orderDatas.value)
+  : { chain: [], stepIds: [], currentStep: -1, done: false, outcome: 'pending' as const, end: undefined }))
 
 const stepResultOptions = computed(() => {
   const flow = orderDatas.value?.chain?.flow
@@ -309,7 +292,20 @@ const stepOptionItems = computed(() => {
  */
 const receiver = computed(() => receiverOf(orderDatas.value))
 
+/** 单据是否还在流转：决定「当前审批人」那一栏显示谁，也决定队列按谁锚定（见 queueAnchor） */
+const orderPending = computed(() => Number(orderDatas.value?.status ?? APPROVAL_STATUS.PENDING) === APPROVAL_STATUS.PENDING)
+
+/** 最后一条已办是谁办的（办结单用它回答"这张单最后谁经手"）—— 与表格「审批结论」列同一口径 */
+const lastHandler = computed(() => lastHandledOf(runtime.value.chain))
+
+/**
+ * 当前待办环节的负责人。**办结之后没有"当前审批人"可言** —— 返回 undefined。
+ *
+ * 为什么不能再退到"链尾那一环的负责人"：单据可能**中途就收了**（走到结束节点 / 命中终结类结论），
+ * 链尾往后还挂着**从没办过**的环节 —— 报出去的人名是错的（实测一张办结单被显示成下一环那位）。
+ */
 const currentApprover = computed<ApprovalChainItem | undefined>(() => {
+  if (!orderPending.value) return undefined
   const chain = runtime.value.chain
   if (chain.length === 0) return undefined
   const idx = runtime.value.currentStep >= 0 ? runtime.value.currentStep : chain.length - 1
@@ -327,48 +323,103 @@ function sameApprover(a?: ApprovalChainItem, b?: ApprovalChainItem) {
   return ae && be ? ae === be : (!!a.name && a.name === b.name)
 }
 
-/** 某张单**当前待办**环节的负责人（已办结则取最后一环）—— 与表格「当前审批人」同口径（mainOf） */
+/**
+ * 某张单"该谁办"：在办取**当前待办环节**的负责人；已办结取**最后一条已办**的人。
+ *
+ * 队列拿它跟锚点比，所以"办结单归谁"这一步的口径必须与 queueAnchor 一致（见那里）。
+ */
 function approverOfOrder(order: ApprovalOrder) {
   const rt = runtimeOf(order)
   if (rt.chain.length === 0) return undefined
-  const idx = rt.currentStep >= 0 ? rt.currentStep : rt.chain.length - 1
-  return mainOf(rt.chain[idx])
+  if (rt.currentStep < 0) {
+    return lastHandledOf(rt.chain)
+  }
+  return mainOf(rt.chain[rt.currentStep])
 }
 
 /**
- * 跳转队列：**这张单当前审批人**的其它在办单。
+ * 跳转队列：右上角「上一个 / 下一个」翻的就是它。
  *
- * 为什么锚在"当前审批人"而不是"登录人"：这排按钮就摆在「当前审批人：X」那一栏里，
- * 跳的自然是 X 的待办（正常场景下 X 就是登录人本人；管理员代看时也不会跳到自己那边去）。
+ * 范围分两档（见 loadApproverQueue）：
+ *   · 一般员工 → **自己名下**的在办单（锚点见 queueAnchor）；
+ *   · 管理员及以上 → **全部**在办单（见 canManageAllOrders：管理员对所有审批单有权限）。
  * 顺序沿用列表口径（getApprovalOrder 的 `-created`），所以左右跳与首页表格的上下行一致。
  */
 const approverQueue = ref<ApprovalOrder[]>([])
 
-/** 队列里当前这张单的位置；-1 = 不在队列里（已办结，或这张单的审批人换了人） */
+const userStore = useUserStore()
+
+/**
+ * 能不能不受"我名下"限制地翻单：**管理员及以上**（超级管理员 / 管理员），
+ * 走权限判定表（utils/permissions 的 approval:manageAll），不在页面里写角色比较。
+ */
+const canManageAllOrders = computed(() => canAct(userStore.appRole, 'approval:manageAll'))
+
+/**
+ * 「上一个 / 下一个」的锚点 = **登录人自己**（"自己名下的审批单"，需求口径）。
+ *
+ * ## 为什么不是"这张单的当前审批人"（旧口径，三个死结都实测过）
+ *
+ *   · **单据办结后就没有"当前审批人"了**：旧代码退到"链尾那一环的负责人"，而链尾往后
+ *     还挂着**从没办过**的环节（单据在中途就收了：走到结束节点 / 命中终结类结论）——
+ *     于是队列算成别人的、甚至空的，箭头直接消失。这就是"办结了没法接着跳下一张"。
+ *   · **单据流转给下一位时**，队列会跳到**接手人**名下，对刚办完的人没有意义。
+ *   · 只有"这一环正好压在我手上"时才成立，而办完那一刻恰恰不成立。
+ *
+ * 换成登录人之后，这些死结一次性消失：不管单据办结、还是流转给了别人，
+ * 队列始终是"我名下还在办的"，`queueCursorOf` 再按建单时间给当前单插个站位 →
+ * 「下一个」就是**我接着要办的那一张**。
+ *
+ * 认人只看 name / email / open_id（与 sameApprover 同一口径）。
+ * 登录信息拿不到时（未登录 / 测试环境）退回"当前审批人 → 最后一条已办的人"，与旧版一致。
+ */
+const queueAnchor = computed<ApprovalChainItem | undefined>(() =>
+  // 登录者形状统一由 store 给（userStore.member，口径与链上认人一致）
+  userStore.member ?? currentApprover.value ?? lastHandler.value)
+
+/** 队列里当前这张单的位置；-1 = 不在队列里（刚办完、已交接给别人，或本身就是别人的单） */
 const queueIndex = computed(() => {
   const no = orderDatas.value?.order_no
   if (!no) return -1
   return approverQueue.value.findIndex(o => (o.order_no ?? o.id) === no)
 })
 
-const prevOrder = computed(() => (queueIndex.value > 0 ? approverQueue.value[queueIndex.value - 1] : undefined))
-const nextOrder = computed(() => {
-  const i = queueIndex.value
-  return i >= 0 && i < approverQueue.value.length - 1 ? approverQueue.value[i + 1] : undefined
-})
+/**
+ * 左右箭头指向哪两张单。
+ *
+ * 口径集中在 utils/approvalRuntime 的 `queueCursorOf`（它同时处理"当前单不在队列里"这种情形 ——
+ * 刚办完一张就是这样，见该函数的说明），本页只负责把队列与当前单递进去。
+ */
+const queueCursor = computed(() => queueCursorOf(approverQueue.value, orderDatas.value))
 
-/** 队列概览（按钮 title 用）：让人知道在谁的队列里 */
+const prevOrder = computed(() => queueCursor.value.prev)
+const nextOrder = computed(() => queueCursor.value.next)
+
+/** 队列概览（按钮 title 用）：让人知道翻的是哪一批单 —— 管理员是全部，员工是自己名下 */
 const queueScope = computed(() => {
-  const who = currentApprover.value?.name ?? ''
-  return `${who ? `${who} 的` : ''}在办审批单（${approverQueue.value.length} 张）`
+  const count = approverQueue.value.length
+  if (canManageAllOrders.value) {
+    return `全部在办审批单（${count} 张）`
+  }
+  const who = queueAnchor.value?.name ?? ''
+  return `${who ? `${who} 的` : ''}在办审批单（${count} 张）`
 })
 
-/** 中间那个「3 / 8」计数：只有一张单、或这张单不在队列里（已办结）时不显示 */
+/** 中间那个「3 / 8」计数：只有一张、或这张单不在队列里（刚办完）时不显示 */
 const queueCountText = computed(() => (
   queueIndex.value >= 0 && approverQueue.value.length > 1
     ? `${queueIndex.value + 1} / ${approverQueue.value.length}`
     : ''
 ))
+
+/**
+ * 是否显示「上一个 / 下一个」这排按钮：**有可跳的目标才显示**。
+ *
+ * 原先写的是"队列里有多张" —— 那个口径在"刚办完一张、手上只剩一张"时会误判成
+ * "只有这一张、没必要显示"，把唯一还能跳过去的那张也藏掉了；
+ * 而这恰好就是"办完想接着办下一张"的时刻。改成看左右箭头有没有落点。
+ */
+const showQueueNav = computed(() => Boolean(prevOrder.value || nextOrder.value))
 
 /**
  * 读队列。**每换一张单都要重算** —— 换了单，锚定的审批人可能就变了。
@@ -377,20 +428,35 @@ const queueCountText = computed(() => (
 async function loadApproverQueue() {
   try {
     const all = await getApprovalOrder()
-    const anchor = currentApprover.value
+    const pending = all.filter(o => Number(o.status ?? APPROVAL_STATUS.PENDING) === APPROVAL_STATUS.PENDING)
+    /*
+     * 管理员及以上：**不受"我名下"限制**，在所有在办单里翻（见 utils/permissions 的 approval:manageAll）。
+     * 一般员工：只在自己名下的在办单里翻（锚点见 queueAnchor）。
+     */
+    if (canManageAllOrders.value) {
+      approverQueue.value = pending
+      return
+    }
+    const anchor = queueAnchor.value
     if (!anchor) {
       approverQueue.value = []
       return
     }
-    approverQueue.value = all.filter(o =>
-      Number(o.status ?? APPROVAL_STATUS.PENDING) === APPROVAL_STATUS.PENDING
-      && sameApprover(approverOfOrder(o), anchor),
-    )
+    approverQueue.value = pending.filter(o => sameApprover(approverOfOrder(o), anchor))
   } catch (error) {
     console.error('[approvalPage] 读取审批人队列失败:', error)
     approverQueue.value = []
   }
 }
+
+/*
+ * 锚点或档位变了就重算队列：登录态是**异步**恢复的（userStore.init 晚于首帧），
+ * 首屏那次 loadApproverQueue 可能还是"未登录"的兜底口径，登录信息到位后必须再算一遍 ——
+ * 否则"自己名下的单 / 全部在办单"要等到手动刷新才出来。
+ */
+watch([queueAnchor, canManageAllOrders], () => {
+  void loadApproverQueue()
+})
 
 /** 跳过去：只改 URL 的 order_no，取数交给下面的 route watch（与飞书回跳同一条路径） */
 function gotoOrder(order?: ApprovalOrder) {
@@ -422,32 +488,16 @@ const stepStartTimes = computed(() => {
 const stepGroups = computed(() => groupApproverSteps(runtime.value.chain, runtime.value.stepIds, stepStartTimes.value))
 
 /**
- * 时间线上「弃置审批段」的起点下标（-1 = 这一单没进入弃置）。
+ * 弃置审批段的标注（与 chain 下标一一对应，不在段里的位置是 undefined）。
  *
- * 口径集中在 utils/approvalRuntime 的 discardSegmentStart 里：
- * **第 4 个环节起 + 出现财务审批**（改口径只改那里的两个常量/函数）。
+ * 口径集中在 utils/approvalRuntime 的 discardMarksOf —— 它按**节点**认（不是"起点往后全算"），
+ * 所以从段内「回退上一级」重新走过的那些环节不会被误标成弃置。
  */
-const discardStart = computed(() => discardSegmentStart(runtime.value.chain))
-
-/**
- * 这一组落在弃置段里吗 —— 落在就返回**段内序号**（0 起），否则 undefined。
- *
- * 传段内序号而不是 chain 下标：圆点"从进入这一段起逐渐缩小"，
- * 缩小幅度只与段内第几环有关（见 ApprovalNode 的 inDiscardSegment）。
- */
-function discardIndexOf (group: ApproverStepGroup): number | undefined {
-  const start = discardStart.value
-  const i = group.indexes[0]
-  return start >= 0 && i >= start ? i - start : undefined
-}
-
-/**
- * 弃置段一共几条节点（**合并后**的节点数，与 discardIndexOf 同一口径）。
- *
- * 交给 ApprovalNode 认出"哪条是这一段的最后一条"：整段背景只有首/尾两条留圆角、
- * 只有它们不往缝里撑，中间的直角首尾相接才拼成**一整块**背景（见其 discardSegmentSize）。
- */
-const discardNodeCount = computed(() => stepGroups.value.filter(g => discardIndexOf(g) !== undefined).length)
+const discardMarks = computed(() => discardMarksOf({
+  chain: runtime.value.chain,
+  stepIds: runtime.value.stepIds,
+  flow: orderDatas.value?.chain?.flow,
+}))
 /** 保存结果提示 */
 const snackbar = ref<{ show: boolean, text: string, color: string }>({ show: false, text: '', color: 'success' })
 function showMsg(text: string, color: 'success' | 'error' | 'warning' = 'success') {
@@ -525,6 +575,7 @@ async function handleSelect(payload: { action: 'cc' | 'transfer', user: UserBrie
   const managers = (chain[idx] ?? []).filter(m => m.type === 'manager')
   const fromName = managers.at(-1)?.name ?? ''
   const member: ApprovalChainItem = {
+    ...(u.open_id ? { open_id: u.open_id } : {}),
     name: u.name,
     avatar: u.avatar,
     email: u.email,
@@ -536,8 +587,14 @@ async function handleSelect(payload: { action: 'cc' | 'transfer', user: UserBrie
 
   const extraMembers = { ...snapshot.extraMembers }
   const existed = extraMembers[stepId] ?? []
-  // 去重：UserBrief 有 open_id，但存进 chain 后没有该字段，按 name 比对
-  if (existed.some(m => m.name === member.name)) {
+  /*
+   * 去重：**优先按 open_id 认人** —— 同名不同人按姓名比会误判成"已经在环节里"，
+   * 于是加不进人（以前存进 chain 的成员没有 open_id，只能按姓名比，这次补上了）。
+   * 老单里存过的成员没有 open_id，退回按姓名比。
+   */
+  if (existed.some(m => (m.open_id && member.open_id
+    ? m.open_id === member.open_id
+    : m.name === member.name))) {
     showMsg(isTransfer ? '该审批人已在当前环节' : '该抄送人已在列表中', 'warning')
     return
   }

@@ -18,6 +18,14 @@
       <span class="text-[12px]">{{ end.reason }}</span>
     </div>
 
+    <!--
+      具体事实：最后是谁、办的什么结论、什么时候 —— 回答"**凭什么**说它结束了"。
+      `reason` 说的是怎么停的（命中哪类结论 / 哪条线），这行补上可核对的事实。
+    -->
+    <div v-if="factsLine" class="mt-1 text-[11px]">
+      <span class="text-medium-emphasis">依据：{{ factsLine }}</span>
+    </div>
+
     <div v-if="end.detail" class="mt-1 text-[11px] text-medium-emphasis">
       {{ end.detail }}
     </div>
@@ -26,6 +34,7 @@
 
 <script lang="ts" setup>
   import type { FlowEndInfo } from '@/types/approval'
+  import { formatDate } from '@/utils/utils'
 
   const props = defineProps<{
     /** 结束依据（runtimeOf / rebuildChain 的 end）；进行中的单传 undefined */
@@ -39,4 +48,17 @@
   const meta = computed(() => (props.end?.kind === 'stuck'
     ? { chip: '流转中止', color: '#b45309', icon: 'mdi-alert-circle-outline' }
     : { chip: '流转结束', color: '#64748b', icon: 'mdi-flag-checkered' }))
+
+  /** 「具体事实」一行：结论 · 谁办理 · 什么时候（有哪项显示哪项，都没有就不占行） */
+  const factsLine = computed(() => {
+    const f = props.end?.facts
+    if (!f) {
+      return ''
+    }
+    return [
+      f.resultLabel ? `最后结论「${f.resultLabel}」` : '',
+      f.byName ? `由 ${f.byName} 办理` : '',
+      f.at ? formatDate(f.at) : '',
+    ].filter(Boolean).join(' · ')
+  })
 </script>

@@ -98,6 +98,10 @@ const router = createRouter({
       component: () => import('@/pages/alarmSetting.vue'),
     },
     {
+      path: '/approvalTypeSetting',
+      component: () => import('@/pages/approvalTypeSetting.vue'),
+    },
+    {
       path: '/knowledge',
       component: () => import('@/pages/knowledge.vue'),
     },

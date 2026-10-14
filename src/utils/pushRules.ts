@@ -1,11 +1,13 @@
 /**
  * 飞书推送规则（在「提醒设置」页面里维护，落库到 PocketBase 的 `push_rules`）。
  *
- * 管四件事：
+ * 管五件事：
  *   1. **是否定时推送** + **频率**（每天 / 仅工作日）+ **每天不早于几点推**；
  *   2. **超时阈值**：待办超过多少个「工作日小时」才开始催（业务原口径 48h）；
- *   3. **推送人员**：默认发给当前审批人，也可以固定发某几个人；
- *   4. **白名单**：名单内的人**一条都不发**（定时提醒与到达提醒都排除）。
+ *   3. **推送间隔**：超时之后每隔多少小时**再催一次** —— 这就是"超时后按推送时间、每隔一段时间
+ *      重复推送"的开关（见 intervalHours；默认 24 小时 = 改造前"每天一条"的行为）；
+ *   4. **推送人员**：默认发给当前审批人，也可以固定发某几个人；
+ *   5. **白名单**：名单内的人**一条都不发**（定时提醒与到达提醒都排除）。
  *
  * 为什么这个文件里全是**纯函数**、一个依赖都不 import：
  * 前端页面、服务端超时跑批（server/reminders.ts）、到达提醒（utils/notifySteps）三处都要用
@@ -41,6 +43,15 @@ export interface PushRules {
   sendTime: string
   /** 待办超过多少个**工作日小时**开始推送（业务原口径 48） */
   overdueHours: number
+  /**
+   * **推送间隔**（小时）：同一单同一级别两次提醒之间至少隔多少小时。
+   *
+   * 超时之后要不要"一直催"，就看它：只要距上次提醒已经隔够这么多小时（**跨自然日则重新起算**，
+   * 见 intervalElapsed），又满足「频率 + 不早于推送时间」那两条（见 shouldPushNow），跑批就再推一次。
+   *   · 24（默认）= 超时后每天一条 —— 与改造前完全一致；
+   *    · 4        = 超时后每 4 小时催一次（工作日、不早于 sendTime）。
+   */
+  intervalHours: number
   receiverMode: ReceiverMode
   /** receiverMode 为 custom / both 时生效的固定收件人 */
   receivers: PushPerson[]
@@ -61,6 +72,8 @@ export const DEFAULT_PUSH_RULES: PushRules = {
   frequency: 'workdays',
   sendTime: '09:00',
   overdueHours: 48,
+  // 24 小时 = 每天一条：与改造前"超时后每天催一次"的行为完全一致
+  intervalHours: 24,
   receiverMode: 'approver',
   receivers: [],
   whitelist: [],
@@ -79,6 +92,26 @@ export const RECEIVER_MODE_OPTIONS: ReadonlyArray<{ value: ReceiverMode, title: 
   { value: 'both', title: '审批人 + 指定人员', hint: '两边都发，指定人员一起盯' },
 ]
 
+/**
+ * 推送间隔的常用档位（「提醒设置」页的下拉直接用）。
+ *
+ * 没有"不重复"这一档：间隔本身就是**重复推送**的开关，把值填大（比如 168 = 一周）
+ * 就等于"基本不再重复"，比多一个布尔开关少一处会互相矛盾的状态。
+ */
+export const PUSH_INTERVAL_OPTIONS: ReadonlyArray<{ value: number, title: string, hint: string }> = [
+  { value: 1, title: '每 1 小时', hint: '超时后每小时催一次（仍只在工作日、且不早于推送时间）' },
+  { value: 2, title: '每 2 小时', hint: '超时后每 2 小时催一次' },
+  { value: 4, title: '每 4 小时', hint: '超时后每 4 小时催一次' },
+  { value: 6, title: '每 6 小时', hint: '超时后每 6 小时催一次' },
+  { value: 8, title: '每 8 小时', hint: '超时后每 8 小时催一次' },
+  { value: 12, title: '每 12 小时', hint: '超时后每天催两次' },
+  { value: 24, title: '每 24 小时', hint: '超时后每天一条（默认，与改造前一致）' },
+]
+
+/** 间隔的取值边界：至少 1 小时、最多 168 小时（一周）—— 跑批比这更密的间隔没有意义 */
+export const PUSH_INTERVAL_MIN = 1
+export const PUSH_INTERVAL_MAX = 168
+
 /** 'HH:mm' → 当天的分钟数；认不出来时退回 0 点（宁可早推，也不要因为配错就不推） */
 export function pushTimeMinutes (sendTime: string): number {
   const hit = PUSH_TIME_RE.exec(String(sendTime ?? '').trim())
@@ -87,6 +120,60 @@ export function pushTimeMinutes (sendTime: string): number {
   }
   const [h, m] = String(sendTime).split(':')
   return Number(h) * 60 + Number(m)
+}
+
+/**
+ * 该不该再给「这一单 + 这一级别」发一条（纯函数：跑批与服务端报告都用它，边界好测）。
+ *
+ * 两条口径：
+ *   1. **同一自然日**内，两次之间至少隔 `intervalHours` 小时；
+ *   2. **换了自然日**就重新起算 —— 当天能不能发由"不早于 sendTime"那道闸门管（见 shouldPushNow）。
+ *
+ * 第 2 条是必须的（实测踩到）：只按"距上次 ≥ 24 小时"算的话，第一天在 10:00 发出，
+ * 第二天 09:00 只有 23 小时 → 被跳过 → 实际推到 10:00，第三天再往后漂一点
+ * —— 表现就是"说好每天 9 点催，越催越晚"。按自然日重算之后，每天的第一条都在 sendTime 之后准时发。
+ *
+ * 这是"间隔推送"的**唯一**判定处：跑批只负责记"上次发在什么时候"，怎么算由这里说了算。
+ *
+ * @param lastSentAt  上次发提醒的时刻（毫秒时间戳）；没发过 = undefined
+ * @param intervalHours 规则里的间隔（小时）
+ * @returns true = 该发（没发过 / 换天了 / 今天已经隔够）
+ */
+export function intervalElapsed (
+  lastSentAt: number | undefined,
+  now: Date,
+  intervalHours: number,
+): boolean {
+  if (lastSentAt === undefined || !Number.isFinite(lastSentAt)) {
+    return true
+  }
+  const last = new Date(lastSentAt)
+  // ① 换了自然日 → 重新起算（时间窗由 shouldPushNow 把关，这里不重复判 sendTime）
+  if (
+    last.getFullYear() !== now.getFullYear()
+    || last.getMonth() !== now.getMonth()
+    || last.getDate() !== now.getDate()
+  ) {
+    return true
+  }
+  // ② 同一天内比时间差；间隔非法（0 / 负数 / NaN）时按默认值算：宁可"每天一条"，也不要退化成"每次跑批都发"
+  const hours = Number.isFinite(Number(intervalHours)) && Number(intervalHours) >= 1
+    ? Number(intervalHours)
+    : DEFAULT_PUSH_RULES.intervalHours
+  return now.getTime() - lastSentAt >= hours * 3_600_000
+}
+
+/**
+ * 一句话描述"超时后会怎么推"（设置页的提示文案；口径只有这一处，页面别自己拼字符串）。
+ * 形如：超时 48 个工作日小时起，每 4 小时催一次（仅工作日，不早于 09:00）
+ *
+ * 单位统一说「工作日小时」—— 与阈值输入框的后缀、以及「进度」列的悬浮说明同一套说法，
+ * 免得同一个判据在三个地方分别是"48 小时""48 个工作日小时""48h"。
+ */
+export function pushCadenceText (rules: PushRules): string {
+  const r = normalizePushRules(rules)
+  const freq = r.frequency === 'workdays' ? '仅工作日' : '每天'
+  return `超时 ${r.overdueHours} 个工作日小时起，每 ${r.intervalHours} 小时催一次（${freq}，不早于 ${r.sendTime}）`
 }
 
 /** 一个人的身份键：**邮箱优先**、缺邮箱退回姓名（与 types/approval 的 sameApprover 同一口径） */
@@ -163,6 +250,7 @@ function normalizeReceiverMode (raw: unknown): ReceiverMode {
 export function normalizePushRules (raw: unknown): PushRules {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const hours = Number(o.overdueHours)
+  const interval = Number(o.intervalHours)
   const sendTime = String(o.sendTime ?? '').trim()
   return {
     enabled: o.enabled === undefined ? DEFAULT_PUSH_RULES.enabled : !!o.enabled,
@@ -170,6 +258,14 @@ export function normalizePushRules (raw: unknown): PushRules {
     sendTime: PUSH_TIME_RE.test(sendTime) ? sendTime : DEFAULT_PUSH_RULES.sendTime,
     // 非正数/非数字一律回默认：0 会让"所有待办一建出来就该催"
     overdueHours: Number.isFinite(hours) && hours > 0 ? Math.round(hours) : DEFAULT_PUSH_RULES.overdueHours,
+    /*
+     * 间隔同样要挡住非法值，但方向相反：这里**小于 1 一律回默认**。
+     * 0 会让 intervalElapsed 永远为真 —— 表现就是"跑批每 tick 都发一条"，比不推更糟。
+     * 上限只做软收敛（夹到一周），超了算用户填错，不该因此静默改成默认值。
+     */
+    intervalHours: Number.isFinite(interval) && interval >= PUSH_INTERVAL_MIN
+      ? Math.min(PUSH_INTERVAL_MAX, Math.round(interval))
+      : DEFAULT_PUSH_RULES.intervalHours,
     receiverMode: normalizeReceiverMode(o.receiverMode),
     receivers: cleanPeople(o.receivers),
     whitelist: cleanPeople(o.whitelist),
@@ -209,9 +305,10 @@ export function excludeWhitelist<T extends { name?: string, email?: string }> (
  *   2. 频率是"仅工作日"且今天是周六/周日 → 不发；
  *   3. 还没到 `sendTime` → 不发。
  *
- * ⚠️ 这里**只管到点**，不管"这一单今天是不是已经发过"（那是跑批自己的按日去重，
- *    见 server/reminders.ts 的 sentToday）—— 所以外部 cron 从推送时刻起
- *    **每 10 分钟打一次也算安全**：到点之后每次跑批都会通过这里，但同一单同一级别当天只发一条。
+ * ⚠️ 这里**只管到点**（"推送窗口"），不管"这一单最近是不是刚发过" —— 那是跑批按**推送间隔**
+ *    记的去重（见 server/reminders.ts 的 lastSentAt 与这里的 intervalElapsed）。
+ *    所以外部 cron 从推送时刻起**每 10 分钟打一次也算安全**：到点之后每次跑批都会通过这里，
+ *    但同一单同一级别同一天内间隔没到就不会再发；第二天从 sendTime 起重新开始。
  *
  * @returns ok = 可以发；reason = 不发的原因（页面/日志直接展示这句话）
  */
@@ -266,6 +363,7 @@ export function pushRulesFromRecord (rec: Record<string, unknown> | null | undef
     frequency: rec.frequency,
     sendTime: rec.send_time,
     overdueHours: rec.overdue_hours,
+    intervalHours: rec.interval_hours,
     receiverMode: rec.receiver_mode,
     receivers: rec.receivers,
     whitelist: rec.whitelist,
@@ -280,6 +378,7 @@ export function pushRulesToRecord (rules: PushRules) {
     frequency: clean.frequency,
     send_time: clean.sendTime,
     overdue_hours: clean.overdueHours,
+    interval_hours: clean.intervalHours,
     receiver_mode: clean.receiverMode,
     receivers: clean.receivers,
     whitelist: clean.whitelist,

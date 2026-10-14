@@ -11,12 +11,14 @@
         <v-sheet class="overflow-hidden mt-3 p-4" rounded="15">
           <div class="block-title">审批信息</div>
 
+          <!-- 当前审批单：同一个 `approver` 字段在在办单里是「当前审批人」（表格已不摆这一列，筛选仍可按它挑单） -->
           <ApprovalFilterBar :dirty="filtersDirty" :filters="filters" :options="filterOptionsMap"
-            @apply="applyFilters" @patch="patchFilters" @reset="resetFilters" />
+            :select-labels="{ approver: '当前审批人' }" @apply="applyFilters" @patch="patchFilters"
+            @reset="resetFilters" />
 
           <v-divider class="mt-3" />
 
-          <v-data-table v-model:page="page" class="text-[12px]" border density="compact" fixed-header :headers="headers"
+          <v-data-table v-model:page="page" class="text-[12px]" border density="compact" fixed-header :headers="pendingHeaders"
             fixed-footer hover :items="pendingList" :items-per-page="itemsPerPage" items-per-page-text="每页条数"
             striped="odd" @click:row="handleRowClick">
             <template #item.order_no="{ value }">
@@ -28,9 +30,8 @@
                 <v-pagination v-model="page" :length="pageCount" />
               </div>
             </template>
-            <!-- 状态：两个 tab 共用同一套映射（原来这里被复制了 5 份，vue 编译器报 Duplicate slot names） -->
-            <template #item.status="{ value }">
-              <v-chip :color="statusMeta(value).color" label size="x-small">{{ statusMeta(value).text }}</v-chip>
+            <template #item.status="{ item }">
+              <v-chip :color="item.statusColor" label size="x-small">{{ item.statusText }}</v-chip>
             </template>
 
             <template #item.created="{ value }">
@@ -55,14 +56,19 @@
         <v-sheet class="p-3 mt-3" rounded="8px">
           <div class="block-title">历史审批单</div>
 
-          <!-- 筛选条件：与 mine.vue 共用同一个组件（加条件只改 utils/approvalFilters 的定义表） -->
+          <!--
+            筛选条件：与 mine.vue 共用同一个组件（加条件只改 utils/approvalFilters 的定义表）。
+            这里的 `approver` 是**最后办理的人**（已办结的单那一列就是它），所以下拉改叫「最后办理人」；
+            与当前审批单页签共用同一份条件，那边同一个字段叫「当前审批人」。
+          -->
           <ApprovalFilterBar :dirty="filtersDirty" :filters="filters" :options="filterOptionsMap"
-            @apply="applyFilters" @patch="patchFilters" @reset="resetFilters" />
+            :select-labels="{ approver: '最后办理人' }" @apply="applyFilters" @patch="patchFilters"
+            @reset="resetFilters" />
 
           <v-divider class="mt-3" />
 
-          <v-data-table v-model:page="page" class="text-[12px]" border density="compact" :headers="headers" fixed-header
-            hover fixed-footer :items="historyList" :items-per-page="itemsPerPage"
+          <v-data-table v-model:page="page" class="text-[12px]" border density="compact" :headers="historyHeaders"
+            fixed-header hover fixed-footer :items="historyList" :items-per-page="itemsPerPage"
             :items-per-page-options="[20, 50, 100, 200]" items-per-page-text="每页条数" striped="odd"
             @click:row="handleRowClick">
             <template #bottom>
@@ -71,8 +77,15 @@
               </div>
             </template>
             <!-- 与当前审批单 tab 用同一套状态映射（原来两个 tab 的驳回一个 warning 一个 error） -->
-            <template #item.status="{ value }">
-              <v-chip :color="statusMeta(value).color" size="small">{{ statusMeta(value).text }}</v-chip>
+            <template #item.status="{ item }">
+              <v-chip :color="item.statusColor" size="small">{{ item.statusText }}</v-chip>
+            </template>
+            <template #item.created="{ value }">
+              {{ formatDate(value) }}
+            </template>
+            <!-- 最后的审批结论：只有走完流程的单有内容；悬浮看办理人 / 意见 / 时间 -->
+            <template #item.conclusion="{ item }">
+              <span :title="item.conclusionDetail">{{ item.conclusion }}</span>
             </template>
             <template #item.actions="{ item }">
               <DeleteOrderButton :row="item" @deleted="onOrderDeleted" @error="onDeleteFailed" />
@@ -112,8 +125,8 @@
 
         <span>当前审批人：{{ selectedNode?.approver ?? '—' }}</span>
 
-        <span>审批状态：<v-chip :color="statusMeta(selectedNode?.status).color" size="small">
-            {{ statusMeta(selectedNode?.status).text }}
+        <span>审批状态：<v-chip :color="selectedNode?.statusColor" size="small">
+            {{ selectedNode?.statusText ?? '—' }}
           </v-chip>
         </span>
       </v-sheet>
@@ -130,8 +143,8 @@
             :allowed-options="selectedOptionItems[g.stepIds[0]]"
             :allowed-results="selectedResultOptions[g.stepIds[0]]"
             :can-handle="g.indexes.includes(selectedCurrentStep)"
-            :data="g.steps[0]" :discard-segment-size="discardNodeCount" :index="g.indexes[0]"
-            :in-discard-segment="discardIndexOf(g)"
+            :data="g.steps[0]" :discard-segment-size="discardMarkOf(g, selectedDiscardMarks)?.size" :index="g.indexes[0]"
+            :in-discard-segment="discardMarkOf(g, selectedDiscardMarks)?.seq"
             :length="selectedChain.length"
             :next-steps="nextStepsOf(g, selectedOptionItems, selectedResultOptions)"
             :option-context="optionContextOf(selectedOrder, selectedChain, g.indexes[0])"
@@ -169,16 +182,15 @@ import { useApprovalTable } from '@/composables/useApprovalTable'
 import { collectStepOptionItems, collectStepResultOptions, receivedQuantities } from '@/types/approval'
 // 条件求值上下文（建单快照优先）：算剩余接收数量要用它，与流程引擎同源
 import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
-import { approvalStatusMeta } from '@/utils/approvalFilters'
 import { APPROVAL_TABLE_HEADERS, toApprovalRow, type ApprovalRow } from '@/utils/approvalRows'
 // 重算链路 / 每步起始时间 / 「连续同人环节」合并 / 弃置段起点：与审批页（approvalPage）共用同一份口径
 import {
-  discardSegmentStart,
+  discardMarkOf,
+  discardMarksOf,
   groupApproverSteps,
   nextStepsOf,
   runtimeOf,
   stepStartTimesOf,
-  type ApproverStepGroup,
 } from '@/utils/approvalRuntime'
 // 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口）
 import { toProductView } from '@/utils/biRowFields'
@@ -205,11 +217,29 @@ const setOpen = computed(() => open.value)
 const page = ref(1)
 const itemsPerPage = ref(15)
 
-/** 状态 → 文案 + 颜色（与「状态」筛选项共用同一份定义） */
-const statusMeta = approvalStatusMeta
-
-/** 表格列：与 mine.vue 共用一份定义（加一列只改 utils/approvalRows） */
+/**
+ * 表格列：与 mine.vue 共用一份定义（加一列只改 utils/approvalRows）。
+ *
+ * 「审批结论」只对**走完流程**的单有内容（见 toApprovalRow），所以在**当前审批单**那张表里
+ * 不摆它 —— 摆着会是一整列 '—'；历史那张表用完整列。
+ */
 const headers = APPROVAL_TABLE_HEADERS
+/**
+ * 当前审批单那张表的列：在完整列定义上**去掉两列** ——
+ *   · 「审批结论」：单没办结，整列都是 '—'；
+ *   · 「当前审批人」：当前单走的就是"压在我手上的那一环"，列出来每行都是同一个名字，没有信息量。
+ * 历史表用完整列（其中「当前审批人」在那边改叫「最后办理人」，见 historyHeaders）。
+ */
+const pendingHeaders = APPROVAL_TABLE_HEADERS.filter(h => h.key !== 'conclusion' && h.key !== 'approver')
+
+/**
+ * 历史审批单那张表的列：用完整列定义，只把「当前审批人」改叫**最后办理人** ——
+ * 已办结的单没有"当前审批人"，那一列显示的是最后办理的人（见 toApprovalRow）。
+ * 筛选条上的同一个字段也按这个叫法显示（见模板里的 select-labels）。
+ */
+const historyHeaders = computed(() =>
+  APPROVAL_TABLE_HEADERS.map(h => (h.key === 'approver' ? { ...h, title: '最后办理人' } : h)),
+)
 
 /*
  * 取数 / 组装行 / 筛选：与 mine.vue 共用同一份实现（见 composables/useApprovalTable）。
@@ -304,28 +334,15 @@ const selectedStepGroups = computed(() =>
 )
 
 /**
- * 弃置审批段起点（-1 = 这一单没进入弃置）。
- * 与审批页 / 我的审批同一口径，判定集中在 utils/approvalRuntime 的 discardSegmentStart（别在本页另写一套）。
+ * 弃置审批段的标注（与 chain 下标一一对应）。
+ * 与审批页 / 我的审批同一口径，判定集中在 utils/approvalRuntime 的 discardMarksOf（别在本页另写一套）——
+ * 它按**节点**认、不是"起点往后全算"，所以「回退上一级」重新走过的环节不会被误标成弃置。
  */
-const selectedDiscardStart = computed(() => discardSegmentStart(selectedChain.value))
-
-/**
- * 这一组落在弃置段里吗 —— 落在就返回**段内序号**（0 起），否则 undefined。
- * 时间线据此把圆点从这一段起逐渐缩小、并整段包上独立背景（见 ApprovalNode 的 inDiscardSegment）。
- */
-function discardIndexOf (group: ApproverStepGroup): number | undefined {
-  const start = selectedDiscardStart.value
-  const i = group.indexes[0]
-  return start >= 0 && i >= start ? i - start : undefined
-}
-
-/**
- * 弃置段一共几条节点（**合并后**的节点数，与 discardIndexOf 同一口径）。
- *
- * 交给 ApprovalNode 认出"哪条是这一段的最后一条"：整段背景只有首/尾两条留圆角、
- * 只有它们不往缝里撑，中间的直角首尾相接才拼成**一整块**背景（见其 discardSegmentSize）。
- */
-const discardNodeCount = computed(() => selectedStepGroups.value.filter(g => discardIndexOf(g) !== undefined).length)
+const selectedDiscardMarks = computed(() => discardMarksOf({
+  chain: selectedChain.value,
+  stepIds: selectedStepIds.value,
+  flow: selectedOrder.value?.chain?.flow,
+}))
 
 function goCreate() {
   sendFeishuCard({

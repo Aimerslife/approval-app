@@ -1,30 +1,5 @@
 <template>
-  <!--
-    接收方的候选：**只列 `utils/organazation` 里维护的团队表**，不再是整棵飞书通讯录。
-    两种粒度（`mode`）：
-      · group（默认）——「选择接收组别」：候选是**组别**，选中记「组别名 + 该组组长」；
-      · team          ——「选择接收团队」：候选是**团队**，选中记「团队名 + 团队负责人（parentManager）」。
-
-    为什么不用通讯录：这个结论是"哪个**组别/团队**接下这批货"，不是"哪个人来办下一环"——
-    给整棵树（三层部门 + 全公司的人）等于让人在几百个名字里找一个组名，
-    而且很容易选到"组里的某个人"（那又是另一种语义）。
-
-    group 模式下 `team` 给定时**只在团队内选**（业务口径：接收组别限于本团队，不涉及其他团队）：
-    那时只列该团队的组别、不夹带别的团队、也不显示团队分组标题；
-    没给定（识别不出单据属于哪个团队）才退回"全部团队、按团队分组"，避免把办理人卡死。
-    （team 模式本来就是在所有团队里挑，不看 `team`。）
-  -->
   <div class="team-picker">
-    <v-text-field
-      v-model="keyword"
-      class="mb-1"
-      clearable
-      density="compact"
-      hide-details
-      :label="mode === 'team' ? '搜索团队 / 负责人' : '搜索组别 / 负责人'"
-      variant="outlined"
-    />
-
     <v-sheet class="team-picker__list pa-1 rounded" style="max-height: 280px; overflow-y: auto;">
       <!-- 选团队（「选择接收团队」）：一行一个团队，副标题是团队负责人 -->
       <template v-if="mode === 'team'">

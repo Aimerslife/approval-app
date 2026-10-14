@@ -6,6 +6,7 @@ import {
   applyFilterPatch,
   createApprovalFilters,
   filterOptions,
+  filtersEqual,
   resetApprovalFilters,
   SELECT_FILTERS,
   type FilterPatch,
@@ -59,8 +60,12 @@ export function useApprovalTable () {
   const filters = reactive(createApprovalFilters())
   const applied = reactive(createApprovalFilters())
 
-  /** 搜索框里有内容还没提交（界面据此把「搜索」按钮点成主色，提示"改了没生效"） */
-  const filtersDirty = computed(() => filters.search !== applied.search)
+  /**
+   * 有条件改了还没提交（界面据此提示"点了才生效"）。
+   * 比的是**整组条件**而不只是搜索词：下拉与日期虽然即点即生效、当场就相等，
+   * 但一旦以后有人把某个控件改成"等确认"，这里不用跟着改（见 filtersEqual）。
+   */
+  const filtersDirty = computed(() => !filtersEqual(filters, applied))
 
   /** 「搜索」：把草稿里的搜索词提交为生效条件 */
   function applyFilters () {

@@ -3,7 +3,7 @@ import type { ApprovalAttachment, ApprovalChain, ApprovalFlow, ApprovalModal, Ap
 import type { GroupApproverOverride } from '@/utils/groupApprovers'
 import type { WarehouseRow } from '@/utils/warehouse'
 import pb from '@/pocketbase.ts'
-import { APPROVAL_STATUS, buildBranchTerminalMap, rebuildChain } from '@/types/approval'
+import { APPROVAL_STATUS, branchTerminalMapOf, rebuildChain } from '@/types/approval'
 import { sendArrivedNotifies } from '@/utils/notifySteps'
 // 「引用模板」的引用关系收集（纯逻辑，只依赖类型）：删除模板前查"有没有别的模板引用了它"
 import { collectTemplateRefs } from '@/utils/templateRef'
@@ -12,10 +12,21 @@ import { normalizeWarehouses, resolveWarehouses, warehouseKey } from '@/utils/wa
 
 export interface DocumentModel {
   collectionId: string
+  title: string
+  subscribe: string
   collectionName: string
   content: string
   created: string
   id: string
+  /**
+   * **发布标记：1 = 已发布，0 = 未发布**（前端"列表只显示已发布的"认的就是它）。
+   * 见 utils/collection 的 getDocument 与 pocketbase/pb_migrations/1791000000_created_document.js。
+   */
+  status?: number
+  /**
+   * 脚手架时代留下的旧标记：口径已改看 `status`，这里只是保持同步
+   * （发布时顺手写 true），别再拿它当判断依据。
+   */
   published: boolean
   updated: string
 }
@@ -38,16 +49,32 @@ export async function register (email: string, password: string) {
   }
 }
 
-// 获取文档
-export async function getDocument (): Promise<DocumentModel | undefined> {
+/**
+ * 获取文档列表 —— **只返回已发布（`status = 1`）的那些**。
+ *
+ * 「0 状态的文章不在前端显示」这条口径放在这里，而不是放在页面里：
+ * 列表页（knowledge）与详情页的无 id 回退（logic）都走这个函数，两处各写一遍 filter
+ * 迟早会漏一处（与 utils/exitTargets 那次"两份口径"是同一个教训）。
+ *
+ * ⚠️ 用的是 **`status`**（number：1 = 已发布 / 0 = 未发布），不是脚手架留下的 `published`(bool)。
+ * 「发布」时两个字段都会写（见 publishDocument），但**判断只认 status**；
+ * `status` 不是 1（含老数据里没配过的 0）就不显示 —— 发布过才会出现在列表里。
+ *
+ * 草稿仍然打得开：编辑页按 id 走 `getDocumentByOne`，那里**不过滤** ——
+ * 没发布的文档本来就该能继续编辑。
+ *
+ * ⚠️ 原来是 `getList(1, 10)`（只取前 10 条），文档攒到第 11 篇就会静默消失；
+ * 文档量级是几十，改成全量取（与 getApprovalOptions 同一处理）。
+ */
+export async function getDocument (): Promise<DocumentModel[] | []> {
   try {
-    const res = await pb.collection('document').getList<DocumentModel>(1, 1, {
-      filter: '',
+    const res = await pb.collection('document').getFullList<DocumentModel>({
+      filter: 'status = 1',
     })
-    return res.items[0]
+    return res
   } catch (error) {
-    console.error(error)
-    return undefined
+    console.error('[collection] 读文档列表失败:', error)
+    return []
   }
 }
 
@@ -81,8 +108,71 @@ export async function saveDocument (content: any, id: string, published: boolean
 // 更新文档
 export async function updateDocument () {}
 
-// 删除文档
-export async function deleteDocument () {}
+/**
+ * 发布一篇文档：写入**标题 + 简略信息**，并把 `status` 置为 **1**（= 已发布）。
+ *
+ * 三项一起写是有原因的：文档列表（pages/knowledge.vue）卡片上显示的**就是** `title` + `subscribe`，
+ * 只置标记不写这两项，列表里就会出现"没名字的卡片"（发布弹窗也正因此要求必填）。
+ *
+ * 标记认 `status`（number）；旧字段 `published`(bool) 顺手写成 true，免得两个字段各说各话 ——
+ * 判断口径**只认 status**（见 getDocument 的 filter）。
+ *
+ * 与 `saveDocument`（正文 + 保留发布状态）**分开**：发布**不碰正文** ——
+ * 正文以编辑器里的「保存」为准；合在一起会让"发布"顺手覆盖掉别人正在改的内容。
+ *
+ * 返回口径同 `deleteApproval`（`{ code, message }`）：失败要能让人看见。
+ * ⚠️ 调用方成功后**必须**同步本地那份文档：编辑页按 Ctrl+S 时 `onSave`
+ * 会把 `data.published` 一起写回去，不同步就会把刚发布的标记又改回未发布。
+ */
+export async function publishDocument (
+  id: string,
+  meta: { title: string, subscribe: string },
+) {
+  try {
+    const res = await pb.collection('document').update<DocumentModel>(id, {
+      title: String(meta?.title ?? '').trim(),
+      subscribe: String(meta?.subscribe ?? '').trim(),
+      status: 1,
+      published: true,
+    })
+    console.log('发布文档成功', id)
+    return {
+      code: 0,
+      message: '文档已发布',
+      data: res,
+    }
+  } catch (error) {
+    console.error('[collection] 发布文档失败:', error)
+    return {
+      code: -1,
+      message: '发布失败，请稍后重试',
+    }
+  }
+}
+
+/**
+ * 删除文档（说明文档页的「删除」按钮用）。
+ *
+ * 与 `deleteApproval` 同一套返回口径（`{ code, message }`）而不是抛错：
+ * 调用方（页面）据此决定提示文案 —— 删除失败必须让人看见，不能静默当成删成功
+ * （页面会照旧刷列表，看起来"没删掉"却不知道为什么）。
+ */
+export async function deleteDocument (id: string) {
+  try {
+    await pb.collection('document').delete(id)
+    console.log('删除文档成功', id)
+    return {
+      code: 0,
+      message: '删除文档成功',
+    }
+  } catch (error) {
+    console.error('[collection] 删除文档失败:', error)
+    return {
+      code: -1,
+      message: '删除文档失败，请稍后重试',
+    }
+  }
+}
 
 // 增加审批流
 // chain.flow 为带条件分支的完整结构（可选）；chain.chain 为拍平后的线性链路，供旧页面兼容渲染；
@@ -157,13 +247,15 @@ async function notifyOnCreate (
     const initial = rebuildChain(
       flow,
       data.decisions ?? [],
-      buildBranchTerminalMap(data.graph),
+      branchTerminalMapOf(data),
       context,
     )
     const res = await sendArrivedNotifies({
       flow,
       before: [], // 建单前什么都没到达过
       after: initial.stepIds,
+      // 链路一起带上：审批环节的到达通知要据此取「上一轮审批信息」（建单时通常没有第一行）
+      afterChain: initial.chain,
       orderNo: order.order_no,
       context,
     })
@@ -265,10 +357,12 @@ export async function getOrdersByRows (
  */
 export async function getApproval (): Promise<ApprovalModal[]> {
   try {
-    const res = await pb.collection('app_chain').getList<ApprovalModal>(1, 10, {
-      filter: '',
-    })
-    return res.items
+    /*
+     * 取**全量**（按名字排）：模板管理页要把「正本 / 副本」分到两个页签里，
+     * 只取前 10 条会让页签里的数字和内容都不对（副本可能一条都看不见）。
+     * 模板是几十条的量级，与 getApprovalOptions 同一取舍 —— 那边也要选到任意一张。
+     */
+    return await pb.collection('app_chain').getFullList<ApprovalModal>({ sort: 'name' })
   } catch (error) {
     console.error(error)
     return []

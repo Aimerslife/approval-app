@@ -3,9 +3,9 @@
     <!-- 页头 -->
     <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-4 px-1">
       <div>
-        <div class="text-[20px] font-bold">提醒设置</div>
+        <div class="text-[20px] font-bold block-title">提醒设置</div>
         <div class="text-[12.5px] text-medium-emphasis mt-1">
-          配置飞书推送规则：定时催办、推送人员与白名单。保存后由超时跑批执行
+          配置飞书推送规则：超时阈值、推送时间与间隔、推送人员与白名单。保存后由超时跑批执行
         </div>
       </div>
 
@@ -23,7 +23,7 @@
 
         <div class="flex-grow-1">
           <div class="text-[14px] font-semibold">审批流定时推送</div>
-          <div class="text-[12px] text-medium-emphasis">待办超过阈值后，按下面的频率提醒相关人</div>
+          <div class="text-[12px] text-medium-emphasis">待办超过阈值后，按下面的频率与**推送间隔**重复提醒相关人</div>
         </div>
 
         <v-switch
@@ -31,14 +31,15 @@
           color="primary"
           density="compact"
           hide-details
-          inset
+          size="small"
           :label="draft.enabled ? '已开启' : '已关闭'"
         />
       </div>
 
       <v-divider />
 
-      <div class="d-flex flex-wrap ga-8 px-5 py-4">
+      <!-- 四个条件框（频率 / 时间 / 阈值 / 间隔）：尺寸与字号比 Vuetify 的 compact 再小 2，见下面 .push-controls 的样式 -->
+      <div class="push-controls d-flex flex-wrap ga-4 px-5 py-4">
         <div class="flex-grow-1" style="min-width: 240px">
           <div class="field-title mb-2">推送频率</div>
 
@@ -53,7 +54,7 @@
           </div>
         </div>
 
-        <div style="min-width: 200px">
+        <div>
           <div class="field-title mb-2">推送时间</div>
 
           <v-text-field
@@ -62,7 +63,7 @@
             hide-details="auto"
             placeholder="09:00"
             single-line
-            style="max-width: 160px"
+            style="max-width: 110px"
             type="time"
             variant="outlined"
           >
@@ -72,12 +73,12 @@
                 否则用户会以为定时器和这个字段联动，等不到消息就去查代码。
               -->
               <span class="text-[11px]">每天**不早于**该时刻推送；建议外部 cron 从该时刻起每 10 分钟打一次
-                /api/reminders/run?send=1（同一单当天只会发一条）</span>
+                /api/reminders/run?send=1（同一单在「推送间隔」内只发一条）</span>
             </template>
           </v-text-field>
         </div>
 
-        <div style="min-width: 200px">
+        <div>
           <div class="field-title mb-2">超时阈值</div>
 
           <v-text-field
@@ -86,16 +87,32 @@
             hide-details
             :min="1"
             single-line
-            style="max-width: 180px"
-            suffix="工作日小时"
+            style="max-width: 90px"
+            suffix="小时"
             type="number"
             variant="outlined"
           />
-
-          <div class="text-[11px] text-medium-emphasis mt-1">
-            按**工作日**计时（周末不计），业务原口径 48 小时
-          </div>
         </div>
+        <div>
+          <div class="field-title mb-2">推送间隔</div>
+
+          <v-select
+            v-model="draft.intervalHours"
+            density="compact"
+            hide-details
+            :items="intervalOptions"
+            :menu-props="{ contentClass: 'filter-menu' }"
+            single-line
+            style="max-width: 170px"
+            variant="outlined"
+          />
+        </div>
+      </div>
+
+      <!-- 一句话把"超时后会怎么推"讲清楚：三个字段（频率 / 阈值 / 间隔）单看都不直观 -->
+      <div class="d-flex align-center ga-2 px-5 pb-3 text-[11px] text-medium-emphasis">
+        <v-icon size="14">mdi-timeline-clock-outline</v-icon>
+        <span>当前口径：{{ cadenceText }}</span>
       </div>
     </v-sheet>
 
@@ -181,9 +198,7 @@
           <v-chip v-if="draft.whitelist.length > 0" label size="x-small" variant="tonal">
             {{ draft.whitelist.length }} 人
           </v-chip>
-
           <v-spacer />
-
           <v-btn
             color="primary"
             prepend-icon="mdi-plus"
@@ -202,13 +217,11 @@
     <v-sheet class="d-flex align-center flex-wrap ga-3 mt-6 px-5 py-3" rounded="xl">
       <v-icon color="primary" size="16">mdi-information-outline</v-icon>
       <span class="text-[12px] text-medium-emphasis flex-grow-1">
-        规则保存后立即生效；「恢复默认」= 回到 工作日 48h 起每天提醒当前审批人
+        规则保存后立即生效；「恢复默认」= 回到 工作日 48 小时后开始、每 24 小时提醒当前审批人
       </span>
-
       <v-btn :disabled="loading || saving" size="small" variant="text" @click="confirmReset = true">
         恢复默认
       </v-btn>
-
       <v-btn color="primary" :disabled="loading" :loading="saving" size="small" variant="flat" @click="save">
         保存
       </v-btn>
@@ -277,7 +290,7 @@
 
         <v-card-text class="px-6 py-5 text-[13px]">
           将清空当前保存的规则，回到默认：
-          <b>工作日 48 小时起、每天提醒当前审批人</b>，白名单为空。
+          <b>工作日 48 小时后开始、每 24 小时提醒当前审批人</b>，白名单为空。
         </v-card-text>
 
         <v-divider />
@@ -312,7 +325,11 @@
     normalizePerson,
     personKeyOf,
     PUSH_FREQUENCY_OPTIONS,
+    PUSH_INTERVAL_MAX,
+    PUSH_INTERVAL_MIN,
+    PUSH_INTERVAL_OPTIONS,
     PUSH_TIME_RE,
+    pushCadenceText,
     RECEIVER_MODE_OPTIONS,
     type PushPerson,
     type PushRules,
@@ -342,6 +359,37 @@
   const frequencyHint = computed(
     () => PUSH_FREQUENCY_OPTIONS.find(o => o.value === draft.value.frequency)?.hint ?? '',
   )
+
+  /**
+   * 推送间隔的下拉项：常用档位 + **当前值**（库里存着的那个数）。
+   *
+   * 为什么要并上当前值：库里可能存着一个不在档位里的数（比如以前手工填过 3），
+   * 不并进来的话 v-select 会显示空白 —— 用户看到的和库里存的不是一回事。
+   *
+   * 档位表本身就是升序的，所以**按位置插入**就够，不用再排序（也不动原数组）。
+   */
+  const intervalOptions = computed(() => {
+    const current = Number(draft.value.intervalHours)
+    const values = PUSH_INTERVAL_OPTIONS.map(o => o.value)
+    if (Number.isFinite(current) && current >= PUSH_INTERVAL_MIN && !values.includes(current)) {
+      const at = values.findIndex(v => v > current)
+      values.splice(at < 0 ? values.length : at, 0, current)
+    }
+    return values.map(v => ({ value: v, title: `每 ${v} 小时` }))
+  })
+
+  /**
+   * 间隔的说明：档位里有就用它写的那句，否则给一句通用的（手工填的值没有文案）。
+   * 末尾统一带上"第二天重新起算" —— 那是用户最容易误解的一处（以为间隔会跨天累计、越推越晚）。
+   */
+  const intervalHint = computed(() => {
+    const base = PUSH_INTERVAL_OPTIONS.find(o => o.value === Number(draft.value.intervalHours))?.hint
+      ?? '超时后按这个间隔重复提醒'
+    return `${base}；第二天从推送时间重新起算`
+  })
+
+  /** 「超时后会怎么推」的一句话（口径在 utils/pushRules，页面不自己拼字符串） */
+  const cadenceText = computed(() => pushCadenceText(draft.value))
 
   /** 读规则：读失败回落默认规则（集合还没建时页面也要能打开），所以这里不需要 try/catch */
   async function reload () {
@@ -419,6 +467,16 @@
     const hours = Number(draft.value.overdueHours)
     if (!Number.isFinite(hours) || hours <= 0) {
       return '超时阈值要填大于 0 的工作日小时数'
+    }
+    /*
+     * 间隔必须在 1~168 小时之间：
+     *   0 / 负数会让"每次都发"（跑批每 tick 一条，比不推更糟）；
+     *   超过一周基本等于"不再重复"，那种需求应该直接关掉总开关，而不是填一个假数字。
+     * ⚠️ 跑批侧还会再收敛一次（normalizePushRules）—— 这里的拦截只是为了让用户当场看到问题。
+     */
+    const interval = Number(draft.value.intervalHours)
+    if (!Number.isFinite(interval) || interval < PUSH_INTERVAL_MIN || interval > PUSH_INTERVAL_MAX) {
+      return `推送间隔要填 ${PUSH_INTERVAL_MIN}~${PUSH_INTERVAL_MAX} 之间的整数小时`
     }
     if (draft.value.receiverMode !== 'approver' && draft.value.receivers.length === 0) {
       return '推送人员选了「指定人员」，但一个人都还没加'
@@ -526,5 +584,72 @@
     background-color: rgb(var(--v-theme-primary) / 7%);
     border: 1px solid rgb(var(--v-theme-primary) / 22%);
     border-radius: 10px;
+}
+
+/* ===== 定时推送的四个条件框：尺寸与字号都比 Vuetify 的 compact 再小一档 =====
+ *
+ * 这几个数是**成组**用的（与全局 .filter-select、components/ApprovalNode 的 .qty-input
+ * 同一套写法）—— 少一项文字就会在框里偏：
+ *   1. 上下内边距**必须对称**（这里都是 1px）：Vuetify 用它们给浮动标签与文字定位，
+ *      写成上 4 下 2 时文字会被往下顶一截，看起来就是"字没在框中间"；
+ *   2. 控件高与输入区高度要**配平**：36 = 34（输入区）+ 1 + 1（上下内边距）——
+ *      只改其中一个，多出来的空间会被勉强分摊，同样表现为偏移；
+ *   3. 输入区自己也要给 padding：光改 .v-field 的变量，里面 .v-field__input 仍带着默认
+ *      的上下留白，字就顶到上边去了；
+ *   4. 字号要同时落在 .v-field__input 与 .v-label（Vuetify 内部节点，只能 :deep 穿透）。
+ *
+ * 为什么单开一个类而不是直接用全局的 .filter-select：那套是**表格筛选**的口径（28px / 12px），
+ * 贴在这张设置卡片里显得过小、和旁边的单选卡片不成比例；这里取"表单默认再小一档"。
+ * 要再调大小，按上面第 2 条的配平关系同时改「控件高 / 输入区高度」两个数。
+ */
+.push-controls :deep(.v-field) {
+    --v-input-control-height: 36px;
+    --v-field-padding-top: 1px;
+    --v-field-padding-bottom: 1px;
+    font-size: 14px;
+}
+
+.push-controls :deep(.v-field__input) {
+    min-height: 34px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    font-size: 14px;
+}
+
+.push-controls :deep(.v-label) {
+    font-size: 14px;
+}
+
+/* 后缀（工作日小时）与下拉箭头：显式垂直居中 —— 默认会靠上，字变小以后更明显 */
+.push-controls :deep(.v-field__append-inner),
+.push-controls :deep(.v-field__prepend-inner) {
+    align-self: center;
+    padding-top: 0;
+}
+
+/* ===== 「工作日小时」这类**后缀文字**：把 Vuetify 给它单独加的高度清掉 =====
+ *
+ * Vuetify 对后缀另有一套尺寸（见 node_modules/vuetify/.../VTextField.css）：
+ *     .v-text-field__suffix {
+ *       min-height: max(var(--v-input-control-height,56px), 1.5rem + 上下 padding);
+ *       padding-top: var(--v-field-padding-top);
+ *       padding-bottom: var(--v-field-padding-bottom);
+ *     }
+ * 在本页的紧凑档里，输入区是 34px + 1 + 1 = 36，而后缀是「36 + 1 + 1」= 38 ——
+ * 同一行里两个高度不一样、又各自按自己的中线居中，于是数字与「工作日小时」不在一条基线上，
+ * 整行还被后缀撑高 2px（四个框只有带后缀的那个高一点）。
+ * 归零后两者同高，统一交给 .v-field__input 的 align-items: center 居中。
+ */
+.push-controls :deep(.v-text-field__suffix),
+.push-controls :deep(.v-text-field__prefix) {
+    min-height: 0;
+    padding-top: 7px;
+    padding-bottom: 0;
+}
+
+/* 「推送频率」的按钮组也在这一行：一起收一档，否则它比旁边三个框明显高一截 */
+.push-controls :deep(.v-btn-toggle .v-btn) {
+    --v-btn-height: 32px;
+    font-size: 13px;
 }
 </style>

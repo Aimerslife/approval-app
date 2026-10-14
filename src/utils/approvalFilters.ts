@@ -1,33 +1,17 @@
-import { APPROVAL_STATUS } from '@/types/approval'
-
-/**
- * approvalFilters.ts —— 审批单表格的**本地筛选**（纯逻辑，不依赖 PocketBase 客户端）
- *
- * 为什么抽出来：home.vue（所有审批单，两个 tab）与 mine.vue（我的审批单）此前**各自复制**了一份
- * 筛选状态、选项推导与过滤函数，于是已经漂了 ——
- *   · mine.vue 的「状态」下拉错绑到 `deptFilter`（选项还是部门）；
- *   · 它的部门选项从**历史**行推导，而它只展示待审批单 → 选项可能是空的；
- *   · 三个表格的 `:items` 全都绑的是**未过滤**数组 → 筛选条点了没反应。
- * 共用一份实现，这类漂移不会再发生；纯函数也能用 tsx 直接断言。
- *
- * ⚠️ 这里是**客户端本地筛选**（两个页面都用 v-data-table，一次全量拉取后本地过滤）。
- *    与 setDatas / workStream 那套「服务端 BiRowQuery」是两回事，别混用 ——
- *    那边数据量大（bi_rows 三千多行）必须服务端筛，这边一次只拉审批单。
- */
+import { APPROVAL_STATUS, CLOSE_FLOW_RESULTS, PENDING_RESULT, type FlowEndInfo } from '@/types/approval'
 
 /** 行里**可被筛选**的字段（页面的 ApprovalRow 是它的超集） */
 export interface FilterableRow {
   order_no: string
   status: number
+  statusText: string
   sku: string
   主MODEL: string
   部门: string
   approver: string
   created: string
-  /** 以下三项来自**建单时的数据快照**（`chain.context`），没有快照的旧单是 '—' */
+  /** 来自**建单时的数据快照**（`chain.context`），没有快照的旧单是 '—' */
   平台: string
-  销售状态: string
-  一级品类: string
 }
 
 /** 缺失值的展示口径（与表格里一致）：筛选选项会把它们排除掉 */
@@ -41,37 +25,90 @@ export function toCellText (v: unknown): string {
   return typeof v === 'object' ? MISSING : String(v)
 }
 
+export const APPROVAL_STAGE = {
+  /** 建单后还没人办过 */
+  UNREVIEWED: 0,
+  /** 办过，还在流转 */
+  REVIEWING: 1,
+  /** 走完流程，最后一条结论是「待定」 */
+  HELD: 2,
+  /** 走完流程，非驳回、非终结类结论 */
+  APPROVED: 3,
+  /** 走完流程且落入驳回走向 */
+  REJECTED: 4,
+  /** 命中「选择接收组别 / 团队」这类终结类结论（货有人接了） */
+  RECEIVED: 5,
+  /** 流程卡住（模板缺兜底分支 / 疑似成环），要人去查模板 */
+  STUCK: 6,
+} as const
+
+export type ApprovalStage = typeof APPROVAL_STAGE[keyof typeof APPROVAL_STAGE]
+
+export const APPROVAL_STAGE_META: Record<ApprovalStage, { text: string, color: string }> = {
+  [APPROVAL_STAGE.UNREVIEWED]: { text: '未审批', color: 'secondary' },
+  [APPROVAL_STAGE.REVIEWING]: { text: '审批中', color: 'primary' },
+  [APPROVAL_STAGE.HELD]: { text: '待定', color: 'warning' },
+  [APPROVAL_STAGE.APPROVED]: { text: '通过', color: 'success' },
+  [APPROVAL_STAGE.REJECTED]: { text: '驳回', color: 'error' },
+  [APPROVAL_STAGE.RECEIVED]: { text: '已接收', color: 'teal' },
+  [APPROVAL_STAGE.STUCK]: { text: '异常', color: 'deep-orange' },
+}
+
+/** 全部取值，按展示顺序（未审批 → 审批中 → 待定 → 通过 → 驳回 → 已接收 → 异常） */
+export const APPROVAL_STAGE_LIST: readonly ApprovalStage[] = [
+  APPROVAL_STAGE.UNREVIEWED,
+  APPROVAL_STAGE.REVIEWING,
+  APPROVAL_STAGE.HELD,
+  APPROVAL_STAGE.APPROVED,
+  APPROVAL_STAGE.REJECTED,
+  APPROVAL_STAGE.RECEIVED,
+  APPROVAL_STAGE.STUCK,
+]
+
+/** 「状态」筛选选项的固定顺序（文案；筛选比的是文案，见 filterValueOf） */
+export const APPROVAL_STAGE_ORDER: readonly string[] = APPROVAL_STAGE_LIST.map(s => APPROVAL_STAGE_META[s].text)
+
 /**
- * 状态 → 文案 + 颜色。
+ * 由 `status` + 办理流水（+ 流程为什么停下）派生展示状态。
  *
- * 此前 home.vue / mine.vue 各写一份（home 的注释还写着"原来这里被复制了 5 份"），
- * 现在只留这一份；两个页面的 chip 渲染与「状态」筛选选项都从这里取。
+ * @param status    approval_chain.status（0 未结束 / 1 通过 / 2 驳回）
+ * @param decisions 办理流水（按办理顺序；同一个 stepId 驳回重审会出现多条）
+ * @param endKind   流程停下的类型（rebuildChain 的 `end.kind`）—— 只有 `'stuck'` 有用：
+ *                  卡住的单仍然是"进行中"，但**谁也办不了**，得单独报出来让人去查模板
  */
-export const APPROVAL_STATUS_META: Record<number, { text: string, color: string }> = {
-  [APPROVAL_STATUS.PENDING]: { text: '待审批', color: 'primary' },
-  [APPROVAL_STATUS.APPROVED]: { text: '通过', color: 'success' },
-  [APPROVAL_STATUS.REJECTED]: { text: '驳回', color: 'error' },
+export function approvalStageOf (
+  status: unknown,
+  decisions?: ReadonlyArray<{ result?: string }>,
+  endKind?: FlowEndInfo['kind'],
+): ApprovalStage {
+  // 卡住优先判：它虽然还是"进行中"，但卡住这件事比"审批中"重要得多
+  if (endKind === 'stuck') {
+    return APPROVAL_STAGE.STUCK
+  }
+  const s = Number(status ?? APPROVAL_STATUS.PENDING)
+  const list = decisions ?? []
+  const last = [...list].reverse().find(d => d?.result)
+  if (s === APPROVAL_STATUS.PENDING) {
+    // 还没结束：一次都没人办过 → 未审批；办过但还在流转 → 审批中
+    return list.some(d => d?.result) ? APPROVAL_STAGE.REVIEWING : APPROVAL_STAGE.UNREVIEWED
+  }
+  if (s === APPROVAL_STATUS.REJECTED) {
+    return APPROVAL_STAGE.REJECTED
+  }
+  // 已结束且不是驳回：先看最后一条结论是不是"终结类"（接收组别 / 团队），再看「待定」
+  if (last?.result && CLOSE_FLOW_RESULTS.includes(last.result)) {
+    return APPROVAL_STAGE.RECEIVED
+  }
+  return last?.result === PENDING_RESULT ? APPROVAL_STAGE.HELD : APPROVAL_STAGE.APPROVED
 }
-
-/** 状态选项的固定顺序（待审批 → 通过 → 驳回）；未知状态兜底成待审批 */
-export function approvalStatusMeta (v: unknown): { text: string, color: string } {
-  return APPROVAL_STATUS_META[Number(v)] ?? APPROVAL_STATUS_META[APPROVAL_STATUS.PENDING]
-}
-
-const STATUS_ORDER = [
-  APPROVAL_STATUS.PENDING,
-  APPROVAL_STATUS.APPROVED,
-  APPROVAL_STATUS.REJECTED,
-].map(s => APPROVAL_STATUS_META[s].text)
 
 /** 下拉型筛选的键 */
 export type SelectFilterKey =
   | 'statusText'
+  | '主MODEL'
   | '部门'
   | 'approver'
   | '平台'
-  | '销售状态'
-  | '一级品类'
 
 export interface SelectFilterDef {
   key: SelectFilterKey
@@ -82,14 +119,17 @@ export interface SelectFilterDef {
  * 下拉筛选定义表：**控件长什么样、按哪个字段取值**都写在这里，页面只负责 `v-for` 渲染。
  * 以后再加一个筛选条件是"加一行"的事，不用同时改模板与过滤逻辑
  * （与 setDatas / workStream 的 SELECT_CONFIGS 同一套思路）。
+ *
+ * 现为：状态 / 主MODEL / 部门 / 审批人 / 平台。
+ * 「主MODEL」是核对呆滞单最常用的那一维（同一个型号的单一眼聚在一起）；
+ * 原先的「一级品类」已按需求去掉，关键字搜索也不再覆盖它（见 SEARCH_FIELDS）。
  */
 export const SELECT_FILTERS: readonly SelectFilterDef[] = [
   { key: 'statusText', label: '状态' },
+  { key: '主MODEL', label: '主MODEL' },
   { key: '部门', label: '部门' },
   { key: 'approver', label: '审批人' },
   { key: '平台', label: '平台' },
-  { key: '销售状态', label: '销售状态' },
-  { key: '一级品类', label: '一级品类' },
 ]
 
 export interface ApprovalFilters {
@@ -105,11 +145,10 @@ export function createApprovalFilters (): ApprovalFilters {
     search: '',
     selects: {
       statusText: null,
+      主MODEL: null,
       部门: null,
       approver: null,
       平台: null,
-      销售状态: null,
-      一级品类: null,
     },
     dateRange: [],
   }
@@ -161,9 +200,28 @@ export function isoDay (v: Date | string): string {
     : `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
 }
 
-/** 该行在某个下拉筛选下的可比较文本（状态是特例：要比的是文案，不是数字） */
+/**
+ * 两份条件是否**等价**（逐字段比，不看对象引用）。
+ *
+ * 用途：「确认」按钮的"有改动没生效"提示 —— 草稿与生效两份条件不再相等就说明有人动过控件。
+ * 日期按 `isoDay` 归一后比：v-date-input 给的可能是 Date、也可能是 'YYYY-MM-DD…' 字符串，
+ * 同一份条件走一轮控件回来往往两种形态都出现过，直接比对象会把"没改"误报成"改过"。
+ */
+export function filtersEqual (a: ApprovalFilters, b: ApprovalFilters): boolean {
+  if (a.search !== b.search) {
+    return false
+  }
+  for (const key of Object.keys(a.selects) as SelectFilterKey[]) {
+    if ((a.selects[key] ?? null) !== (b.selects[key] ?? null)) {
+      return false
+    }
+  }
+  return a.dateRange.map(d => isoDay(d)).join('~') === b.dateRange.map(d => isoDay(d)).join('~')
+}
+
+/** 该行在某个下拉筛选下的可比较文本（状态是特例：要比的是**展示文案**，不是数字） */
 export function filterValueOf (row: FilterableRow, key: SelectFilterKey): string {
-  return key === 'statusText' ? approvalStatusMeta(row.status).text : String(row[key] ?? '')
+  return key === 'statusText' ? String(row.statusText ?? '') : String(row[key] ?? '')
 }
 
 /**
@@ -186,13 +244,16 @@ export function filterOptions (rows: FilterableRow[], key: SelectFilterKey): str
   }
   const list = [...seen]
   return key === 'statusText'
-    ? list.sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b))
+    ? list.sort((a, b) => APPROVAL_STAGE_ORDER.indexOf(a) - APPROVAL_STAGE_ORDER.indexOf(b))
     : list.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
 }
 
-/** 关键字搜索覆盖的字段（比原来多了审批人与两个业务列） */
+/**
+ * 关键字搜索覆盖的字段：单号 / SKU / 主MODEL / 部门 / 审批人 / 平台。
+ * 「销售状态」「一级品类」已按需求移出（既有下拉、也不在搜索范围内）。
+ */
 const SEARCH_FIELDS: (keyof FilterableRow)[] = [
-  'order_no', 'sku', '主MODEL', '部门', 'approver', '平台', '销售状态',
+  'order_no', 'sku', '主MODEL', '部门', 'approver', '平台',
 ]
 
 /**

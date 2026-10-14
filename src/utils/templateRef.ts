@@ -225,16 +225,30 @@ export async function expandTemplateRefs (
 
   /** 展开一个节点**内部**的引用（它自己的类型不变）；inRef / prevId 见 expandList 的说明 */
   async function expandInside (node: any, stack: string[], prevId?: string, inRef = false): Promise<any> {
+    const isBranchGroup = node?.type === 'branch' || node?.type === 'probe'
     /*
-     * 分支 / 查询节点的**每个分支**：分支内第一个环节的"上一级"是**分支组之前**那个环节
-     * （与保存期同一口径），所以把 prevId 原样传下去。
-     * 分支里的 `steps` 是**步骤位**（asStep=true）——引用落在这里要转成步骤形态。
+     * **凡是带 `branches` 的节点都要往下走**，不是只认 branch / probe。
+     *
+     * 为什么：`branches` 不止分支组有 —— **「引用模板」卡片自己也有**（画布上给它接了 ≥2 条出线，
+     * 表示"这一段办完按结论分流"，见下面 :exits 那一段）。而引用卡片的 branches 里挂的正是
+     * **本模板自己的下游**，那些环节后面**照样可能有引用卡片**。
+     * 早先这里按类型白名单处理，引用卡片的 branches 直接被原样返回 ——
+     * 里面的引用永远轮不到展开，一直到 `expandFlowForOrder` 的自检才炸成
+     * 「流程里还有没展开的「引用模板」卡片（…）」，而那时**单子已经建不出来**了
+     * （实测：一张模板 36 处引用，其中 22 处就这么漏掉）。
+     *
+     * 分支里的 `steps` 是**步骤位**（asStep=true）—— 引用落在这里要转成步骤形态。
      */
-    if (node?.type === 'branch' || node?.type === 'probe') {
+    if (Array.isArray(node?.branches) && node.branches.length > 0) {
       const branches: any[] = []
       for (const b of node.branches ?? []) {
         const steps = await expandList(b.steps ?? [], stack, prevId, inRef, true)
-        branches.push({ ...b, steps: inRef ? (ensureRejectLoopBackInSteps(steps, prevId) as any[]) : steps })
+        /*
+         * 只有**分支组 / 查询**才在这里补「驳回 → 回退到分支组之前那一环」（与保存期同一口径）。
+         * 引用卡片的按结论分流不能在这儿补：它的回退目标应当是**这一段的最后一环**，
+         * 由下面编译 `:exits` 时带着 `segTail` 补（那里幂等，这里补早了会占住目标）。
+         */
+        branches.push({ ...b, steps: isBranchGroup && inRef ? (ensureRejectLoopBackInSteps(steps, prevId) as any[]) : steps })
       }
       return { ...node, branches }
     }

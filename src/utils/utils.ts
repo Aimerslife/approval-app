@@ -1,8 +1,12 @@
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { flowToChain } from '@/types/approval'
+import { branchTerminalMapOf, compactBranchTerminal, flowToChain, slimFlowMembers } from '@/types/approval'
+// 通讯录索引：给"只有邮箱/姓名"的成员补 open_id（见 utils/orgDirectory）；与建单主路径同一口径
+import { buildOrgDirectory, memberOpenId } from '@/utils/orgDirectory'
 import { createApprocalModel, getApprovalFirstByFilter } from '@/utils/collection'
+// 组织架构缓存：建测试单时按它给成员补 open_id（取不到就退化成不补，建单不受影响）
+import { fetchOrgTreeCache } from '@/api/api'
 // 建单期展开（数据查询 / 组间轮询）：与 pages/workStream 同一口径
 import { expandFlowForOrder } from '@/utils/expandFlowForOrder'
 
@@ -185,11 +189,16 @@ export async function generateApprovalChain () {
     return undefined
   }
   // chain 由 flow 派生（建单时为主线快照），后续由 rebuildChain 按实际结论重算；
-  // flow / graph 作为模板只读保存，decisions 为办理流水，建单时为空
+  // flow / branchTerminal 作为模板只读保存，decisions 为办理流水，建单时为空。
+  // 不写 graph：那是编辑器的画布，运行期只用得到其中的"分支出口表"（见 types/approval
+  // 的 branchTerminalMapOf 与 pages/workStream 的同款说明）—— 与建单主路径同一口径。
+  // 成员同样瘦身 + 按通讯录补 open_id（与建单主路径同一口径，见 types/approval 的 slimFlowMembers）
+  const dir = buildOrgDirectory((await fetchOrgTreeCache().catch(() => null))?.data?.tree)
+  const slim = slimFlowMembers(expanded.flow, m => memberOpenId(dir, m))
   const res2 = await createApprocalModel({
-    chain: flowToChain(expanded.flow),
-    flow: expanded.flow,
-    graph: res?.chain?.graph,
+    chain: flowToChain(slim),
+    flow: slim,
+    branchTerminal: compactBranchTerminal(branchTerminalMapOf(res?.chain)),
     decisions: [],
   })
   console.log(res2)

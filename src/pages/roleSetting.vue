@@ -2,7 +2,7 @@
   <v-container class="page-bg px-30 pb-6 pt-10" fluid>
     <!-- 页头 -->
     <div class="mb-4 px-1">
-      <div class="text-[20px] font-bold">角色设置</div>
+      <div class="text-[20px] font-bold block-title">角色设置</div>
       <div class="text-[12.5px] text-medium-emphasis mt-1">管理成员所属角色与权限，变更后对新审批单生效</div>
     </div>
 

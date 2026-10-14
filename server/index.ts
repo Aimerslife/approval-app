@@ -1095,6 +1095,11 @@ http.createServer(async (req, res) => {
  * 加 REMINDER_SEND=1 才会真的发消息 —— 不设就只是算一遍并打日志。
  * 生产更推荐用外部 cron 打 POST /api/reminders/run?send=1：
  * 进程重启不会漏跑，也不会因为多开几个实例重复发。
+ *
+ * ⚠️ 这个 tick 与「提醒设置」里的**推送间隔**是两回事：
+ *     tick = 跑批多久看一次（决定"到点后最迟晚多久发"）；
+ *     间隔 = 同一单两次提醒之间至少隔多久（页面里配，默认 24h）。
+ *     要让"每 4 小时催一次"准点，tick 必须明显小于 4 小时（比如 10~30 分钟）。
  */
 const remindMin = Number(process.env.REMINDER_INTERVAL_MIN ?? 0)
 if (remindMin > 0) {
@@ -1108,7 +1113,8 @@ if (remindMin > 0) {
         return
       }
       console.log(`[Reminders] 跑批：扫描 ${report.scanned}，应提醒 ${report.due}，已发 ${report.sent}`
-        + `${report.skippedToday ? `，今日已发过 ${report.skippedToday}` : ''}`
+        + `（推送间隔 ${report.intervalHours}h）`
+        + `${report.skippedInterval ? `，间隔未到跳过 ${report.skippedInterval}` : ''}`
         + `${report.errors.length > 0 ? `，错误 ${report.errors.length}` : ''}`)
     } catch (error: any) {
       console.warn('[Reminders] 跑批失败:', error?.message ?? error)

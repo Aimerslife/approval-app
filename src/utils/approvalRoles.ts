@@ -61,11 +61,14 @@ function allUsers (tree: OrgTreeNode[]): UserBrief[] {
 
 function toMember (u: UserBrief, role: ApprovalRole, hit?: DeptHit): ApprovalChainItem {
   return {
+    /*
+     * 只带"身份 + 展示"要用的字段（与 types/approval 的 slimFlowMembers 同一份口径）：
+     * 头像与 is_leader / is_tenant_manager 不进单据快照 —— 头像由展示层按 open_id 现查
+     * （见 stores/avatarDirectory），那两个标记只有选人界面才看。
+     */
+    ...(u.open_id ? { open_id: u.open_id } : {}),
     name: u.name,
     email: u.email,
-    avatar: u.avatar,
-    is_leader: u.is_leader,
-    is_tenant_manager: u.is_tenant_manager,
     type: 'manager',
     ...(hit ? { department: hit.node.name, department_path: hit.path } : {}),
     role,
