@@ -1,5 +1,10 @@
 <template>
-  <v-row class="h-100">
+  <!--
+    no-gutters：去掉栅格自带的 12px 内衬（v-col padding）与行负外边距（v-row margin），
+    左侧背景图才会**贴边**铺满（原来上下各留 12px、左边也可能被外层 overflow 裁出缝隙）。
+    右边那一栏的留白由它自己的 v-sheet padding 负责，不受影响。
+  -->
+  <v-row class="h-100" no-gutters>
     <v-col class="relative" cols="8">
       <v-img class="h-100" cover gradient="to top right, rgba(100,115,201,.33), rgba(25,32,72,.7)" :src="background" />
       <div class="word-badge absolute bottom-10 left-15">
@@ -8,7 +13,7 @@
 
         <v-sheet class="word-card" color="#3546C9" rounded="10">
           <div class="d-flex align-center gap-2">
-            <v-avatar image="https://cdn.vuetifyjs.com/images/john.jpg" size="35" />
+            <v-avatar :image="title" size="35" />
             <div class="word-card__title">今日鸡汤</div>
           </div> 
           <div class="word-card__text p-2">{{ word }}</div>
@@ -62,10 +67,10 @@
             <v-avatar :image="feishu" size="18" />
           </v-btn>
 
-          <span>没有账号？</span>
+          <!-- <span>没有账号？</span>
 
           <span class="no-underline hover:underline text-[#3378FF] cursor-pointer hover:text-[12px]"
-            @click="goRegister">去注册</span>
+            @click="goRegister">去注册</span> -->
         </div>
       </v-sheet>
     </v-col>
@@ -79,6 +84,7 @@
 
 <script lang="ts" setup>
 import background from '@/assets/background.jpg'
+import title from '@/assets/title.png'
 import feishu from '@/assets/feishu.png'
 import logo from '@/assets/logo.png'
 import { useUserStore } from '@/stores/user'
@@ -208,21 +214,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/*
- * 左下角「爱心评分 + 今日鸡汤」这一块。
- *
- * 布局口径（就这么简单，不再跟 Vuetify 的定位打架）：
- *   · 外层 .word-badge 是**纵向 flex**：rating 在上、鸡汤卡片在下 —— 顺序由文档流保证；
- *   · 卡片 width: fit-content：**宽度随内容变化**（短文案就窄），上限由外层 max-width 兜住
- *     （长文案到这个宽度才换行，不会冲出容器）。
- *
- * ⚠️ 两个踩过的坑，别再改回去：
- *   1) 原来用 `<v-snackbar contained>` 承载鸡汤 —— 它的 --contained 是 position: absolute，
- *      **不占文档流**，会压住上面的爱心评分（评分甚至看不见），宽度也不随内容走。
- *      它本质是"会自己消失的提示条"，而鸡汤是常驻装饰，本就不该用 toast 组件。
- *   2) 宽度别写 `width: auto` + `min-width: 0`：那等于让它收缩到 min-content，
- *      而**中文的 min-content 就是一个字** —— 会变成"一字一行"的细长条。
- */
+
 .word-badge {
   display: flex;
   flex-direction: column;

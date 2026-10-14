@@ -1,5 +1,6 @@
 <template>
-  <v-row class="h-100">
+  <!-- no-gutters：去掉栅格自带的 12px 内衬与行负外边距，左侧背景图才会贴边铺满（与登录页同版式） -->
+  <v-row class="h-100" no-gutters>
     <v-col class="relative" cols="8">
       <v-img
         class="h-100"
