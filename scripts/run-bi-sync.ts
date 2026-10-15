@@ -13,7 +13,7 @@
  *   2) created/updated 的量级符合预期。
  *
  * 环境变量（可用 .env.local 提供，见下方 loadEnv）：
- *   BI_ACCESS_KEY_ID / BI_ACCESS_KEY_SECRET（或 VITE_ACCESSKEYID / VITE_ACCESSKEYSECRET）
+ *   BI_ACCESS_KEY_ID / BI_ACCESS_KEY_SECRET
  *   PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD    ← bi_rows 只有管理员可写
  *   BI_COMPONENT_ID / PB_URL / BI_BASE_URL 可选
  */
@@ -70,7 +70,7 @@ const hasSecret = !!process.env.PB_ADMIN_PASSWORD
 console.log(`[run-bi-sync] 模式: ${write ? '写库（--write）' : 'dryRun（只读，不会写库）'}${prune ? ' + prune' : ''}`)
 console.log(`[run-bi-sync] PB 管理员: ${email ? email : '❌ 未配置 PB_ADMIN_EMAIL'}`)
 console.log(`[run-bi-sync] PB 管理员密码: ${hasSecret ? '已配置' : '❌ 未配置 PB_ADMIN_PASSWORD'}`)
-console.log(`[run-bi-sync] BI 凭据: ${process.env.BI_ACCESS_KEY_ID || process.env.VITE_ACCESSKEYID ? '已配置' : '❌ 缺失'}`)
+console.log(`[run-bi-sync] BI 凭据: ${process.env.BI_ACCESS_KEY_ID ? '已配置' : '❌ 缺失'}`)
 console.log('')
 
 if (write && (!email || !hasSecret)) {

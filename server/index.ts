@@ -12,6 +12,8 @@ import { assertRequiredKeys, config, configSummary, optionalWarnings } from './c
 import { loadedEnvFiles } from './env'
 import { deleteApprovalOrder } from './orderDelete'
 import { purgeBiData as runPurgeBiData } from './purgeData'
+// 跑批执行日志（进程内环形缓冲）：「提醒设置」页的「执行日志」板块读它，见 server/reminderLog.ts
+import { readReminderRuns, recordReminderRun, type ReminderTrigger } from './reminderLog'
 import { runReminders } from './reminders'
 import { syncSnapshots } from './snapshotSync'
 
@@ -416,13 +418,37 @@ async function readPushRules (): Promise<PushRules> {
   }
 }
 
-/** 跑一遍超时提醒（路由与定时任务共用）。规则现读现用，见 readPushRules */
-async function runReminderBatch (dryRun: boolean, now?: Date) {
-  const rules = await readPushRules()
-  return runReminders(
-    { pbUrl: PB_URL, sendText: sendFeishuText, admins: orgAdmins, rules, log: console.log },
-    { dryRun, ...(now ? { now } : {}) },
-  )
+/**
+ * 跑一遍超时提醒（路由与定时任务共用）。规则现读现用，见 readPushRules。
+ *
+ * 每轮结果都会记一笔执行日志（**失败也记**）——「提醒设置」页的「执行日志」板块读的就是它。
+ * 记在这里而不是各个调用点：定时与接口两条路都经过本函数，漏记一处日志就不可信了。
+ */
+async function runReminderBatch (dryRun: boolean, now?: Date, trigger: ReminderTrigger = 'http') {
+  const startedAt = Date.now()
+  const at = new Date(startedAt).toISOString()
+  try {
+    const rules = await readPushRules()
+    const report = await runReminders(
+      { pbUrl: PB_URL, sendText: sendFeishuText, admins: orgAdmins, rules, log: console.log },
+      { dryRun, ...(now ? { now } : {}) },
+    )
+    recordReminderRun({ at, trigger, dryRun, ms: Date.now() - startedAt, report })
+    return report
+  } catch (error: any) {
+    /*
+     * 跑批本身抛异常（读规则挂了、读库挂了……）：也要留一条。
+     * 不记的话页面上看起来像"压根没跑过"，而实际是每轮都失败 —— 那是最容易误判的情形。
+     */
+    recordReminderRun({
+      at,
+      trigger,
+      dryRun,
+      ms: Date.now() - startedAt,
+      fatal: error?.message || String(error),
+    })
+    throw error
+  }
 }
 
 /** 从 PocketBase 读取缓存（org_tree_cache 集合中取第一条记录） */
@@ -674,12 +700,19 @@ http.createServer(async (req, res) => {
         if (deptIds.length === 0) {
           json(res, 200, {
             code: 0,
-            data: { department_id: '', department_name: '', department_path: '', company_name: '' },
+            // 该用户没挂任何部门：部门信息全空，但**企业名照样给**
+            //（企业名是写死的常量，与有没有部门无关；给空串会让这一栏莫名空白）
+            data: {
+              department_id: '',
+              department_name: '',
+              department_path: '',
+              company_name: config.companyName,
+            },
           })
           return
         }
 
-        // 2. 沿 parent_department_id 逐级上溯拼祖先链。
+        // 2. 沿 parent_department_id 逐级上溯拼祖先链（只用于部门路径）。
         //    飞书没有「一次取回全部祖先」的接口，只能逐级 department.get（深度通常 2~4 层）。
         //    guard 防御脏数据成环导致死循环。
         const names: string[] = []
@@ -713,8 +746,9 @@ http.createServer(async (req, res) => {
             // 最后一级 = 用户自己的部门
             department_name: names.at(-1) ?? '',
             department_path: names.join(' / '),
-            // 第一级 = 顶层部门，作为企业名（飞书无公开的「查企业名」接口）
-            company_name: names[0] ?? '',
+            // 企业名是**写死的常量**（server/config.ts 的 companyName），
+            // 不从部门树推导 —— 顶层节点常常是「总经理」这种职位部门，推导出来的必然是职位名。
+            company_name: config.companyName,
           },
         })
       } catch (error: any) {
@@ -865,8 +899,23 @@ http.createServer(async (req, res) => {
     // POST /api/reminders/run          —— 默认 **dry-run**（只算不发，返回"该提醒谁"）
     // POST /api/reminders/run?send=1   —— 真发消息
     // 生产建议用外部 cron 定时打这个地址（进程内定时默认关，见文件末尾）
+    //
+    // GET /api/reminders/log —— 「提醒设置」页的「执行日志」板块读它：最近几轮跑了什么、
+    //   发了多少、被哪条规则挡掉、有没有失败。**只覆盖本次服务启动以来**（进程内缓冲，
+    //   见 server/reminderLog.ts 里"为什么不落库"的说明）。
+    if (pathname === '/api/reminders/log' && req.method === 'GET') {
+      json(res, 200, { code: 0, data: readReminderRuns() })
+      return
+    }
+
     if (pathname === '/api/reminders/run' && req.method === 'POST') {
       const dryRun = url.searchParams.get('send') !== '1'
+      /*
+       * ?src=manual 是页面「立即试算」按钮带的标记：外部 cron 打的记 'http'、页面手点的记 'manual'。
+       * 执行日志里两种混在一起时能分清"定时任务真跑过"和"有人手动点过"——
+       * 否则看着有记录，会误以为定时器在正常工作。只影响记录，不影响行为。
+       */
+      const trigger: ReminderTrigger = url.searchParams.get('src') === 'manual' ? 'manual' : 'http'
       /*
        * ?now=<ISO> 把"现在"挪一下 —— 用来在**真实单据**上验证"到点会不会被提醒"
        * （不用真等到 48 小时后）。只在 dry-run 下认这个参数：
@@ -879,7 +928,7 @@ http.createServer(async (req, res) => {
         return
       }
       try {
-        const report = await runReminderBatch(dryRun, now)
+        const report = await runReminderBatch(dryRun, now, trigger)
         if (!dryRun) {
           console.log(`[Reminders] 已发 ${report.sent} 条（扫描 ${report.scanned}，应提醒 ${report.due}）`)
         }
@@ -1112,6 +1161,7 @@ http.createServer(async (req, res) => {
   console.log(`  发送卡片: POST /api/feishu/send-card`)
   console.log(`  BI 同步: POST /api/bi/sync（?dryRun=1 只校验不写库，?prune=1 顺带删除多余行）`)
   console.log(`  超时提醒: POST /api/reminders/run（默认 dry-run；?send=1 真发）`)
+  console.log(`  执行日志: GET /api/reminders/log（「提醒设置」页的「执行日志」板块读它；只记本次启动以来的轮次）`)
 })
 
 /*
@@ -1133,7 +1183,8 @@ if (remindMin > 0) {
   const sending = config.reminder.send
   const tick = async () => {
     try {
-      const report = await runReminderBatch(!sending)
+      // 触发来源记 'timer'：执行日志里要能分清"定时器跑的"与"cron / 页面手动打的"
+      const report = await runReminderBatch(!sending, undefined, 'timer')
       // 被规则挡掉时单独说一句：否则"记了几行日志但什么都没动"会被误读成没有超时单
       if (report.gate) {
         console.log(`[Reminders] 本轮按推送规则跳过：${report.gate}`)

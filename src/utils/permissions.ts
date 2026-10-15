@@ -158,6 +158,18 @@ const ACTION_ROLES = {
    *  而且这两个集合的 deleteRule 是空的，浏览器直删本来也删不掉）。
    */
   'approval:delete': ['superAdmin'],
+
+  /**
+   * 打开 PocketBase **自带后台**（顶栏「Collection」入口）：只给超级管理员。
+   *
+   * 后台里能直接浏览 / 修改**所有集合** —— users、审批单、BI 镜像全在里面，
+   * 口径比 `bi:purge`（只清 `bi_rows`）还宽，所以与 `approval:delete` 同档，连"管理员"都不给。
+   *
+   * ⚠️ 这只是**界面礼貌**：后台本身要 PB 超管账号才能登录，而 PB 的 `_superusers`
+   * 与应用里的 `users.role` **是两套东西**（服务端那些特权写操作用的 PB_ADMIN_* 就是前者）。
+   * 这里拦的是"别让普通用户在界面上看见这个入口"，不是"拦住能进后台的人"。
+   */
+  'pb:admin': ['superAdmin'],
 } as const
 
 export type AppAction = keyof typeof ACTION_ROLES

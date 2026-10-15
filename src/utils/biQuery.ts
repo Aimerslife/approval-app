@@ -45,6 +45,23 @@ export interface BiRowQuery {
   search?: { columns: string[], value: string }
   /** 闭区间。日期列存的是 'YYYY-MM-DD' 文本，字典序即时间序 */
   range?: { column: string, from?: string, to?: string }
+  /**
+   * **命中任一**即算匹配（跨列 OR）：`(col1 = v1 || col1 = v2 || col2 = v3)`。
+   *
+   * 用在「按关联单据的状态筛数据行」上：状态存在 `approval_chain`，`bi_rows` 里没有这一列，
+   * 所以只能先把该状态下所有单关联的键查出来，再拼成一个"等于其中任意一个"的条件。
+   *
+   * ⚠️ 条件串长度 = 值个数 × 每条约 40 字符，而 PB 的 filter 走 URL，
+   *    值太多会被 PB 或反向代理拒掉 —— 调用方负责限制规模（见 collection.getOrderRowKeys）。
+   */
+  matchAny?: Array<{ column: string, values: string[] }>
+  /**
+   * **全部排除**（跨列 AND，用 `!=`）：`(col1 != v1 && col1 != v2 && col2 != v3)`。
+   *
+   * 用在「未开启任务」= 该行与任何一张单都不关联。注意是"不等于每一个值"，
+   * 不是"不等于其中某一个"—— 写成 OR 会把所有行都放过。
+   */
+  matchNone?: Array<{ column: string, values: string[] }>
 }
 
 /**
@@ -80,6 +97,23 @@ export function buildBiFilter (q: BiRowQuery): string {
     if (q.range.to) {
       parts.push(`${q.range.column} <= ${pbQuote(q.range.to)}`)
     }
+  }
+
+  /*
+   * 关联键条件（见 BiRowQuery 的 matchAny / matchNone）。
+   * 两处都把空组过滤掉：值数组为空时如果还拼，会产出 `( || )` 这种坏 filter，
+   * PB 直接报语法错 —— 那时界面上表现为"一筛选就查不出任何数据"，很难往这里想。
+   */
+  const anyExprs = (q.matchAny ?? [])
+    .flatMap(g => (g.values.length > 0 ? g.values.map(v => `${g.column} = ${pbQuote(v)}`) : []))
+  if (anyExprs.length > 0) {
+    parts.push('(' + anyExprs.join(' || ') + ')')
+  }
+
+  const noneExprs = (q.matchNone ?? [])
+    .flatMap(g => (g.values.length > 0 ? g.values.map(v => `${g.column} != ${pbQuote(v)}`) : []))
+  if (noneExprs.length > 0) {
+    parts.push('(' + noneExprs.join(' && ') + ')')
   }
 
   return parts.join(' && ')

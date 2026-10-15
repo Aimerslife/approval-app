@@ -1,34 +1,12 @@
 <template>
   <v-container :class="fullSceen ? 'screen-full' : 'pa-3'" fluid @dblclick="onDblClick" @pointerdown="onPointerDown">
     <v-sheet border class="filter-bar p-3 d-flex flex-wrap align-center ga-3" rounded="5px">
-      <v-text-field
-        v-model="draft.search"
-        density="compact"
-        flat
-        class="filter-input"
-        hide-details
-        label="搜索"
-        prepend-inner-icon="mdi-magnify"
-        single-line
-        variant="solo-filled"
-        @keyup.enter="applyFilters"
-      />
+      <v-text-field v-model="draft.search" density="compact" flat class="filter-input" hide-details label="搜索"
+        prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" @keyup.enter="applyFilters" />
 
-      <v-select
-        v-for="ctl in selectControls"
-        :key="ctl.key"
-        v-model="draft[ctl.key]"
-        clearable
-        class="filter-select"
-        density="compact"
-        flat
-        hide-details
-        :items="ctl.items"
-        :label="ctl.label"
-        :menu-props="{ contentClass: 'filter-menu' }"
-        single-line
-        variant="outlined"
-      />
+      <v-select v-for="ctl in selectControls" :key="ctl.key" v-model="draft[ctl.key]" clearable class="filter-select"
+        density="compact" flat hide-details :items="ctl.items" :label="ctl.label"
+        :menu-props="{ contentClass: 'filter-menu' }" single-line variant="outlined" />
 
       <div class="d-flex align-center ga-2">
         <v-btn color="surface-variant" size="small" variant="flat" @click="resetFilters">
@@ -52,116 +30,50 @@
           <span v-if="pendingRows.length > 0" class="text-[12px] text-medium-emphasis">
             · 待上传 {{ pendingRows.length }} 行</span>
 
-          <span
-            v-if="pendingRows.length > 0 && (dedupePreview.duplicated || dedupePreview.missingKey)"
-            class="text-[12px] text-warning"
-          >（唯一键去重后 {{ dedupePreview.unique }} 行<template
-            v-if="dedupePreview.duplicated"
-          >，{{ dedupePreview.duplicated }} 行重复</template>
+          <span v-if="pendingRows.length > 0 && (dedupePreview.duplicated || dedupePreview.missingKey)"
+            class="text-[12px] text-warning">（唯一键去重后 {{ dedupePreview.unique }} 行<template
+              v-if="dedupePreview.duplicated">，{{ dedupePreview.duplicated }} 行重复</template>
 
-            <template
-              v-if="dedupePreview.missingKey"
-            >，{{ dedupePreview.missingKey }} 行无 SKU 会被跳过</template>）</span>
+            <template v-if="dedupePreview.missingKey">，{{ dedupePreview.missingKey }} 行无 SKU 会被跳过</template>）</span>
 
           <span v-if="fetchError" class="text-error text-[12px]"> · {{ fetchError }}</span>
 
-          <v-btn
-            class="ml-3"
-            color="#0052D9"
-            :disabled="loading"
-            size="x-small"
-            variant="flat"
-            @click="exportToExcel"
-          >导出</v-btn>
+          <v-btn class="ml-3" color="#0052D9" :disabled="loading" size="x-small" variant="flat"
+            @click="exportToExcel">导出</v-btn>
         </div>
 
         <div class="d-flex align-center ml-2">
           <!-- 上传是管理员及以上的操作（见 utils/permissions 的 ACTION_ROLES）。
                输入框也要禁用：只拦那个文字入口的话，键盘/程序化触发仍能选到文件 -->
-          <v-file-input
-            ref="fileInputRef"
-            v-model="attachment"
-            accept=".xlsx,.xls,.csv"
-            class="attachment-input"
-            density="compact"
-            :disabled="!canUpload"
-            hide-input
-            @update:model-value="onFileChange"
-          >
+          <v-file-input ref="fileInputRef" v-model="attachment" accept=".xlsx,.xls,.csv" class="attachment-input"
+            density="compact" :disabled="!canUpload" hide-input @update:model-value="onFileChange">
             <template #prepend>
               <v-icon color="#1055C9" size="14">mdi-paperclip</v-icon>
             </template>
           </v-file-input>
 
-          <span
-            v-if="attachment"
-            class="text-[12px] text-medium-emphasis text-decoration-underline text-truncate"
-            :title="attachment.name"
-          >
+          <span v-if="attachment" class="text-[12px] text-medium-emphasis text-decoration-underline text-truncate"
+            :title="attachment.name">
             {{ attachment.name }}
           </span>
 
-          <span
-            v-else
-            class="text-[12px] text-medium-emphasis"
+          <span v-else class="text-[12px] text-medium-emphasis"
             :class="canUpload ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
-            :title="canUpload ? undefined : NO_UPLOAD_TIP"
-            @click="openFilePicker"
-          >上传附件</span>
+            :title="canUpload ? undefined : NO_UPLOAD_TIP" @click="openFilePicker">上传附件</span>
 
-          <v-btn
-            v-if="attachment"
-            density="compact"
-            icon="mdi-close"
-            variant="plain"
-            @click="attachment = null"
-          >
+          <v-btn v-if="attachment" density="compact" icon="mdi-close" variant="plain" @click="attachment = null">
             <v-icon icon="mdi-close" size="15" />
           </v-btn>
         </div>
 
-        <v-btn
-          color="#0052D9"
-          :disabled="!canUpload || pendingRows.length === 0 || uploading"
-          :loading="uploading"
-          size="x-small"
-          :title="canUpload ? '把选中的文件写入数据库，并删除库里多出来的旧行' : NO_UPLOAD_TIP"
-          variant="flat"
-          @click="uploadDatas"
-        >上传到数据库</v-btn>
-
-        <!--
-          快照同步：把**真实列**回填进表格读的 data 快照（只写 data）。
-          用途：直接在库里改了列（筛选会跟着变、单元格值不变）之后，用它把界面刷成列的值。
-          ⚠️ 同为界面礼貌，权限判定在服务端（server/snapshotSync.ts 拿 token 问 PB 的 role）。
-        -->
-        <v-btn
-          v-if="canSnapshot"
-          class="ml-3"
-          color="#0052D9"
-          :disabled="snapshotting"
-          prepend-icon="mdi-database-sync-outline"
-          size="x-small"
-          title="把库里的真实列写进 data 快照（只更新快照，不动列与唯一键）"
-          variant="tonal"
-          @click="openSnapshotDialog"
-        >同步快照</v-btn>
-
-        <!--
-          清空数据：**只给超级管理员**看。
-          ⚠️ 这只是界面礼貌，不是权限 —— 真正的校验在服务端
-          （server/purgeData.ts 拿 token 去问 PocketBase 这个人的 role 是不是 superAdmin）；
-          而且这些集合在 PB 里的 deleteRule 是空的（只有 superuser 能删），前端本来也删不掉。
-        -->
-        <v-btn
-          v-if="canPurge"
-          class="ml-3"
-          color="error"
-          prepend-icon="mdi-database-remove-outline"
-          size="x-small"
-          variant="tonal"
-          @click="openPurgeDialog"
-        >清空 BI 数据</v-btn>
+        <v-btn color="#0052D9" :disabled="!canUpload || pendingRows.length === 0 || uploading" :loading="uploading"
+          size="x-small" :title="canUpload ? '把选中的文件写入数据库，并删除库里多出来的旧行' : NO_UPLOAD_TIP" variant="flat"
+          @click="uploadDatas">上传到数据库</v-btn>
+        <v-btn v-if="canSnapshot" class="ml-3" color="#0052D9" :disabled="snapshotting"
+          prepend-icon="mdi-database-sync-outline" size="x-small" title="把库里的真实列写进 data 快照（只更新快照，不动列与唯一键）"
+          variant="tonal" @click="openSnapshotDialog">同步快照</v-btn>
+        <v-btn v-if="canPurge" class="ml-3" color="error" prepend-icon="mdi-database-remove-outline" size="x-small"
+          variant="tonal" @click="openPurgeDialog">清空 BI 数据</v-btn>
       </div>
 
       <!-- 确认框：先把"要删多少、不动什么"摆出来，再要求手动输入才能执行 -->
@@ -198,36 +110,19 @@
               <strong>不会动</strong>：{{ purgeSummary.kept.join('、') }}（账号留着才登得进来）
             </div>
 
-            <v-text-field
-              v-model="purgeConfirmText"
-              class="mt-3"
-              density="compact"
-              :disabled="purging"
-              hide-details
-              label="输入「清空」以确认"
-              variant="outlined"
-            />
+            <v-text-field v-model="purgeConfirmText" class="mt-3" density="compact" :disabled="purging" hide-details
+              label="输入「清空」以确认" variant="outlined" />
           </v-card-text>
 
           <v-card-actions>
             <v-spacer />
             <v-btn :disabled="purging" variant="text" @click="purgeDialog = false">取消</v-btn>
 
-            <v-btn
-              color="error"
-              :disabled="purgeConfirmText !== '清空' || purging"
-              :loading="purging"
-              variant="flat"
-              @click="doPurge"
-            >确认清空</v-btn>
+            <v-btn color="error" :disabled="purgeConfirmText !== '清空' || purging" :loading="purging" variant="flat"
+              @click="doPurge">确认清空</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
-
-      <!--
-        快照同步确认框：先 dryRun 把"将更新多少行、哪些字段、有多少处会把值写成 0"摆出来，
-        再让人点确认 —— 不做无提示的整库写操作。
-      -->
       <v-dialog v-model="snapshotDialog" max-width="620" persistent>
         <v-card>
           <v-card-title class="text-[15px]">同步快照（列 → data）</v-card-title>
@@ -271,7 +166,8 @@
                 <div class="mt-2 text-medium-emphasis">改动最多的字段：</div>
 
                 <div v-for="f in snapshotSummary.fieldChanges.slice(0, 6)" :key="f.key">
-                  {{ f.key }}（{{ f.column }}）：{{ f.rows }} 行<template v-if="f.zeroed">，跳过 {{ f.zeroed }} 处 0/空</template>
+                  {{ f.key }}（{{ f.column }}）：{{ f.rows }} 行<template v-if="f.zeroed">，跳过 {{ f.zeroed }} 处
+                    0/空</template>
                 </div>
               </template>
 
@@ -290,35 +186,14 @@
               「列里是 0/空」默认跳过：那些列的 0 多半是"从没被写过"（金额类最常见），
               写下去等于把界面上的金额刷成 0。只有"我故意把某列改成 0"才需要勾上。
             -->
-            <v-checkbox
-              v-model="snapshotIncludeBlanks"
-              class="mt-2"
-              color="#0052D9"
-              density="compact"
-              :disabled="snapshotting"
-              hide-details
-              @update:model-value="refreshSnapshotPreview"
-            >
+            <v-checkbox v-model="snapshotIncludeBlanks" class="mt-2" color="#0052D9" density="compact"
+              :disabled="snapshotting" hide-details @update:model-value="refreshSnapshotPreview">
               <template #label>
                 <span class="text-[12px]">连「列为 0 / 空」的值也写进快照</span>
               </template>
             </v-checkbox>
-
-            <!--
-              重算唯一键：改了「仓位 / 组别 / SKU / 呆滞」这类**参与键的列**之后才需要。
-              ⚠️ 两行改成同一个键会被 UNIQUE 索引拒 —— 服务端会先挑出冲突、跳过它们并报出来。
-              另外 approval_chain.sync_key（审批单里存的键副本）这个功能**不碰**，
-              所以按旧键关联的老单子会关联不上（按记录 id 关联的不受影响）。
-            -->
-            <v-checkbox
-              v-model="snapshotRekey"
-              class="mt-1"
-              color="#0052D9"
-              density="compact"
-              :disabled="snapshotting"
-              hide-details
-              @update:model-value="refreshSnapshotPreview"
-            >
+            <v-checkbox v-model="snapshotRekey" class="mt-1" color="#0052D9" density="compact" :disabled="snapshotting"
+              hide-details @update:model-value="refreshSnapshotPreview">
               <template #label>
                 <span class="text-[12px]">同时重算唯一键 sync_key（按当前列）</span>
               </template>
@@ -329,77 +204,30 @@
             <v-spacer />
             <v-btn :disabled="snapshotting" variant="text" @click="snapshotDialog = false">取消</v-btn>
 
-            <v-btn
-              color="#0052D9"
-              :disabled="!canExecuteSnapshot || snapshotting"
-              :loading="snapshotting"
-              variant="flat"
-              @click="doSnapshot"
-            >执行同步</v-btn>
+            <v-btn color="#0052D9" :disabled="!canExecuteSnapshot || snapshotting" :loading="snapshotting"
+              variant="flat" @click="doSnapshot">执行同步</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
 
       <div>
-        <v-icon-btn
-          color="#7A7A7A"
-          icon="mdi-refresh"
-          :loading="loading"
-          size="small"
-          title="从数据库重新读取（读的是 data 快照；直接在库里改了列请用「同步快照」）"
-          variant="text"
-          @click="reload(true)"
-        />
+        <v-icon-btn color="#7A7A7A" icon="mdi-refresh" :loading="loading" size="small"
+          title="从数据库重新读取（读的是 data 快照；直接在库里改了列请用「同步快照」）" variant="text" @click="reload(true)" />
 
-        <v-icon-btn
-          color="#7A7A7A"
-          icon="mdi-cog-outline"
-          size="small"
-          title="列设置"
-          variant="text"
-          @click="settingsOpen = true"
-        />
+        <v-icon-btn color="#7A7A7A" icon="mdi-cog-outline" size="small" title="列设置" variant="text"
+          @click="settingsOpen = true" />
 
-        <v-icon-btn
-          color="#7A7A7A"
-          :icon="fullSceen ? 'mdi-arrow-collapse-all' : 'mdi-arrow-expand-all'"
-          size="small"
-          :title="fullSceen ? '退出全屏' : '全屏'"
-          variant="text"
-          @click="setFullScreen"
-        />
+        <v-icon-btn color="#7A7A7A" :icon="fullSceen ? 'mdi-arrow-collapse-all' : 'mdi-arrow-expand-all'" size="small"
+          :title="fullSceen ? '退出全屏' : '全屏'" variant="text" @click="setFullScreen" />
       </div>
     </div>
 
-    <v-data-table-server
-      v-model:items-per-page="itemsPerPage"
-      v-model:page="page"
-      :headers="headers"
-      :items="rows"
-      border
-      :items-length="totalItems"
-      hover
-      :items-per-page-options="[20, 50, 100, 200]"
-      density="compact"
-      items-per-page-text="每页条数"
-      fixed-header
-      :loading="loading"
-      fixed-footer
-      :height="tableHeight"
-      class="text-[12px]"
-      :no-data-text="noDataText"
-      striped="odd"
-      @update:options="onTableOptions"
-    >
+    <v-data-table-server v-model:items-per-page="itemsPerPage" v-model:page="page" :headers="headers" :items="rows"
+       :items-length="totalItems" hover :items-per-page-options="[20, 50, 100, 200]" density="compact"
+      items-per-page-text="每页条数" fixed-header :loading="loading" fixed-footer :height="tableHeight" class="text-[12px]"
+      :no-data-text="noDataText" striped="odd" @update:options="onTableOptions">
       <template #item.图片链接="{ value }">
-        <v-img
-          v-if="value"
-          class="rounded mx-auto"
-          cover
-          height="48"
-          :src="String(value)"
-          width="48"
-        />
+        <v-img v-if="value" class="rounded mx-auto" cover height="48" :src="String(value)" width="48" />
 
         <span v-else>—</span>
       </template>
@@ -433,30 +261,15 @@
         <v-divider />
 
         <v-card-text class="pa-2">
-          <div
-            v-for="(item, index) in orderedFields"
-            :key="item.key"
-            class="col-item"
-            :class="{ 'col-item--drag': dragIndex === index, 'col-item--over': overIndex === index }"
-            draggable="true"
-            @dragend="onDragEnd"
-            @dragover.prevent="onDragOver(index)"
-            @dragstart="onDragStart(index)"
-            @drop.prevent="onDrop(index)"
-          >
+          <div v-for="(item, index) in orderedFields" :key="item.key" class="col-item"
+            :class="{ 'col-item--drag': dragIndex === index, 'col-item--over': overIndex === index }" draggable="true"
+            @dragend="onDragEnd" @dragover.prevent="onDragOver(index)" @dragstart="onDragStart(index)"
+            @drop.prevent="onDrop(index)">
             <v-icon class="col-item__handle" icon="mdi-drag-vertical" size="16" />
             <span class="col-item__title" :title="item.title">{{ item.title }}</span>
 
-            <v-switch
-              class="col-item__switch"
-              color="primary"
-              density="compact"
-              false-icon="mdi-close"
-              hide-details
-              :model-value="isVisible(item.key)"
-              true-icon="mdi-check"
-              @update:model-value="toggleVisible(item.key)"
-            />
+            <v-switch class="col-item__switch" color="primary" density="compact" false-icon="mdi-close" hide-details
+              :model-value="isVisible(item.key)" true-icon="mdi-check" @update:model-value="toggleVisible(item.key)" />
           </div>
         </v-card-text>
 
@@ -470,995 +283,988 @@
       </v-card>
     </v-dialog>
 
-    <v-snackbar
-      v-model="snackbar.show"
-      :color="snackbar.color"
-      location="top"
-      timeout="6000"
-      variant="tonal"
-    >
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="6000" variant="tonal">
       {{ snackbar.text }}
     </v-snackbar>
   </v-container>
 </template>
 
 <script lang="ts" setup>
-  import {
-    biColumnOf, type BiRowQuery, fetchAllBiRows, fetchBiFacets, fetchBiRows,
-    purgeBiData, type PurgeSummary, type SnapshotSyncSummary, syncBiSnapshots, uploadBiRows,
-  } from '@/api/api'
-  import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
-  import { useUserStore } from '@/stores/user'
-  import { canAct } from '@/utils/permissions'
-  // 与服务端**同一个**唯一键实现，用来预告「这份文件入库后是多少行」
-  import { makeSyncKey } from '@/utils/biRowFields'
-  // Excel 解析放在独立模块里（纯函数，能被 tsx 直接跑单测），页面只负责接线
-  import { describeExcelProblems, parseExcelSheet } from '@/utils/excelTable'
-  import { PRODUCT_FIELDS, type ProductField } from '@/utils/productFields'
-  import { exportExcel, formatDatas, type ExportColumn } from '@/utils/utils'
+import {
+  biColumnOf, type BiRowQuery, fetchAllBiRows, fetchBiFacets, fetchBiRows,
+  purgeBiData, type PurgeSummary, type SnapshotSyncSummary, syncBiSnapshots, uploadBiRows,
+} from '@/api/api'
+import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
+import { useUserStore } from '@/stores/user'
+import { canAct } from '@/utils/permissions'
+// 与服务端**同一个**唯一键实现，用来预告「这份文件入库后是多少行」
+import { makeSyncKey } from '@/utils/biRowFields'
+// Excel 解析放在独立模块里（纯函数，能被 tsx 直接跑单测），页面只负责接线
+import { describeExcelProblems, parseExcelSheet } from '@/utils/excelTable'
+import { PRODUCT_FIELDS, type ProductField } from '@/utils/productFields'
+import { exportExcel, formatDatas, type ExportColumn } from '@/utils/utils'
 
-  /** BI 组件 id */
-  const COMPONENT_ID = '0c356d17-3c48-4c3b-b133-e6406a88c5fe'
+/** BI 组件 id */
+const COMPONENT_ID = '0c356d17-3c48-4c3b-b133-e6406a88c5fe'
 
-  const page = ref(1)
-  const itemsPerPage = ref(20)
-  const fullSceen = ref(false)
+const page = ref(1)
+const itemsPerPage = ref(20)
+const fullSceen = ref(false)
 
-  /* ---------- 表格数据：**全部来自 PocketBase**（服务端分页 / 排序 / 筛选） ---------- */
+/* ---------- 表格数据：**全部来自 PocketBase**（服务端分页 / 排序 / 筛选） ---------- */
 
-  /** 当前页的行。已是「中文 key 的视图对象」，并做过千分位格式化 */
-  const rows = ref<Record<string, unknown>[]>([])
-  /** 满足当前筛选条件的总行数（PB 返回，分页器用它） */
-  const totalItems = ref(0)
-  /** 本次读取完成的时间 */
-  const fetchedAt = ref('')
-  /** 排序：PB 的 sort 串（'qty_total' 升序 / '-qty_total' 降序） */
-  const sortBy = ref('')
-  /**
-   * 筛选下拉的选项：PB 列名 → 去重后的取值数组。
-   * 由服务端一条 SQL 算好（见 api.ts 的 fetchBiFacets），不在浏览器里扫全量。
-   */
-  const facets = ref<Record<string, string[]>>({})
-  /** 读取 / 解析过程中的提示 */
-  const fetchError = ref('')
+/** 当前页的行。已是「中文 key 的视图对象」，并做过千分位格式化 */
+const rows = ref<Record<string, unknown>[]>([])
+/** 满足当前筛选条件的总行数（PB 返回，分页器用它） */
+const totalItems = ref(0)
+/** 本次读取完成的时间 */
+const fetchedAt = ref('')
+/** 排序：PB 的 sort 串（'qty_total' 升序 / '-qty_total' 降序） */
+const sortBy = ref('')
+/**
+ * 筛选下拉的选项：PB 列名 → 去重后的取值数组。
+ * 由服务端一条 SQL 算好（见 api.ts 的 fetchBiFacets），不在浏览器里扫全量。
+ */
+const facets = ref<Record<string, string[]>>({})
+/** 读取 / 解析过程中的提示 */
+const fetchError = ref('')
 
-  const loading = ref(false)
+const loading = ref(false)
 
-  /* ---------- 待上传的文件：解析后先放着，**点按钮才写库** ---------- */
+/* ---------- 待上传的文件：解析后先放着，**点按钮才写库** ---------- */
 
-  /**
-   * 已解析、等待上传的行。
-   *
-   * ⚠️ 表格**不显示**它 —— 表格永远显示 PB 里的数据（上面那个 rows）。
-   * 只有点了「上传到数据库」才会把它写进 PB，并按唯一键删掉库里多出来的旧行。
-   * 这样「看数据」和「改数据」互不干扰：翻页 / 筛选看到的一定是库里的现状。
-   */
-  const pendingRows = ref<Record<string, unknown>[]>([])
-  const uploading = ref(false)
-  const attachment = ref<File | null>(null)
-  const fileInputRef = ref<{ click: () => void } | null>(null)
+/**
+ * 已解析、等待上传的行。
+ *
+ * ⚠️ 表格**不显示**它 —— 表格永远显示 PB 里的数据（上面那个 rows）。
+ * 只有点了「上传到数据库」才会把它写进 PB，并按唯一键删掉库里多出来的旧行。
+ * 这样「看数据」和「改数据」互不干扰：翻页 / 筛选看到的一定是库里的现状。
+ */
+const pendingRows = ref<Record<string, unknown>[]>([])
+const uploading = ref(false)
+const attachment = ref<File | null>(null)
+const fileInputRef = ref<{ click: () => void } | null>(null)
 
-  /**
-   * 选中 Excel → **只解析**，不写库、也不切换表格数据。
-   *
-   * 解析结果放进 pendingRows，由「上传到数据库」按钮决定什么时候真正写进 PB。
-   * 表格始终展示库里的现状 —— 否则「选中文件」这个动作看起来像已经改了数据。
-   */
-  async function onFileChange (value: File | File[]) {
-    const file = Array.isArray(value) ? value[0] : value
-    fetchError.value = ''
+/**
+ * 选中 Excel → **只解析**，不写库、也不切换表格数据。
+ *
+ * 解析结果放进 pendingRows，由「上传到数据库」按钮决定什么时候真正写进 PB。
+ * 表格始终展示库里的现状 —— 否则「选中文件」这个动作看起来像已经改了数据。
+ */
+async function onFileChange(value: File | File[]) {
+  const file = Array.isArray(value) ? value[0] : value
+  fetchError.value = ''
+  pendingRows.value = []
+  if (!file) return
+
+  loading.value = true
+  try {
+    const res = parseExcelSheet(await file.arrayBuffer())
+    pendingRows.value = res.rows
+    fetchError.value = describeExcelProblems(res)
+  } catch (error) {
+    console.error('[setDatas] 解析 Excel 失败:', error)
     pendingRows.value = []
-    if (!file) return
-
-    loading.value = true
-    try {
-      const res = parseExcelSheet(await file.arrayBuffer())
-      pendingRows.value = res.rows
-      fetchError.value = describeExcelProblems(res)
-    } catch (error) {
-      console.error('[setDatas] 解析 Excel 失败:', error)
-      pendingRows.value = []
-      fetchError.value = `解析失败：${error instanceof Error ? error.message : String(error)}`
-    } finally {
-      loading.value = false
-    }
+    fetchError.value = `解析失败：${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    loading.value = false
   }
+}
 
-  const dedupePreview = computed(() => {
-    const seen = new Set<string>()
-    let missingKey = 0
-    for (const row of pendingRows.value) {
-      const key = makeSyncKey(row)
-      if (!key) {
-        missingKey++
-        continue
-      }
-      seen.add(key)
+const dedupePreview = computed(() => {
+  const seen = new Set<string>()
+  let missingKey = 0
+  for (const row of pendingRows.value) {
+    const key = makeSyncKey(row)
+    if (!key) {
+      missingKey++
+      continue
     }
-    return {
-      unique: seen.size,
-      missingKey,
-      duplicated: pendingRows.value.length - seen.size - missingKey,
-    }
-  })
-  const CELL_PADDING = 44
-
-  /** 各列的默认宽度（内容宽度 + 单元格内边距），也是「双击恢复默认」的依据 */
-  const DEFAULT_WIDTHS: Record<string, number> = Object.fromEntries(
-    PRODUCT_FIELDS.map(f => [f.key, f.width + CELL_PADDING]),
-  )
-
-  const RESIZE_ZONE = 8
-  /** 列宽下限，防止拖到抓不回来 */
-  const MIN_COL_WIDTH = 48
-
-  const colLayout = ref<Array<{ field: string, width?: number }>>([])
-  const colVisible = ref<Record<string, boolean>>({})
-
-  const userStore = useUserStore()
-
-  /** 提示与按钮的 title 共用一份，免得"按钮说的"和"点了之后弹的"对不上 */
-  const NO_UPLOAD_TIP = '仅管理员可上传数据'
-
-  /**
-   * 能不能上传 BI 数据 —— **操作级**权限，与"能不能进本页面"无关
-   * （数据页三档都能进，但上传会按唯一键删旧行，是整库级写操作）。
-   * 判定表在 utils/permissions.ts，不要在这里写死角色比较：那样下一条规则又会是另一种写法。
-   */
-  const canUpload = computed(() => canAct(userStore.appRole, 'bi:upload'))
-
-  /* ==================== 快照同步（列 → data，仅超级管理员） ==================== */
-
-  /**
-   * 能不能同步快照 —— 同样走权限判定表（见 utils/permissions 的 ACTION_ROLES：
-   * 未知动作 fail-closed）。界面藏起来只是礼貌，真正的拦截在服务端
-   * （server/snapshotSync.ts 拿调用者 token 去问 PocketBase 的 role）。
-   */
-  const canSnapshot = computed(() => canAct(userStore.appRole, 'bi:snapshot'))
-
-  const snapshotDialog = ref(false)
-  const snapshotting = ref(false)
-  /** dryRun 的统计结果（确认框里显示"将更新多少行 / 哪些字段 / 跳过多少处 0"） */
-  const snapshotSummary = ref<SnapshotSyncSummary | null>(null)
-  /**
-   * 是否连「列里是 0/空」的值一起写。
-   *
-   * 默认**不写**：那些列的 0 多半是"从没被写过"（金额类的回款/毛利润实测 6 万多处），
-   * 写下去等于把界面上的金额刷成 0。默认语义因此是一句话：
-   * **只把列里确实有值、且与快照不同的字段同步过去**。只有"我故意把某列改成 0"时才勾。
-   */
-  const snapshotIncludeBlanks = ref(false)
-
-  /**
-   * 是否顺带**重算 `sync_key`**（唯一键 = `SKU|店铺|仓位|组别|呆滞`）。
-   *
-   * 什么时候需要：直接在库里改了**参与键的那几列**（仓位 / 组别 / SKU / 呆滞）——
-   * 行的键还停在旧值上，下次全量同步就认不出它（会"新建一条同键行 + 把这条当 orphan"）。
-   *
-   * 默认**不勾**：改键会改变下次同步的匹配结果；冲突（两行同一个新键）的行会被跳过并报出来。
-   */
-  const snapshotRekey = ref(false)
-
-  /** 预演结果显示"确实有活可干"（快照有改动，或勾了重算且有键要换）才允许执行 */
-  const canExecuteSnapshot = computed(() => {
-    const s = snapshotSummary.value
-    return !!s && (s.changed > 0 || s.keyChanged > 0)
-  })
-
-  /** 按当前开关重新跑一遍预演（勾选切换时用，让界面上的数字和实际会写的一致） */
-  async function refreshSnapshotPreview () {
-    try {
-      snapshotSummary.value = await syncBiSnapshots({
-        dryRun: true,
-        includeBlanks: snapshotIncludeBlanks.value,
-        rekey: snapshotRekey.value,
-      })
-    } catch (error) {
-      showMsg(error instanceof Error ? error.message : String(error), 'error')
-    }
+    seen.add(key)
   }
-
-  /**
-   * 打开确认框：**先 dryRun** 把差异摆出来再让人确认。
-   *
-   * 为什么必须有这一步：快照同步是按列覆盖 data，一次可能动上千行；
-   * 而库里金额类列与快照本来就不一致（实测 25%~70%，6 万多处），
-   * 不先看一眼 skippedBlanks 就执行，可能把界面上的金额刷成 0。
-   */
-  async function openSnapshotDialog () {
-    if (!canSnapshot.value) {
-      showMsg('只有超级管理员可以同步快照', 'warning')
-      return
-    }
-    snapshotSummary.value = null
-    snapshotIncludeBlanks.value = false
-    snapshotRekey.value = false
-    snapshotDialog.value = true
-    await refreshSnapshotPreview()
+  return {
+    unique: seen.size,
+    missingKey,
+    duplicated: pendingRows.value.length - seen.size - missingKey,
   }
+})
+const CELL_PADDING = 44
 
-  /** 执行：写库后重新取数 —— 表格的值来自 data，写完必须重取才看得见 */
-  async function doSnapshot () {
-    // 双保险：按钮已按权限/差异禁用，这里再拦一次（权限不能只靠"按钮点不到"保证）
-    if (!canSnapshot.value) {
-      showMsg('只有超级管理员可以同步快照', 'warning')
-      return
-    }
-    snapshotting.value = true
-    try {
-      const res = await syncBiSnapshots({
-        includeBlanks: snapshotIncludeBlanks.value,
-        rekey: snapshotRekey.value,
-      })
-      snapshotDialog.value = false
-      const parts = [`已写入 ${res.written} 行`]
-      if (res.changed > 0) parts.push(`其中快照 ${res.changed} 行`)
-      if (res.keyChanged > 0) parts.push(`重算唯一键 ${res.keyChanged} 行`)
-      if (res.keyConflicts > 0) parts.push(`${res.keyConflicts} 行键冲突被跳过`)
-      if (res.failed > 0) parts.push(`${res.failed} 行失败（明细见控制台）`)
-      showMsg(parts.join('，'), res.failed > 0 ? 'error' : 'success')
-      if (res.failures.length > 0) {
-        console.warn('[setDatas] 快照同步失败明细:', res.failures)
-      }
-      // force：参数签名可能没变，必须绕过短路；下拉选项也跟着重取一遍（列没变，保持一致）
-      await reload(true)
-    } catch (error) {
-      console.error('[setDatas] 同步快照失败:', error)
-      showMsg(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      snapshotting.value = false
-    }
-  }
+/** 各列的默认宽度（内容宽度 + 单元格内边距），也是「双击恢复默认」的依据 */
+const DEFAULT_WIDTHS: Record<string, number> = Object.fromEntries(
+  PRODUCT_FIELDS.map(f => [f.key, f.width + CELL_PADDING]),
+)
 
-  /* ==================== 清空数据（仅超级管理员） ==================== */
+const RESIZE_ZONE = 8
+/** 列宽下限，防止拖到抓不回来 */
+const MIN_COL_WIDTH = 48
 
-  /**
-   * 能不能清空数据 —— 同样走权限判定表，不在这里写死角色比较
-   * （见 utils/permissions 的 ACTION_ROLES 说明：未知动作 fail-closed）。
-   *
-   * ⚠️ 这是**界面**权限：真正拦住人的是服务端 —— server/purgeData.ts 拿我们带过去的 token
-   * 去问 PocketBase 这是谁、role 是不是 superAdmin；而且这些集合在 PB 里的 deleteRule 是空的
-   * （只有 superuser 能删），前端哪怕绕过界面也删不掉。
-   */
-  const canPurge = computed(() => canAct(userStore.appRole, 'bi:purge'))
+const colLayout = ref<Array<{ field: string, width?: number }>>([])
+const colVisible = ref<Record<string, boolean>>({})
 
-  const purgeDialog = ref(false)
-  const purging = ref(false)
-  /** 必须手动输入这个字才能点确认 —— 不可恢复的操作，不给"手滑连点两下就没了"的机会 */
-  const purgeConfirmText = ref('')
-  const purgeSummary = ref<PurgeSummary | null>(null)
+const userStore = useUserStore()
 
-  /** 打开确认框：先 dry-run 统计一次，把"将要删掉多少"摆出来再让人确认 */
-  async function openPurgeDialog () {
-    if (!canPurge.value) {
-      showMsg('只有超级管理员可以清空数据', 'warning')
-      return
-    }
-    purgeConfirmText.value = ''
-    purgeSummary.value = null
-    purgeDialog.value = true
-    try {
-      purgeSummary.value = await purgeBiData(true)
-    } catch (error) {
-      purgeDialog.value = false
-      showMsg(error instanceof Error ? error.message : String(error), 'error')
-    }
-  }
+/** 提示与按钮的 title 共用一份，免得"按钮说的"和"点了之后弹的"对不上 */
+const NO_UPLOAD_TIP = '仅管理员可上传数据'
 
-  async function doPurge () {
-    // 双保险：按钮已经禁用/藏起来了，这里再拦一次（与 uploadDatas 同一套口径）
-    if (!canPurge.value) {
-      showMsg('只有超级管理员可以清空数据', 'warning')
-      return
-    }
-    if (purgeConfirmText.value !== '清空') {
-      return
-    }
-    purging.value = true
-    try {
-      const res = await purgeBiData(false)
-      purgeDialog.value = false
-      const touched = res.collections.filter(c => c.count > 0).length
-      showMsg(`已清空 ${touched} 个集合，共删除 ${res.totalDeleted} 条记录`, 'success')
-      // 清完把表格置空：否则页面上还列着已经不存在的行
-      rows.value = []
-      totalItems.value = 0
-    } catch (error) {
-      console.error('[setDatas] 清空失败:', error)
-      showMsg(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      purging.value = false
-    }
-  }
+/**
+ * 能不能上传 BI 数据 —— **操作级**权限，与"能不能进本页面"无关
+ * （数据页三档都能进，但上传会按唯一键删旧行，是整库级写操作）。
+ * 判定表在 utils/permissions.ts，不要在这里写死角色比较：那样下一条规则又会是另一种写法。
+ */
+const canUpload = computed(() => canAct(userStore.appRole, 'bi:upload'))
 
-  /**
-   * 打开文件选择器。
-   * 无权限时**不静默 return**：点了没反应会让人以为页面坏了，所以补一条提示。
-   */
-  function openFilePicker () {
-    if (!canUpload.value) {
-      showMsg(NO_UPLOAD_TIP, 'warning')
-      return
-    }
-    fileInputRef.value?.click()
-  }
+/* ==================== 快照同步（列 → data，仅超级管理员） ==================== */
 
-  /** 字段清单里该列的默认显隐 */
-  function defaultVisible (key: string): boolean {
-    return PRODUCT_FIELDS.find(f => f.key === key)?.visualable ?? true
-  }
+/**
+ * 能不能同步快照 —— 同样走权限判定表（见 utils/permissions 的 ACTION_ROLES：
+ * 未知动作 fail-closed）。界面藏起来只是礼貌，真正的拦截在服务端
+ * （server/snapshotSync.ts 拿调用者 token 去问 PocketBase 的 role）。
+ */
+const canSnapshot = computed(() => canAct(userStore.appRole, 'bi:snapshot'))
 
-  /** 该列当前是否显示 */
-  function isVisible (key: string): boolean {
-    return colVisible.value[key] ?? defaultVisible(key)
-  }
+const snapshotDialog = ref(false)
+const snapshotting = ref(false)
+/** dryRun 的统计结果（确认框里显示"将更新多少行 / 哪些字段 / 跳过多少处 0"） */
+const snapshotSummary = ref<SnapshotSyncSummary | null>(null)
+/**
+ * 是否连「列里是 0/空」的值一起写。
+ *
+ * 默认**不写**：那些列的 0 多半是"从没被写过"（金额类的回款/毛利润实测 6 万多处），
+ * 写下去等于把界面上的金额刷成 0。默认语义因此是一句话：
+ * **只把列里确实有值、且与快照不同的字段同步过去**。只有"我故意把某列改成 0"时才勾。
+ */
+const snapshotIncludeBlanks = ref(false)
 
-  /** 该列当前宽度：用户调过用调过的，否则用字段清单的默认值（内容宽 + 内边距） */
-  function widthOf (key: string): number {
-    const saved = colLayout.value.find(item => item.field === key)?.width
-    return typeof saved === 'number' && saved >= MIN_COL_WIDTH ? saved : DEFAULT_WIDTHS[key]
-  }
-  /**
-   * 导出用的列：与表格**同一份**口径 —— 当前顺序、当前显隐、当前标题与列宽。
-   *
-   * 不要直接把行对象丢给 xlsx：`json_to_sheet` 会拿**第一行对象的键顺序**当表头，
-   * 那是 PB 记录的原始字段顺序（id / created / data / 中文列名…），
-   * 与页面上看到的列顺序、显隐完全对不上（见 utils/exportExcel 的说明）。
-   */
-  function exportColumns (): ExportColumn[] {
-    return visibleFields.value.map(f => ({ key: f.key, title: f.title, width: widthOf(f.key) }))
-  }
-  /**
-   * 导出：按**当前生效的筛选条件**从 PB 取全量（不是只导当前那一页）。
-   * 取回来的是中文 key 的行，与上传导入用的是同一套列名，可以来回倒。
-   */
-  async function exportToExcel () {
-    loading.value = true
-    try {
-      const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
-      await exportExcel(all.map(formatDatas), '导出数据', exportColumns())
-    } catch (error) {
-      console.error('[setDatas] 导出失败:', error)
-      showMsg(`导出失败：${error instanceof Error ? error.message : String(error)}`, 'error')
-    } finally {
-      loading.value = false
-    }
-  }
+/**
+ * 是否顺带**重算 `sync_key`**（唯一键 = `SKU|店铺|仓位|组别|呆滞`）。
+ *
+ * 什么时候需要：直接在库里改了**参与键的那几列**（仓位 / 组别 / SKU / 呆滞）——
+ * 行的键还停在旧值上，下次全量同步就认不出它（会"新建一条同键行 + 把这条当 orphan"）。
+ *
+ * 默认**不勾**：改键会改变下次同步的匹配结果；冲突（两行同一个新键）的行会被跳过并报出来。
+ */
+const snapshotRekey = ref(false)
 
-  function ensureFullOrder (): Array<{ field: string, width?: number }> {
-    const byKey = new Map(PRODUCT_FIELDS.map(f => [f.key, f]))
-    const order: string[] = []
-    for (const item of colLayout.value) {
-      if (byKey.delete(item.field)) order.push(item.field)
-    }
-    order.push(...byKey.keys())
-    const widthByKey = new Map(colLayout.value.map(i => [i.field, i.width]))
-    return order.map(field => {
-      const w = widthByKey.get(field)
-      return typeof w === 'number' ? { field, width: w } : { field }
+/** 预演结果显示"确实有活可干"（快照有改动，或勾了重算且有键要换）才允许执行 */
+const canExecuteSnapshot = computed(() => {
+  const s = snapshotSummary.value
+  return !!s && (s.changed > 0 || s.keyChanged > 0)
+})
+
+/** 按当前开关重新跑一遍预演（勾选切换时用，让界面上的数字和实际会写的一致） */
+async function refreshSnapshotPreview() {
+  try {
+    snapshotSummary.value = await syncBiSnapshots({
+      dryRun: true,
+      includeBlanks: snapshotIncludeBlanks.value,
+      rekey: snapshotRekey.value,
     })
+  } catch (error) {
+    showMsg(error instanceof Error ? error.message : String(error), 'error')
   }
+}
 
-  /** 按当前顺序排好、含隐藏列的全部字段。面板用它，下标与 colLayout 一一对应 */
-  const orderedFields = computed(() => {
-    const byKey = new Map(PRODUCT_FIELDS.map(f => [f.key, f]))
-    const out: ProductField[] = []
-    for (const item of colLayout.value) {
-      const f = byKey.get(item.field)
-      // 过滤掉已经不在字段清单里的（BI 删了字段）
-      if (f) {
-        out.push(f); byKey.delete(item.field)
-      }
+/**
+ * 打开确认框：**先 dryRun** 把差异摆出来再让人确认。
+ *
+ * 为什么必须有这一步：快照同步是按列覆盖 data，一次可能动上千行；
+ * 而库里金额类列与快照本来就不一致（实测 25%~70%，6 万多处），
+ * 不先看一眼 skippedBlanks 就执行，可能把界面上的金额刷成 0。
+ */
+async function openSnapshotDialog() {
+  if (!canSnapshot.value) {
+    showMsg('只有超级管理员可以同步快照', 'warning')
+    return
+  }
+  snapshotSummary.value = null
+  snapshotIncludeBlanks.value = false
+  snapshotRekey.value = false
+  snapshotDialog.value = true
+  await refreshSnapshotPreview()
+}
+
+/** 执行：写库后重新取数 —— 表格的值来自 data，写完必须重取才看得见 */
+async function doSnapshot() {
+  // 双保险：按钮已按权限/差异禁用，这里再拦一次（权限不能只靠"按钮点不到"保证）
+  if (!canSnapshot.value) {
+    showMsg('只有超级管理员可以同步快照', 'warning')
+    return
+  }
+  snapshotting.value = true
+  try {
+    const res = await syncBiSnapshots({
+      includeBlanks: snapshotIncludeBlanks.value,
+      rekey: snapshotRekey.value,
+    })
+    snapshotDialog.value = false
+    const parts = [`已写入 ${res.written} 行`]
+    if (res.changed > 0) parts.push(`其中快照 ${res.changed} 行`)
+    if (res.keyChanged > 0) parts.push(`重算唯一键 ${res.keyChanged} 行`)
+    if (res.keyConflicts > 0) parts.push(`${res.keyConflicts} 行键冲突被跳过`)
+    if (res.failed > 0) parts.push(`${res.failed} 行失败（明细见控制台）`)
+    showMsg(parts.join('，'), res.failed > 0 ? 'error' : 'success')
+    if (res.failures.length > 0) {
+      console.warn('[setDatas] 快照同步失败明细:', res.failures)
     }
-    // 剩下的 = BI 新增、偏好里还没有的，按默认顺序追加到末尾，保证老用户看得到新字段
-    out.push(...byKey.values())
-    return out
+    // force：参数签名可能没变，必须绕过短路；下拉选项也跟着重取一遍（列没变，保持一致）
+    await reload(true)
+  } catch (error) {
+    console.error('[setDatas] 同步快照失败:', error)
+    showMsg(error instanceof Error ? error.message : String(error), 'error')
+  } finally {
+    snapshotting.value = false
+  }
+}
+
+/* ==================== 清空数据（仅超级管理员） ==================== */
+
+/**
+ * 能不能清空数据 —— 同样走权限判定表，不在这里写死角色比较
+ * （见 utils/permissions 的 ACTION_ROLES 说明：未知动作 fail-closed）。
+ *
+ * ⚠️ 这是**界面**权限：真正拦住人的是服务端 —— server/purgeData.ts 拿我们带过去的 token
+ * 去问 PocketBase 这是谁、role 是不是 superAdmin；而且这些集合在 PB 里的 deleteRule 是空的
+ * （只有 superuser 能删），前端哪怕绕过界面也删不掉。
+ */
+const canPurge = computed(() => canAct(userStore.appRole, 'bi:purge'))
+
+const purgeDialog = ref(false)
+const purging = ref(false)
+/** 必须手动输入这个字才能点确认 —— 不可恢复的操作，不给"手滑连点两下就没了"的机会 */
+const purgeConfirmText = ref('')
+const purgeSummary = ref<PurgeSummary | null>(null)
+
+/** 打开确认框：先 dry-run 统计一次，把"将要删掉多少"摆出来再让人确认 */
+async function openPurgeDialog() {
+  if (!canPurge.value) {
+    showMsg('只有超级管理员可以清空数据', 'warning')
+    return
+  }
+  purgeConfirmText.value = ''
+  purgeSummary.value = null
+  purgeDialog.value = true
+  try {
+    purgeSummary.value = await purgeBiData(true)
+  } catch (error) {
+    purgeDialog.value = false
+    showMsg(error instanceof Error ? error.message : String(error), 'error')
+  }
+}
+
+async function doPurge() {
+  // 双保险：按钮已经禁用/藏起来了，这里再拦一次（与 uploadDatas 同一套口径）
+  if (!canPurge.value) {
+    showMsg('只有超级管理员可以清空数据', 'warning')
+    return
+  }
+  if (purgeConfirmText.value !== '清空') {
+    return
+  }
+  purging.value = true
+  try {
+    const res = await purgeBiData(false)
+    purgeDialog.value = false
+    const touched = res.collections.filter(c => c.count > 0).length
+    showMsg(`已清空 ${touched} 个集合，共删除 ${res.totalDeleted} 条记录`, 'success')
+    // 清完把表格置空：否则页面上还列着已经不存在的行
+    rows.value = []
+    totalItems.value = 0
+  } catch (error) {
+    console.error('[setDatas] 清空失败:', error)
+    showMsg(error instanceof Error ? error.message : String(error), 'error')
+  } finally {
+    purging.value = false
+  }
+}
+
+/**
+ * 打开文件选择器。
+ * 无权限时**不静默 return**：点了没反应会让人以为页面坏了，所以补一条提示。
+ */
+function openFilePicker() {
+  if (!canUpload.value) {
+    showMsg(NO_UPLOAD_TIP, 'warning')
+    return
+  }
+  fileInputRef.value?.click()
+}
+
+/** 字段清单里该列的默认显隐 */
+function defaultVisible(key: string): boolean {
+  return PRODUCT_FIELDS.find(f => f.key === key)?.visualable ?? true
+}
+
+/** 该列当前是否显示 */
+function isVisible(key: string): boolean {
+  return colVisible.value[key] ?? defaultVisible(key)
+}
+
+/** 该列当前宽度：用户调过用调过的，否则用字段清单的默认值（内容宽 + 内边距） */
+function widthOf(key: string): number {
+  const saved = colLayout.value.find(item => item.field === key)?.width
+  return typeof saved === 'number' && saved >= MIN_COL_WIDTH ? saved : DEFAULT_WIDTHS[key]
+}
+/**
+ * 导出用的列：与表格**同一份**口径 —— 当前顺序、当前显隐、当前标题与列宽。
+ *
+ * 不要直接把行对象丢给 xlsx：`json_to_sheet` 会拿**第一行对象的键顺序**当表头，
+ * 那是 PB 记录的原始字段顺序（id / created / data / 中文列名…），
+ * 与页面上看到的列顺序、显隐完全对不上（见 utils/exportExcel 的说明）。
+ */
+function exportColumns(): ExportColumn[] {
+  return visibleFields.value.map(f => ({ key: f.key, title: f.title, width: widthOf(f.key) }))
+}
+/**
+ * 导出：按**当前生效的筛选条件**从 PB 取全量（不是只导当前那一页）。
+ * 取回来的是中文 key 的行，与上传导入用的是同一套列名，可以来回倒。
+ */
+async function exportToExcel() {
+  loading.value = true
+  try {
+    const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
+    await exportExcel(all.map(formatDatas), '导出数据', exportColumns())
+  } catch (error) {
+    console.error('[setDatas] 导出失败:', error)
+    showMsg(`导出失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+function ensureFullOrder(): Array<{ field: string, width?: number }> {
+  const byKey = new Map(PRODUCT_FIELDS.map(f => [f.key, f]))
+  const order: string[] = []
+  for (const item of colLayout.value) {
+    if (byKey.delete(item.field)) order.push(item.field)
+  }
+  order.push(...byKey.keys())
+  const widthByKey = new Map(colLayout.value.map(i => [i.field, i.width]))
+  return order.map(field => {
+    const w = widthByKey.get(field)
+    return typeof w === 'number' ? { field, width: w } : { field }
   })
+}
 
-  /** 表格实际渲染的字段 */
-  const visibleFields = computed(() => orderedFields.value.filter(f => isVisible(f.key)))
-
-  /** 字段清单的默认顺序，用于判定「顺序有没有被改过」以及补齐缺失字段 */
-  const DEFAULT_ORDER = PRODUCT_FIELDS.map(f => f.key)
-
-  function mergeWidths (
-    order: Array<{ field: string, width?: number }>,
-    widths: Record<string, number> | undefined,
-  ): Array<{ field: string, width?: number }> {
-    const byField = new Map(order.map(i => [i.field, i]))
-    for (const f of PRODUCT_FIELDS) {
-      if (byField.has(f.key)) continue
-      const item: { field: string, width?: number } = { field: f.key }
-      order.push(item)
-      byField.set(f.key, item)
-    }
-    if (widths && typeof widths === 'object') {
-      for (const [field, w] of Object.entries(widths)) {
-        if (typeof w !== 'number' || w < MIN_COL_WIDTH) continue
-        byField.get(field)!.width = w
-      }
-    }
-    return order
-  }
-
-  /** 用 PB 偏好覆盖默认值；数据异常（非布尔 / 非数字 / 太小）时忽略，回落字段清单的默认值 */
-  function applyLayoutPrefs () {
-    const prefs = userStore.preferences
-
-    const layout = Array.isArray(prefs?.columnLayout) ? prefs.columnLayout : []
-    colLayout.value = mergeWidths(
-      layout
-        .filter(item => item && typeof item.field === 'string')
-        .map(item =>
-          typeof item.width === 'number' && item.width >= MIN_COL_WIDTH
-            ? { field: item.field, width: item.width }
-            : { field: item.field },
-        ),
-      prefs?.columnWidths,
-    )
-
-    const vis = prefs?.columnVisibility
-    if (vis && typeof vis === 'object') {
-      const next: Record<string, boolean> = {}
-      for (const [key, value] of Object.entries(vis)) {
-        if (typeof value === 'boolean') next[key] = value
-      }
-      colVisible.value = next
+/** 按当前顺序排好、含隐藏列的全部字段。面板用它，下标与 colLayout 一一对应 */
+const orderedFields = computed(() => {
+  const byKey = new Map(PRODUCT_FIELDS.map(f => [f.key, f]))
+  const out: ProductField[] = []
+  for (const item of colLayout.value) {
+    const f = byKey.get(item.field)
+    // 过滤掉已经不在字段清单里的（BI 删了字段）
+    if (f) {
+      out.push(f); byKey.delete(item.field)
     }
   }
-  applyLayoutPrefs()
-  // 登录态是异步恢复的（authStore 初始化 / 重新登录），偏好到位后再覆盖一次
-  watch(() => userStore.preferences, applyLayoutPrefs, { deep: true })
+  // 剩下的 = BI 新增、偏好里还没有的，按默认顺序追加到末尾，保证老用户看得到新字段
+  out.push(...byKey.values())
+  return out
+})
 
-  let layoutSaveTimer: ReturnType<typeof setTimeout> | undefined
+/** 表格实际渲染的字段 */
+const visibleFields = computed(() => orderedFields.value.filter(f => isVisible(f.key)))
 
-  /** 把当前顺序 + 调过的列宽 + 显隐差异写回 PB */
-  function persistLayout () {
-    const full = ensureFullOrder()
-    const order = full.map(i => i.field)
+/** 字段清单的默认顺序，用于判定「顺序有没有被改过」以及补齐缺失字段 */
+const DEFAULT_ORDER = PRODUCT_FIELDS.map(f => f.key)
 
-    // 列宽：稀疏存，只存与默认不同的
-    const widths: Record<string, number> = {}
-    for (const item of full) {
-      if (typeof item.width === 'number' && item.width !== DEFAULT_WIDTHS[item.field]) {
-        widths[item.field] = item.width
-      }
+function mergeWidths(
+  order: Array<{ field: string, width?: number }>,
+  widths: Record<string, number> | undefined,
+): Array<{ field: string, width?: number }> {
+  const byField = new Map(order.map(i => [i.field, i]))
+  for (const f of PRODUCT_FIELDS) {
+    if (byField.has(f.key)) continue
+    const item: { field: string, width?: number } = { field: f.key }
+    order.push(item)
+    byField.set(f.key, item)
+  }
+  if (widths && typeof widths === 'object') {
+    for (const [field, w] of Object.entries(widths)) {
+      if (typeof w !== 'number' || w < MIN_COL_WIDTH) continue
+      byField.get(field)!.width = w
     }
-
-    const reordered
-      = order.length !== DEFAULT_ORDER.length || order.some((k, i) => k !== DEFAULT_ORDER[i])
-
-    const visibilityDiff: Record<string, boolean> = {}
-    for (const f of PRODUCT_FIELDS) {
-      const v = colVisible.value[f.key]
-      if (typeof v === 'boolean' && v !== defaultVisible(f.key)) visibilityDiff[f.key] = v
-    }
-
-    userStore
-      .savePreferences({
-        columnWidths: widths,
-        // ⚠️ 顺序**只有真的重排过才写**：全量 65 项约 1.9KB，
-        // 会把 PB 的登录 cookie 撑过 4096 字节上限而被浏览器静默丢弃（详见 stores/user.ts）。
-        // 没重排就写空数组，读取侧回落字段清单的默认顺序。
-        columnLayout: reordered
-          ? full.map(({ field, width }) => (typeof width === 'number' ? { field, width } : { field }))
-          : [],
-        columnVisibility: visibilityDiff,
-      })
-      .catch(error => {
-        console.error('[setDatas] 保存列设置失败:', error)
-      })
   }
+  return order
+}
 
-  /** 拖拽调宽 / 连点开关都会高频触发，防抖后落库一次 */
-  function scheduleLayoutSave () {
-    clearTimeout(layoutSaveTimer)
-    layoutSaveTimer = setTimeout(persistLayout, 400)
-  }
+/** 用 PB 偏好覆盖默认值；数据异常（非布尔 / 非数字 / 太小）时忽略，回落字段清单的默认值 */
+function applyLayoutPrefs() {
+  const prefs = userStore.preferences
 
-  /** 改某一列的宽度（不动它的位置） */
-  function setColumnWidth (key: string, width: number) {
-    colLayout.value = ensureFullOrder().map(item =>
-      item.field === key ? { field: key, width } : item,
-    )
-  }
-
-  /** 去掉某列的宽度，回落默认 */
-  function resetColumnWidth (key: string) {
-    colLayout.value = ensureFullOrder().map(item =>
-      item.field === key ? { field: key } : item,
-    )
-  }
-
-  // ==================== 列设置面板 ====================
-
-  const settingsOpen = ref(false)
-
-  /** 面板里正在拖的项 / 拖到哪一项上面（只用于显示落点提示） */
-  const dragIndex = ref(-1)
-  const overIndex = ref(-1)
-
-  function onDragStart (index: number) {
-    dragIndex.value = index
-  }
-
-  function onDragOver (index: number) {
-    overIndex.value = index
-  }
-
-  function onDragEnd () {
-    dragIndex.value = -1
-    overIndex.value = -1
-  }
-
-  /**
-   * 拖动排序。
-   * 面板列的是**全部字段**（含隐藏的），且顺序与 ensureFullOrder() 完全一致，
-   * 所以这里的下标可以直接用 —— 不能拿 visibleFields 的下标去查，那会把隐藏列算错。
-   */
-  function onDrop (index: number) {
-    const from = dragIndex.value
-    onDragEnd()
-    if (from < 0 || from === index) return
-    const layout = ensureFullOrder()
-    const [moved] = layout.splice(from, 1)
-    layout.splice(index, 0, moved)
-    colLayout.value = layout
-    scheduleLayoutSave()
-  }
-
-  /** 切换某一列的显隐 */
-  function toggleVisible (key: string) {
-    colVisible.value = { ...colVisible.value, [key]: !isVisible(key) }
-    scheduleLayoutSave()
-  }
-
-  /** 恢复全部默认（顺序 + 宽度 + 显隐） */
-  function resetColumnSettings () {
-    colLayout.value = []
-    colVisible.value = {}
-    scheduleLayoutSave()
-  }
-
-  function setFullScreen () {
-    fullSceen.value = !fullSceen.value
-    isEditorFullscreen.value = fullSceen.value
-  }
-
-  /** 表格高度：全屏时顶部系统栏（.app-titlebar 的 36px）不再占位，可用高度多 36px */
-  const tableHeight = computed(() => (fullSceen.value ? 'calc(100vh - 162px)' : 'calc(100vh - 198px)'))
-
-  // 离开页面必须还原：isEditorFullscreen 是跨组件共享的，
-  // 不还原的话顶栏和侧边栏会一直藏着，整个应用都回不来。
-  onBeforeUnmount(() => {
-    isEditorFullscreen.value = false
-  })
-
-  onMounted(() => document.body.classList.add('data-table-page'))
-  onBeforeUnmount(() => document.body.classList.remove('data-table-page'))
-
-  const headers = computed(() =>
-    visibleFields.value.map(({ title, key, sortable, fixed }) => {
-      const w = widthOf(key)
-      // 只有「用户调过宽度」的列才给 width，没调过的只给 minWidth（原因见上方注释）
-      const resized = colLayout.value.some(i => i.field === key && typeof i.width === 'number')
-      return {
-        title,
-        key,
-        sortable: sortable ?? false,
-        align: 'center' as const,
-        fixed,
-        ...(resized ? { width: w, minWidth: w } : { minWidth: w }),
-      }
-    }),
+  const layout = Array.isArray(prefs?.columnLayout) ? prefs.columnLayout : []
+  colLayout.value = mergeWidths(
+    layout
+      .filter(item => item && typeof item.field === 'string')
+      .map(item =>
+        typeof item.width === 'number' && item.width >= MIN_COL_WIDTH
+          ? { field: item.field, width: item.width }
+          : { field: item.field },
+      ),
+    prefs?.columnWidths,
   )
 
-  // —— 拖拽 ——
-
-  /** 正在拖的列（null = 没在拖） */
-  let resizing: { key: string, startX: number, startWidth: number } | null = null
-
-  function resizeTargetOf (e: { target: EventTarget | null, offsetX: number }) {
-    const th = (e.target as HTMLElement | null)?.closest?.('th')
-    if (!th) return null
-    if (th.clientWidth - e.offsetX > RESIZE_ZONE) return null
-    // th 在表头行里的序号就是 headers 的序号（这个表没有多选框列 / 展开列）
-    const row = th.parentElement
-    const index = row ? Array.from(row.children).indexOf(th) : -1
-    const header = headers.value[index]
-    if (!header) return null
-    return { key: String(header.key), width: th.clientWidth }
-  }
-
-  function endResize () {
-    window.removeEventListener('pointermove', onPointerMove)
-    window.removeEventListener('pointerup', onPointerUp)
-    document.body.style.cursor = ''
-    document.body.style.userSelect = ''
-    if (!resizing) return
-    resizing = null
-    // 拖拽中每帧都写 PB 显然不行，松手后防抖落库一次
-    scheduleLayoutSave()
-  }
-
-  function onPointerUp () {
-    endResize()
-  }
-
-  function onPointerMove (e: PointerEvent) {
-    if (!resizing) return
-    const next = Math.max(
-      MIN_COL_WIDTH,
-      Math.round(resizing.startWidth + (e.clientX - resizing.startX)),
-    )
-    setColumnWidth(resizing.key, next)
-  }
-
-  function onPointerDown (e: PointerEvent) {
-    const hit = resizeTargetOf(e)
-    if (!hit) return
-    // 阻止默认行为，否则拖动时会把表头文字选中；触屏上还会把页面滚走
-    e.preventDefault()
-    resizing = { key: hit.key, startX: e.clientX, startWidth: hit.width }
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    window.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp, { once: true })
-  }
-
-  /** 双击热区 = 该列恢复默认宽度 */
-  function onDblClick (e: MouseEvent) {
-    const hit = resizeTargetOf(e)
-    if (!hit) return
-    resetColumnWidth(hit.key)
-    scheduleLayoutSave()
-  }
-
-  onBeforeUnmount(() => {
-    endResize()
-    clearTimeout(layoutSaveTimer)
-  })
-  // 排序改为**服务端**做（见 onTableOptions → sortBy → PB 的 sort 参数）：
-  // 分页之后客户端排序只能排当前页，那是错的。
-  // 也因此不再需要「收集数值列 + 自定义比较器」那套 —— PB 按真列的原生类型排，
-  // 比原来把千分位字符串解析回数字再比更准。
-
-  const SEARCH_FIELDS = ['SKU', 'SPU', '主MODEL', '产品名称']
-
-  /** 日期范围按哪一列过滤。BI 返回 'YYYY-MM-DD' 字符串，可直接按字典序比大小 */
-  const DATE_FILTER_FIELD = '最早开售日期-SKU'
-
-  type FilterKey
-    = | 'type' | 'sale' | 'model' | 'manager' | 'department'
-      | 'remain' | 'category1' | 'category2' | 'lamp'
-      | 'group' | 'platform' | 'warehouse'
-
-  const SELECT_CONFIGS: { key: FilterKey, field: string, mode: 'eq' | 'includes' }[] = [
-    { key: 'type', field: '销售状态', mode: 'includes' },
-    { key: 'sale', field: '供应商', mode: 'eq' },
-    // { key: 'model', field: '主MODEL', mode: 'eq' },
-    { key: 'manager', field: '组长', mode: 'eq' },
-    { key: 'department', field: '部门', mode: 'eq' },
-    { key: 'remain', field: '是否属于呆滞库存', mode: 'eq' },
-    { key: 'category1', field: '一级品类', mode: 'eq' },
-    { key: 'category2', field: '二级品类', mode: 'eq' },
-    // { key: 'lamp', field: '是否属于灯具', mode: 'eq' },
-    { key: 'group', field: '组别', mode: 'eq' },
-    { key: 'platform', field: '平台', mode: 'eq' },
-    { key: 'warehouse', field: '仓位', mode: 'eq' },
-  ]
-
-  /* ==================== 从 PocketBase 读（服务端分页 / 排序 / 筛选） ==================== */
-
-  /** 参与筛选的列在 PB 里的 ASCII 列名（去重；映射不出来的列自动跳过） */
-  const FACET_COLUMNS = [...new Set(
-    SELECT_CONFIGS.map(c => biColumnOf(c.field)).filter((c): c is string => !!c),
-  )]
-
-  /**
-   * 把当前**已生效**的筛选条件翻译成 PB 查询。
-   * 列名必须用 ASCII 列名（见 api.ts 的 biColumnOf），否则 PB 会报「字段不存在」。
-   */
-  function currentQuery (extra: Partial<BiRowQuery> = {}): BiRowQuery {
-    const f = applied.value
-    const equals: Record<string, string> = {}
-    const contains: Record<string, string> = {}
-    for (const cfg of SELECT_CONFIGS) {
-      const v = f[cfg.key]
-      if (!v) continue
-      const col = biColumnOf(cfg.field)
-      if (!col) continue
-      if (cfg.mode === 'includes') contains[col] = v
-      else equals[col] = v
+  const vis = prefs?.columnVisibility
+  if (vis && typeof vis === 'object') {
+    const next: Record<string, boolean> = {}
+    for (const [key, value] of Object.entries(vis)) {
+      if (typeof value === 'boolean') next[key] = value
     }
-    const searchColumns = SEARCH_FIELDS.map(biColumnOf).filter((c): c is string => !!c)
-    const from = f.dateRange[0]
-    const to = f.dateRange.at(-1)
+    colVisible.value = next
+  }
+}
+applyLayoutPrefs()
+// 登录态是异步恢复的（authStore 初始化 / 重新登录），偏好到位后再覆盖一次
+watch(() => userStore.preferences, applyLayoutPrefs, { deep: true })
+
+let layoutSaveTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 把当前顺序 + 调过的列宽 + 显隐差异写回 PB */
+function persistLayout() {
+  const full = ensureFullOrder()
+  const order = full.map(i => i.field)
+
+  // 列宽：稀疏存，只存与默认不同的
+  const widths: Record<string, number> = {}
+  for (const item of full) {
+    if (typeof item.width === 'number' && item.width !== DEFAULT_WIDTHS[item.field]) {
+      widths[item.field] = item.width
+    }
+  }
+
+  const reordered
+    = order.length !== DEFAULT_ORDER.length || order.some((k, i) => k !== DEFAULT_ORDER[i])
+
+  const visibilityDiff: Record<string, boolean> = {}
+  for (const f of PRODUCT_FIELDS) {
+    const v = colVisible.value[f.key]
+    if (typeof v === 'boolean' && v !== defaultVisible(f.key)) visibilityDiff[f.key] = v
+  }
+
+  userStore
+    .savePreferences({
+      columnWidths: widths,
+      // ⚠️ 顺序**只有真的重排过才写**：全量 65 项约 1.9KB，
+      // 会把 PB 的登录 cookie 撑过 4096 字节上限而被浏览器静默丢弃（详见 stores/user.ts）。
+      // 没重排就写空数组，读取侧回落字段清单的默认顺序。
+      columnLayout: reordered
+        ? full.map(({ field, width }) => (typeof width === 'number' ? { field, width } : { field }))
+        : [],
+      columnVisibility: visibilityDiff,
+    })
+    .catch(error => {
+      console.error('[setDatas] 保存列设置失败:', error)
+    })
+}
+
+/** 拖拽调宽 / 连点开关都会高频触发，防抖后落库一次 */
+function scheduleLayoutSave() {
+  clearTimeout(layoutSaveTimer)
+  layoutSaveTimer = setTimeout(persistLayout, 400)
+}
+
+/** 改某一列的宽度（不动它的位置） */
+function setColumnWidth(key: string, width: number) {
+  colLayout.value = ensureFullOrder().map(item =>
+    item.field === key ? { field: key, width } : item,
+  )
+}
+
+/** 去掉某列的宽度，回落默认 */
+function resetColumnWidth(key: string) {
+  colLayout.value = ensureFullOrder().map(item =>
+    item.field === key ? { field: key } : item,
+  )
+}
+
+// ==================== 列设置面板 ====================
+
+const settingsOpen = ref(false)
+
+/** 面板里正在拖的项 / 拖到哪一项上面（只用于显示落点提示） */
+const dragIndex = ref(-1)
+const overIndex = ref(-1)
+
+function onDragStart(index: number) {
+  dragIndex.value = index
+}
+
+function onDragOver(index: number) {
+  overIndex.value = index
+}
+
+function onDragEnd() {
+  dragIndex.value = -1
+  overIndex.value = -1
+}
+
+/**
+ * 拖动排序。
+ * 面板列的是**全部字段**（含隐藏的），且顺序与 ensureFullOrder() 完全一致，
+ * 所以这里的下标可以直接用 —— 不能拿 visibleFields 的下标去查，那会把隐藏列算错。
+ */
+function onDrop(index: number) {
+  const from = dragIndex.value
+  onDragEnd()
+  if (from < 0 || from === index) return
+  const layout = ensureFullOrder()
+  const [moved] = layout.splice(from, 1)
+  layout.splice(index, 0, moved)
+  colLayout.value = layout
+  scheduleLayoutSave()
+}
+
+/** 切换某一列的显隐 */
+function toggleVisible(key: string) {
+  colVisible.value = { ...colVisible.value, [key]: !isVisible(key) }
+  scheduleLayoutSave()
+}
+
+/** 恢复全部默认（顺序 + 宽度 + 显隐） */
+function resetColumnSettings() {
+  colLayout.value = []
+  colVisible.value = {}
+  scheduleLayoutSave()
+}
+
+function setFullScreen() {
+  fullSceen.value = !fullSceen.value
+  isEditorFullscreen.value = fullSceen.value
+}
+
+/** 表格高度：全屏时顶部系统栏（.app-titlebar 的 36px）不再占位，可用高度多 36px */
+const tableHeight = computed(() => (fullSceen.value ? 'calc(100vh - 162px)' : 'calc(100vh - 198px)'))
+
+// 离开页面必须还原：isEditorFullscreen 是跨组件共享的，
+// 不还原的话顶栏和侧边栏会一直藏着，整个应用都回不来。
+onBeforeUnmount(() => {
+  isEditorFullscreen.value = false
+})
+
+onMounted(() => document.body.classList.add('data-table-page'))
+onBeforeUnmount(() => document.body.classList.remove('data-table-page'))
+
+const headers = computed(() =>
+  visibleFields.value.map(({ title, key, sortable, fixed }) => {
+    const w = widthOf(key)
+    // 只有「用户调过宽度」的列才给 width，没调过的只给 minWidth（原因见上方注释）
+    const resized = colLayout.value.some(i => i.field === key && typeof i.width === 'number')
     return {
-      componentId: COMPONENT_ID,
-      page: page.value,
-      perPage: itemsPerPage.value,
-      ...(sortBy.value ? { sort: sortBy.value } : {}),
-      equals,
-      contains,
-      search: { columns: searchColumns, value: f.search },
-      range: {
-        column: biColumnOf(DATE_FILTER_FIELD) ?? 'first_sale_date',
-        from: from ? toISO(from) : undefined,
-        to: to ? toISO(to) : undefined,
-      },
-      ...extra,
+      title,
+      key,
+      sortable: sortable ?? false,
+      align: 'center' as const,
+      fixed,
+      ...(resized ? { width: w, minWidth: w } : { minWidth: w }),
     }
-  }
+  }),
+)
 
-  /**
-   * 上一次查询的参数签名。
-   *
-   * 作用：参数没变就**不重复发请求**。必须要有，因为进页面时表自身的首次
-   * `update:options` 会和 `onMounted` 撞车，日志里就是两条相隔 47ms 的相同请求。
-   * 顺带也让「翻回上一页」不再重查。
-   */
-  let lastQueryKey = ''
+// —— 拖拽 ——
 
-  /** 读当前页。库里存的是数字（供排序 / 比较），千分位只在显示时加 */
-  async function loadPage (force = false) {
-    const query = currentQuery()
-    const key = JSON.stringify(query)
-    if (!force && key === lastQueryKey) return
-    lastQueryKey = key
+/** 正在拖的列（null = 没在拖） */
+let resizing: { key: string, startX: number, startWidth: number } | null = null
 
-    loading.value = true
-    fetchError.value = ''
-    try {
-      const res = await fetchBiRows(query)
-      rows.value = res.rows.map(formatDatas)
-      totalItems.value = res.totalItems
-      fetchedAt.value = new Date().toLocaleString('zh-CN')
-    } catch (error) {
-      console.error('[setDatas] 从 PB 读取失败:', error)
-      rows.value = []
-      totalItems.value = 0
-      const raw = error instanceof Error ? error.message : String(error)
-      // 「连接被中断」这类错误原本只显示 Failed to fetch，看不出所以然。
-      // PB 的日志里对应的是 `write tcp ... wsasend: An established connection was aborted` ——
-      // 即服务端还在写响应时客户端把连接关了，通常是页面刷新 / HMR 打断了请求，重试即可。
-      fetchError.value = /aborted|Failed to fetch|NetworkError|network/i.test(raw)
-        ? `连接被中断（${raw}）—— 多为页面刷新/热更新打断，点右上角刷新重试`
-        : raw
-      // 失败时清掉签名，下次（比如点刷新）能原样重试
-      lastQueryKey = ''
-    } finally {
-      loading.value = false
-    }
-  }
+function resizeTargetOf(e: { target: EventTarget | null, offsetX: number }) {
+  const th = (e.target as HTMLElement | null)?.closest?.('th')
+  if (!th) return null
+  if (th.clientWidth - e.offsetX > RESIZE_ZONE) return null
+  // th 在表头行里的序号就是 headers 的序号（这个表没有多选框列 / 展开列）
+  const row = th.parentElement
+  const index = row ? Array.from(row.children).indexOf(th) : -1
+  const header = headers.value[index]
+  if (!header) return null
+  return { key: String(header.key), width: th.clientWidth }
+}
 
-  /**
-   * 筛选下拉的选项是否已经取过。
-   *
-   * 服务端做得很快（一条 DISTINCT，几十毫秒），但仍没必要每次翻页都取：
-   * 选项只在「进页面」和「上传成功后（数据变了，可能出现新取值）」时才需要刷新。
-   */
-  let facetsLoaded = false
+function endResize() {
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  if (!resizing) return
+  resizing = null
+  // 拖拽中每帧都写 PB 显然不行，松手后防抖落库一次
+  scheduleLayoutSave()
+}
 
-  /** 读筛选下拉的选项（服务端一条 DISTINCT，一个请求） */
-  async function loadFacets (force = false) {
-    if (facetsLoaded && !force) return
-    try {
-      facets.value = await fetchBiFacets(COMPONENT_ID, FACET_COLUMNS)
-      facetsLoaded = true
-    } catch (error) {
-      // 失败不置标志，下次进来会重试
-      console.error('[setDatas] 读取筛选选项失败:', error)
-    }
-  }
+function onPointerUp() {
+  endResize()
+}
 
-  /**
-   * 重新读一遍。
-   * @param force 忽略「参数没变」的短路，强制重查（刷新按钮 / 上传成功后用）
-   */
-  async function reload (force = false) {
-    await Promise.all([loadFacets(force), loadPage(force)])
-  }
-
-  /**
-   * 控件绑定的**草稿**值。
-   * 改控件不动表格，点「确认」才生效 —— 否则每敲一个字都要重算 7900 行 × 65 列。
-   * 每个 FilterKey 都要在这里有一条，漏了就会在 f[c.key] 处报索引类型错误。
-   */
-  const draft = reactive<{ search: string, dateRange: Date[] } & Record<FilterKey, string | null>>({
-    search: '',
-    dateRange: [],
-    type: null,
-    sale: null,
-    model: null,
-    manager: null,
-    department: null,
-    remain: null,
-    category1: null,
-    category2: null,
-    lamp: null,
-    group: null,
-    platform: null,
-    warehouse: null,
-  })
-
-  /** 快照草稿。dateRange 必须复制：直接展开会与 draft 共享同一个数组引用 */
-  function snapshotFilters () {
-    return { ...draft, dateRange: [...draft.dateRange] }
-  }
-
-  /** 已生效的筛选条件，点「确认」时快照 */
-  const applied = ref(snapshotFilters())
-
-  /** 当前生效的条件个数 */
-  const activeFilterCount = computed(() => {
-    const f = applied.value
-    let n = 0
-    if (f.search.trim()) n++
-    for (const c of SELECT_CONFIGS) if (f[c.key]) n++
-    if (f.dateRange.length > 0) n++
-    return n
-  })
-
-  /** 空表文案：有筛选条件时必须说清是「筛没的」，否则会被当成数据没入库 */
-  const noDataText = computed(() =>
-    activeFilterCount.value > 0 ? '没有符合筛选条件的数据，试试放宽条件' : '暂无数据',
+function onPointerMove(e: PointerEvent) {
+  if (!resizing) return
+  const next = Math.max(
+    MIN_COL_WIDTH,
+    Math.round(resizing.startWidth + (e.clientX - resizing.startX)),
   )
+  setColumnWidth(resizing.key, next)
+}
 
-  function toISO (value: Date | string): string {
-    if (typeof value === 'string') return value.slice(0, 10)
-    const m = String(value.getMonth() + 1).padStart(2, '0')
-    const day = String(value.getDate()).padStart(2, '0')
-    return `${value.getFullYear()}-${m}-${day}`
+function onPointerDown(e: PointerEvent) {
+  const hit = resizeTargetOf(e)
+  if (!hit) return
+  // 阻止默认行为，否则拖动时会把表头文字选中；触屏上还会把页面滚走
+  e.preventDefault()
+  resizing = { key: hit.key, startX: e.clientX, startWidth: hit.width }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp, { once: true })
+}
+
+/** 双击热区 = 该列恢复默认宽度 */
+function onDblClick(e: MouseEvent) {
+  const hit = resizeTargetOf(e)
+  if (!hit) return
+  resetColumnWidth(hit.key)
+  scheduleLayoutSave()
+}
+
+onBeforeUnmount(() => {
+  endResize()
+  clearTimeout(layoutSaveTimer)
+})
+// 排序改为**服务端**做（见 onTableOptions → sortBy → PB 的 sort 参数）：
+// 分页之后客户端排序只能排当前页，那是错的。
+// 也因此不再需要「收集数值列 + 自定义比较器」那套 —— PB 按真列的原生类型排，
+// 比原来把千分位字符串解析回数字再比更准。
+
+const SEARCH_FIELDS = ['SKU', 'SPU', '主MODEL', '产品名称']
+
+/** 日期范围按哪一列过滤。BI 返回 'YYYY-MM-DD' 字符串，可直接按字典序比大小 */
+const DATE_FILTER_FIELD = '最早开售日期-SKU'
+
+type FilterKey
+  = | 'type' | 'sale' | 'model' | 'manager' | 'department'
+  | 'remain' | 'category1' | 'category2' | 'lamp'
+  | 'group' | 'platform' | 'warehouse'
+
+const SELECT_CONFIGS: { key: FilterKey, field: string, mode: 'eq' | 'includes' }[] = [
+  { key: 'sale', field: '供应商', mode: 'eq' },
+  // { key: 'model', field: '主MODEL', mode: 'eq' },
+  { key: 'manager', field: '组长', mode: 'eq' },
+  { key: 'department', field: '部门', mode: 'eq' },
+  { key: 'remain', field: '是否属于呆滞库存', mode: 'eq' },
+  { key: 'category1', field: '一级品类', mode: 'eq' },
+  { key: 'category2', field: '二级品类', mode: 'eq' },
+  // { key: 'lamp', field: '是否属于灯具', mode: 'eq' },
+  { key: 'group', field: '组别', mode: 'eq' },
+  { key: 'platform', field: '平台', mode: 'eq' },
+  { key: 'warehouse', field: '仓位', mode: 'eq' },
+]
+
+/* ==================== 从 PocketBase 读（服务端分页 / 排序 / 筛选） ==================== */
+
+/** 参与筛选的列在 PB 里的 ASCII 列名（去重；映射不出来的列自动跳过） */
+const FACET_COLUMNS = [...new Set(
+  SELECT_CONFIGS.map(c => biColumnOf(c.field)).filter((c): c is string => !!c),
+)]
+
+/**
+ * 把当前**已生效**的筛选条件翻译成 PB 查询。
+ * 列名必须用 ASCII 列名（见 api.ts 的 biColumnOf），否则 PB 会报「字段不存在」。
+ */
+function currentQuery(extra: Partial<BiRowQuery> = {}): BiRowQuery {
+  const f = applied.value
+  const equals: Record<string, string> = {}
+  const contains: Record<string, string> = {}
+  for (const cfg of SELECT_CONFIGS) {
+    const v = f[cfg.key]
+    if (!v) continue
+    const col = biColumnOf(cfg.field)
+    if (!col) continue
+    if (cfg.mode === 'includes') contains[col] = v
+    else equals[col] = v
   }
-
-  // 筛选改为**服务端**做（见 currentQuery → PB 的 filter）：
-  // 客户端筛选只能筛当前这一页，分页之后是错的。
-  // matchesFilters / filteredRows 那套已删除。
-
-  /**
-   * 下拉选项：直接取服务端算好的去重值（列名要从中文 key 翻译成 PB 的 ASCII 列名）。
-   *
-   * 选项取自**全量**（不随当前筛选收窄）—— 否则选了「亚马逊」之后其它平台就从列表里消失，
-   * 用户没法改选别的。
-   */
-  function distinctValues (field: string): string[] {
-    const col = biColumnOf(field)
-    return col ? (facets.value[col] ?? []) : []
+  const searchColumns = SEARCH_FIELDS.map(biColumnOf).filter((c): c is string => !!c)
+  const from = f.dateRange[0]
+  const to = f.dateRange.at(-1)
+  return {
+    componentId: COMPONENT_ID,
+    page: page.value,
+    perPage: itemsPerPage.value,
+    ...(sortBy.value ? { sort: sortBy.value } : {}),
+    equals,
+    contains,
+    search: { columns: searchColumns, value: f.search },
+    range: {
+      column: biColumnOf(DATE_FILTER_FIELD) ?? 'first_sale_date',
+      from: from ? toISO(from) : undefined,
+      to: to ? toISO(to) : undefined,
+    },
+    ...extra,
   }
+}
 
-  const filterOptions = computed(() => {
-    const map = {} as Record<FilterKey, string[]>
-    for (const cfg of SELECT_CONFIGS) map[cfg.key] = distinctValues(cfg.field)
-    return map
-  })
+/**
+ * 上一次查询的参数签名。
+ *
+ * 作用：参数没变就**不重复发请求**。必须要有，因为进页面时表自身的首次
+ * `update:options` 会和 `onMounted` 撞车，日志里就是两条相隔 47ms 的相同请求。
+ * 顺带也让「翻回上一页」不再重查。
+ */
+let lastQueryKey = ''
 
-  /** 列 key → 界面标题。取自字段清单，标题不再抄第二份 */
-  const TITLE_BY_KEY: Record<string, string> = Object.fromEntries(
-    PRODUCT_FIELDS.map(f => [f.key, f.title]),
-  )
+/** 读当前页。库里存的是数字（供排序 / 比较），千分位只在显示时加 */
+async function loadPage(force = false) {
+  const query = currentQuery()
+  const key = JSON.stringify(query)
+  if (!force && key === lastQueryKey) return
+  lastQueryKey = key
 
-  const OPTION_LABELS: Record<string, Record<string, string>> = {
-    是否属于呆滞库存: { 0: '呆滞', 1: '未呆滞' },
+  loading.value = true
+  fetchError.value = ''
+  try {
+    const res = await fetchBiRows(query)
+    rows.value = res.rows.map(formatDatas)
+    totalItems.value = res.totalItems
+    fetchedAt.value = new Date().toLocaleString('zh-CN')
+  } catch (error) {
+    console.error('[setDatas] 从 PB 读取失败:', error)
+    rows.value = []
+    totalItems.value = 0
+    const raw = error instanceof Error ? error.message : String(error)
+    // 「连接被中断」这类错误原本只显示 Failed to fetch，看不出所以然。
+    // PB 的日志里对应的是 `write tcp ... wsasend: An established connection was aborted` ——
+    // 即服务端还在写响应时客户端把连接关了，通常是页面刷新 / HMR 打断了请求，重试即可。
+    fetchError.value = /aborted|Failed to fetch|NetworkError|network/i.test(raw)
+      ? `连接被中断（${raw}）—— 多为页面刷新/热更新打断，点右上角刷新重试`
+      : raw
+    // 失败时清掉签名，下次（比如点刷新）能原样重试
+    lastQueryKey = ''
+  } finally {
+    loading.value = false
   }
+}
 
-  const selectControls = computed(() =>
-    SELECT_CONFIGS.map(cfg => {
-      const labels = OPTION_LABELS[cfg.field]
-      const values = filterOptions.value[cfg.key]
-      return {
-        key: cfg.key,
-        label: TITLE_BY_KEY[cfg.field] ?? cfg.field,
-        items: labels ? values.map(v => ({ title: labels[v] ?? v, value: v })) : values,
-      }
-    }),
-  )
+/**
+ * 筛选下拉的选项是否已经取过。
+ *
+ * 服务端做得很快（一条 DISTINCT，几十毫秒），但仍没必要每次翻页都取：
+ * 选项只在「进页面」和「上传成功后（数据变了，可能出现新取值）」时才需要刷新。
+ */
+let facetsLoaded = false
 
-  /** 「确认」：草稿转生效条件，回到第 1 页并重新查（否则筛选后会停在越界的空白页） */
-  function applyFilters () {
-    applied.value = snapshotFilters()
-    page.value = 1
-    void loadPage()
+/** 读筛选下拉的选项（服务端一条 DISTINCT，一个请求） */
+async function loadFacets(force = false) {
+  if (facetsLoaded && !force) return
+  try {
+    facets.value = await fetchBiFacets(COMPONENT_ID, FACET_COLUMNS)
+    facetsLoaded = true
+  } catch (error) {
+    // 失败不置标志，下次进来会重试
+    console.error('[setDatas] 读取筛选选项失败:', error)
   }
+}
 
-  /** 「重置」：清空全部条件 */
-  function resetFilters () {
-    draft.search = ''
-    draft.dateRange = []
-    // 用 SELECT_CONFIGS 驱动，以后加筛选项不会再漏清
-    for (const cfg of SELECT_CONFIGS) draft[cfg.key] = null
-    applyFilters()
-  }
+/**
+ * 重新读一遍。
+ * @param force 忽略「参数没变」的短路，强制重查（刷新按钮 / 上传成功后用）
+ */
+async function reload(force = false) {
+  await Promise.all([loadFacets(force), loadPage(force)])
+}
 
-  /**
-   * v-data-table-server 的 options 变化（翻页 / 改每页条数 / 点表头排序）→ 重新查。
-   *
-   * 排序 key 是**列 key（中文）**，要翻译成 PB 的 ASCII 列名；
-   * 翻译不出来（该列在库里没有对应列）就当没排序，避免 PB 报「字段不存在」。
-   * 排序交给服务端：分页之后客户端排序只能排当前页，那是错的。
-   */
-  function onTableOptions (opts: {
-    page: number
-    itemsPerPage: number
-    sortBy: { key: string, order: 'asc' | 'desc' }[]
-  }) {
-    page.value = opts.page
-    itemsPerPage.value = opts.itemsPerPage
-    const first = opts.sortBy[0]
-    const col = first ? biColumnOf(String(first.key)) : undefined
-    sortBy.value = first && col ? `${first.order === 'desc' ? '-' : ''}${col}` : ''
-    void loadPage()
-  }
-  /** 上传结果反馈。用 snackbar 而不是顶部那条 fetchError 文案：后者是 text-error（红字），
-   *  成功也显示成红的会被当成失败。 */
-  const snackbar = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
-    show: false,
-    text: '',
-    color: 'success',
-  })
-  // color 允许 warning：无权限、去重提示这类"不是失败但要让人注意"的情况要用它。
-  // 与 home.vue / mine.vue 的那份签名保持一致，免得同一类提示在三个页面显示成不同颜色。
-  function showMsg (text: string, color: 'success' | 'error' | 'warning' = 'success') {
-    snackbar.value = { show: true, text, color }
-  }
+/**
+ * 控件绑定的**草稿**值。
+ * 改控件不动表格，点「确认」才生效 —— 否则每敲一个字都要重算 7900 行 × 65 列。
+ * 每个 FilterKey 都要在这里有一条，漏了就会在 f[c.key] 处报索引类型错误。
+ */
+const draft = reactive<{ search: string, dateRange: Date[] } & Record<FilterKey, string | null>>({
+  search: '',
+  dateRange: [],
+  type: null,
+  sale: null,
+  model: null,
+  manager: null,
+  department: null,
+  remain: null,
+  category1: null,
+  category2: null,
+  lamp: null,
+  group: null,
+  platform: null,
+  warehouse: null,
+})
 
-  /**
-   * 「上传到数据库」—— **唯一会改库的入口**。
-   *
-   * 语义是「替换」：把这份文件写进 bi_rows，并按唯一键删掉库里多出来的旧行（传 prune）。
-   * 服务端是**先写后删**而不是先删后写，所以中途失败时旧数据仍在，
-   * 不会出现「删完了没写进去」的空表。
-   *
-   * 写完重新从 PB 读一次，表格立刻反映新数据。
-   */
-  async function uploadDatas () {
-    // 双保险：按钮已按权限禁用，这里再拦一次 —— 权限不能只靠"按钮点不到"来保证
-    if (!canUpload.value) {
-      showMsg(NO_UPLOAD_TIP, 'warning')
-      return
+/** 快照草稿。dateRange 必须复制：直接展开会与 draft 共享同一个数组引用 */
+function snapshotFilters() {
+  return { ...draft, dateRange: [...draft.dateRange] }
+}
+
+/** 已生效的筛选条件，点「确认」时快照 */
+const applied = ref(snapshotFilters())
+
+/** 当前生效的条件个数 */
+const activeFilterCount = computed(() => {
+  const f = applied.value
+  let n = 0
+  if (f.search.trim()) n++
+  for (const c of SELECT_CONFIGS) if (f[c.key]) n++
+  if (f.dateRange.length > 0) n++
+  return n
+})
+
+/** 空表文案：有筛选条件时必须说清是「筛没的」，否则会被当成数据没入库 */
+const noDataText = computed(() =>
+  activeFilterCount.value > 0 ? '没有符合筛选条件的数据，试试放宽条件' : '暂无数据',
+)
+
+function toISO(value: Date | string): string {
+  if (typeof value === 'string') return value.slice(0, 10)
+  const m = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${value.getFullYear()}-${m}-${day}`
+}
+
+// 筛选改为**服务端**做（见 currentQuery → PB 的 filter）：
+// 客户端筛选只能筛当前这一页，分页之后是错的。
+// matchesFilters / filteredRows 那套已删除。
+
+/**
+ * 下拉选项：直接取服务端算好的去重值（列名要从中文 key 翻译成 PB 的 ASCII 列名）。
+ *
+ * 选项取自**全量**（不随当前筛选收窄）—— 否则选了「亚马逊」之后其它平台就从列表里消失，
+ * 用户没法改选别的。
+ */
+function distinctValues(field: string): string[] {
+  const col = biColumnOf(field)
+  return col ? (facets.value[col] ?? []) : []
+}
+
+const filterOptions = computed(() => {
+  const map = {} as Record<FilterKey, string[]>
+  for (const cfg of SELECT_CONFIGS) map[cfg.key] = distinctValues(cfg.field)
+  return map
+})
+
+/** 列 key → 界面标题。取自字段清单，标题不再抄第二份 */
+const TITLE_BY_KEY: Record<string, string> = Object.fromEntries(
+  PRODUCT_FIELDS.map(f => [f.key, f.title]),
+)
+
+const OPTION_LABELS: Record<string, Record<string, string>> = {
+  是否属于呆滞库存: { 0: '呆滞', 1: '未呆滞' },
+}
+
+const selectControls = computed(() =>
+  SELECT_CONFIGS.map(cfg => {
+    const labels = OPTION_LABELS[cfg.field]
+    const values = filterOptions.value[cfg.key]
+    return {
+      key: cfg.key,
+      label: TITLE_BY_KEY[cfg.field] ?? cfg.field,
+      items: labels ? values.map(v => ({ title: labels[v] ?? v, value: v })) : values,
     }
-    const pending = pendingRows.value
-    if (pending.length === 0) {
-      showMsg('没有可上传的数据，请先选择 Excel 文件', 'error')
-      return
-    }
-    uploading.value = true
-    try {
-      const res = await uploadBiRows(pending, { componentId: COMPONENT_ID, prune: true })
-      const parts = [`新增 ${res.created}`, `更新 ${res.updated}`, `未变 ${res.unchanged}`]
-      if (res.pruned) parts.push(`删除旧数据 ${res.pruned} 行`)
-      if (res.missingKey) parts.push(`跳过 ${res.missingKey} 行（无 SKU）`)
-      if (res.conflictRows) parts.push(`同键冲突丢弃 ${res.conflictRows} 行`)
-      const failed = res.failures.length
-      showMsg(
-        `已替换：${pending.length} 行 → 入库 ${res.unique} 行；${parts.join('，')}`
-          + (failed ? `；${failed} 条写入失败（详见控制台）` : ''),
-        failed ? 'error' : 'success',
-      )
-      // 明细只进控制台：冲突键 / 未入库列 / 失败原因，都是排查用的
-      if (res.conflicts.length > 0) console.warn('[setDatas] 唯一键冲突（同键不同内容）:', res.conflicts)
-      if (res.unmappedColumns.length > 0) console.warn('[setDatas] 未入库的列:', res.unmappedColumns)
-      if (failed) console.warn('[setDatas] 写入失败明细:', res.failures)
+  }),
+)
 
-      // 成功后清掉待传文件，并回到第 1 页重新读（数据变了，旧页码可能越界）
-      if (!failed) {
-        attachment.value = null
-        pendingRows.value = []
-        page.value = 1
-      }
-      // force：数据变了，参数签名可能没变，必须绕过短路；下拉选项也要重取（新值可能出现）
-      await reload(true)
-    } catch (error) {
-      console.error('[setDatas] 上传失败:', error)
-      showMsg(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      uploading.value = false
-    }
+/** 「确认」：草稿转生效条件，回到第 1 页并重新查（否则筛选后会停在越界的空白页） */
+function applyFilters() {
+  applied.value = snapshotFilters()
+  page.value = 1
+  void loadPage()
+}
+
+/** 「重置」：清空全部条件 */
+function resetFilters() {
+  draft.search = ''
+  draft.dateRange = []
+  // 用 SELECT_CONFIGS 驱动，以后加筛选项不会再漏清
+  for (const cfg of SELECT_CONFIGS) draft[cfg.key] = null
+  applyFilters()
+}
+
+/**
+ * v-data-table-server 的 options 变化（翻页 / 改每页条数 / 点表头排序）→ 重新查。
+ *
+ * 排序 key 是**列 key（中文）**，要翻译成 PB 的 ASCII 列名；
+ * 翻译不出来（该列在库里没有对应列）就当没排序，避免 PB 报「字段不存在」。
+ * 排序交给服务端：分页之后客户端排序只能排当前页，那是错的。
+ */
+function onTableOptions(opts: {
+  page: number
+  itemsPerPage: number
+  sortBy: { key: string, order: 'asc' | 'desc' }[]
+}) {
+  page.value = opts.page
+  itemsPerPage.value = opts.itemsPerPage
+  const first = opts.sortBy[0]
+  const col = first ? biColumnOf(String(first.key)) : undefined
+  sortBy.value = first && col ? `${first.order === 'desc' ? '-' : ''}${col}` : ''
+  void loadPage()
+}
+/** 上传结果反馈。用 snackbar 而不是顶部那条 fetchError 文案：后者是 text-error（红字），
+ *  成功也显示成红的会被当成失败。 */
+const snackbar = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
+  show: false,
+  text: '',
+  color: 'success',
+})
+// color 允许 warning：无权限、去重提示这类"不是失败但要让人注意"的情况要用它。
+// 与 home.vue / mine.vue 的那份签名保持一致，免得同一类提示在三个页面显示成不同颜色。
+function showMsg(text: string, color: 'success' | 'error' | 'warning' = 'success') {
+  snackbar.value = { show: true, text, color }
+}
+
+/**
+ * 「上传到数据库」—— **唯一会改库的入口**。
+ *
+ * 语义是「替换」：把这份文件写进 bi_rows，并按唯一键删掉库里多出来的旧行（传 prune）。
+ * 服务端是**先写后删**而不是先删后写，所以中途失败时旧数据仍在，
+ * 不会出现「删完了没写进去」的空表。
+ *
+ * 写完重新从 PB 读一次，表格立刻反映新数据。
+ */
+async function uploadDatas() {
+  // 双保险：按钮已按权限禁用，这里再拦一次 —— 权限不能只靠"按钮点不到"来保证
+  if (!canUpload.value) {
+    showMsg(NO_UPLOAD_TIP, 'warning')
+    return
   }
+  const pending = pendingRows.value
+  if (pending.length === 0) {
+    showMsg('没有可上传的数据，请先选择 Excel 文件', 'error')
+    return
+  }
+  uploading.value = true
+  try {
+    const res = await uploadBiRows(pending, { componentId: COMPONENT_ID, prune: true })
+    const parts = [`新增 ${res.created}`, `更新 ${res.updated}`, `未变 ${res.unchanged}`]
+    if (res.pruned) parts.push(`删除旧数据 ${res.pruned} 行`)
+    if (res.missingKey) parts.push(`跳过 ${res.missingKey} 行（无 SKU）`)
+    if (res.conflictRows) parts.push(`同键冲突丢弃 ${res.conflictRows} 行`)
+    const failed = res.failures.length
+    showMsg(
+      `已替换：${pending.length} 行 → 入库 ${res.unique} 行；${parts.join('，')}`
+      + (failed ? `；${failed} 条写入失败（详见控制台）` : ''),
+      failed ? 'error' : 'success',
+    )
+    // 明细只进控制台：冲突键 / 未入库列 / 失败原因，都是排查用的
+    if (res.conflicts.length > 0) console.warn('[setDatas] 唯一键冲突（同键不同内容）:', res.conflicts)
+    if (res.unmappedColumns.length > 0) console.warn('[setDatas] 未入库的列:', res.unmappedColumns)
+    if (failed) console.warn('[setDatas] 写入失败明细:', res.failures)
 
-  // 进页面就从 PB 读（数据源已经是库，不再直连 BI）。
-  // 表自身的首次 update:options 也会触发一次 loadPage，靠 lastQueryKey 短路掉重复。
-  onMounted(() => reload())
+    // 成功后清掉待传文件，并回到第 1 页重新读（数据变了，旧页码可能越界）
+    if (!failed) {
+      attachment.value = null
+      pendingRows.value = []
+      page.value = 1
+    }
+    // force：数据变了，参数签名可能没变，必须绕过短路；下拉选项也要重取（新值可能出现）
+    await reload(true)
+  } catch (error) {
+    console.error('[setDatas] 上传失败:', error)
+    showMsg(error instanceof Error ? error.message : String(error), 'error')
+  } finally {
+    uploading.value = false
+  }
+}
+
+// 进页面就从 PB 读（数据源已经是库，不再直连 BI）。
+// 表自身的首次 update:options 也会触发一次 loadPage，靠 lastQueryKey 短路掉重复。
+onMounted(() => reload())
 </script>
 <style scoped lang="scss">
 /* —— 列设置面板 —— */

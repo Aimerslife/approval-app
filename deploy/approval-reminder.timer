@@ -1,0 +1,34 @@
+# 超时提醒的定时器 —— 放到 /etc/systemd/system/approval-reminder.timer
+#
+# `systemctl enable --now approval-reminder.timer` 之后，每 10 分钟拉起一次
+# approval-reminder.service（见同目录那个 oneshot 单元）。
+#
+# ## 为什么是 10 分钟
+#
+# 要分清两个"间隔"（server/index.ts 末尾也写了同一件事）：
+#   · **tick**（本文件）= 跑批多久检查一次 —— 决定"到点后最迟晚多久发出"；
+#   · **推送间隔**（「提醒设置」页里配的 intervalHours）= 同一单两次提醒至少隔多久。
+#
+# 规则里的推送间隔最小档位是 1 小时，10 分钟的 tick 明显小于它，所以：
+#   到点后最迟 10 分钟发出，且同一单不会被重复催（去重由 intervalElapsed 按间隔判定）。
+#
+# ⚠️ 反过来说：**tick 必须明显小于推送间隔**。如果哪天把 tick 改成 60 分钟，
+#    而间隔配的是 1 小时，就会退化成"每小时碰运气检查一次"，实际推送时间开始漂。
+#
+# ## 时区
+#
+# 规则里的「不早于 09:00」是按**服务器时区**判断的（shouldPushNow 用本机时间），
+# 所以服务器时区必须是业务时区。approval-app.service 里显式设了 TZ=Asia/Shanghai，
+# 别在服务器上依赖"默认时区刚好对"。
+
+[Unit]
+Description=Trigger the approval reminder batch every 10 minutes
+
+[Timer]
+# 每小时的 0/10/20/30/40/50 分触发
+OnCalendar=*:0/10
+# 关机期间错过的那一次，开机后补跑（对本 timer 相当于"开机后立刻先跑一轮"）
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -15,7 +15,7 @@
     </div>
 
     <!-- ① 定时推送：开关 + 频率 + 时间 + 超时阈值 -->
-    <v-sheet class="overflow-hidden" rounded="xl">
+    <v-sheet class="overflow-hidden p-4" rounded="15">
       <div class="d-flex align-center ga-3 px-5 py-3">
         <v-avatar color="primary" size="30" variant="tonal">
           <v-icon size="16">mdi-alarm-check</v-icon>
@@ -26,14 +26,8 @@
           <div class="text-[12px] text-medium-emphasis">待办超过阈值后，按下面的频率与**推送间隔**重复提醒相关人</div>
         </div>
 
-        <v-switch
-          v-model="draft.enabled"
-          color="primary"
-          density="compact"
-          hide-details
-          size="small"
-          :label="draft.enabled ? '已开启' : '已关闭'"
-        />
+        <v-switch v-model="draft.enabled" color="primary" density="compact" hide-details size="small"
+          :label="draft.enabled ? '已开启' : '已关闭'" />
       </div>
 
       <v-divider />
@@ -57,16 +51,8 @@
         <div>
           <div class="field-title mb-2">推送时间</div>
 
-          <v-text-field
-            v-model="draft.sendTime"
-            density="compact"
-            hide-details="auto"
-            placeholder="09:00"
-            single-line
-            style="max-width: 110px"
-            type="time"
-            variant="outlined"
-          >
+          <v-text-field v-model="draft.sendTime" density="compact" hide-details="auto" placeholder="09:00" single-line
+            style="max-width: 110px" type="time" variant="outlined">
             <template #message>
               <!--
                 跑批是"到点之后最近的第一次执行"，不是"准时在 09:00 发" —— 说清楚，
@@ -81,31 +67,14 @@
         <div>
           <div class="field-title mb-2">超时阈值</div>
 
-          <v-text-field
-            v-model.number="draft.overdueHours"
-            density="compact"
-            hide-details
-            :min="1"
-            single-line
-            style="max-width: 90px"
-            suffix="小时"
-            type="number"
-            variant="outlined"
-          />
+          <v-text-field v-model.number="draft.overdueHours" density="compact" hide-details :min="1" single-line
+            style="max-width: 90px" suffix="小时" type="number" variant="outlined" />
         </div>
         <div>
           <div class="field-title mb-2">推送间隔</div>
 
-          <v-select
-            v-model="draft.intervalHours"
-            density="compact"
-            hide-details
-            :items="intervalOptions"
-            :menu-props="{ contentClass: 'filter-menu' }"
-            single-line
-            style="max-width: 170px"
-            variant="outlined"
-          />
+          <v-select v-model="draft.intervalHours" density="compact" hide-details :items="intervalOptions"
+            :menu-props="{ contentClass: 'filter-menu' }" single-line style="max-width: 170px" variant="outlined" />
         </div>
       </div>
 
@@ -117,7 +86,7 @@
     </v-sheet>
 
     <!-- ② 推送人员：默认当前审批人，也可固定发某几个人 -->
-    <v-sheet class="overflow-hidden mt-6" rounded="xl">
+    <v-sheet class="overflow-hidden mt-6 p-4" rounded="15">
       <div class="d-flex align-center ga-3 px-5 py-3">
         <v-avatar color="primary" size="30" variant="tonal">
           <v-icon size="16">mdi-account-multiple-outline</v-icon>
@@ -131,16 +100,11 @@
 
       <v-divider />
 
-      <div class="px-5 py-4">
+      <div class="px-5 py-4 ">
         <v-radio-group v-model="draft.receiverMode" class="receiver-radio" hide-details>
           <div class="d-flex flex-wrap ga-3">
-            <div
-              v-for="opt in RECEIVER_MODE_OPTIONS"
-              :key="opt.value"
-              class="mode-card"
-              :class="{ 'mode-card-active': draft.receiverMode === opt.value }"
-              @click="draft.receiverMode = opt.value"
-            >
+            <div v-for="opt in RECEIVER_MODE_OPTIONS" :key="opt.value" class="mode-card"
+              :class="{ 'mode-card-active': draft.receiverMode === opt.value }" @click="draft.receiverMode = opt.value">
               <v-radio :value="opt.value" color="primary" density="compact" hide-details :ripple="false">
                 <template #label>
                   <div class="d-flex flex-column ml-1">
@@ -161,13 +125,8 @@
 
           <v-spacer />
 
-          <v-btn
-            color="primary"
-            prepend-icon="mdi-plus"
-            size="small"
-            variant="tonal"
-            @click="openPicker('receivers')"
-          >添加人员</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-plus" size="small" variant="tonal"
+            @click="openPicker('receivers')">添加人员</v-btn>
         </div>
 
         <PushPeopleList :people="draft.receivers" empty="还没有指定人员（选「当前审批人」时这里可以留空）"
@@ -176,7 +135,7 @@
     </v-sheet>
 
     <!-- ③ 白名单：名单内的人不推送 -->
-    <v-sheet class="overflow-hidden mt-6" rounded="xl">
+    <v-sheet class="overflow-hidden mt-6 p-4" rounded="15">
       <div class="d-flex align-center ga-3 px-5 py-3">
         <v-avatar color="warning" size="30" variant="tonal">
           <v-icon size="16">mdi-shield-off-outline</v-icon>
@@ -199,13 +158,8 @@
             {{ draft.whitelist.length }} 人
           </v-chip>
           <v-spacer />
-          <v-btn
-            color="primary"
-            prepend-icon="mdi-plus"
-            size="small"
-            variant="tonal"
-            @click="openPicker('whitelist')"
-          >添加人员</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-plus" size="small" variant="tonal"
+            @click="openPicker('whitelist')">添加人员</v-btn>
         </div>
 
         <PushPeopleList :people="draft.whitelist" empty="白名单是空的：所有人都可能收到提醒"
@@ -213,8 +167,129 @@
       </div>
     </v-sheet>
 
+    <!--
+      ④ 执行日志：定时跑批到底跑没跑、发了什么。
+      只读，与上面三个板块（改规则）分开 —— 它不需要保存，也不参与「保存 / 恢复默认」的草稿。
+    -->
+    <v-sheet class="overflow-hidden mt-6 p-4" rounded="15">
+      <div class="d-flex align-center ga-3 px-5 py-3">
+        <v-avatar color="primary" size="30" variant="tonal">
+          <v-icon size="16">mdi-history</v-icon>
+        </v-avatar>
+
+        <div class="flex-grow-1">
+          <div class="text-[14px] font-semibold">执行日志</div>
+
+          <div class="text-[12px] text-medium-emphasis">
+            每轮跑了多久、扫描多少、该提醒多少、真发多少、被哪条规则挡掉
+            <template v-if="log">（最多留最近 {{ log.limits.entries }} 轮，每轮最多 {{ log.limits.tasks }} 条明细）</template>
+          </div>
+        </div>
+
+        <v-btn :loading="logLoading" prepend-icon="mdi-refresh" size="small" variant="text" @click="reloadLog">
+          刷新
+        </v-btn>
+
+        <v-btn color="primary" :loading="probing" prepend-icon="mdi-play-circle-outline" size="small" variant="tonal"
+          @click="runDryRun">立即试算</v-btn>
+      </div>
+
+      <v-divider />
+
+      <div class="px-5 py-4">
+        <!--
+          进程内定时的开关状态放在最前面：它比"日志是空的"更能说明问题 ——
+          没开定时时界面该说"靠外部 cron"，而不是让人以为跑批坏了。
+        -->
+        <div class="d-flex flex-wrap align-center ga-2 mb-3">
+          <v-chip :color="log?.timer.enabled ? 'success' : 'warning'" label size="small" variant="tonal">
+            {{ timerText }}
+          </v-chip>
+
+          <v-chip v-if="log?.timer.enabled" :color="log.timer.send ? 'warning' : undefined" label size="small"
+            variant="tonal">
+            {{ log.timer.send ? '会真发消息' : '只试算不发' }}
+          </v-chip>
+
+          <span v-if="log" class="text-[11.5px] text-medium-emphasis">
+            服务启动于 {{ formatDate(log.since) }}{{ lastRunText }}
+          </span>
+        </div>
+
+        <v-alert v-if="logError" density="compact" type="warning" variant="tonal">{{ logError }}</v-alert>
+
+        <div v-else-if="runs.length === 0" class="text-[12.5px] text-medium-emphasis">
+          本次服务启动后还没跑过。可点右上「立即试算」看一遍会提醒哪些单（不发消息），或等定时任务 / 外部 cron 触发。
+        </div>
+
+        <v-table v-else class="run-table" density="compact" hover>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>触发</th>
+              <th>模式</th>
+              <th>扫描 / 应提醒 / 已发</th>
+              <th>跳过 / 升级</th>
+              <th>结果</th>
+              <th class="text-right">耗时</th>
+              <th />
+            </tr>
+          </thead>
+
+          <tbody>
+            <template v-for="run in runs" :key="run.at">
+              <tr>
+                <td class="text-no-wrap">{{ formatDate(run.at) }}</td>
+                <td>
+                  <v-chip :color="TRIGGER_META[run.trigger].color" label size="x-small" variant="tonal">
+                    {{ TRIGGER_META[run.trigger].text }}
+                  </v-chip>
+                </td>
+                <td>{{ run.dryRun ? '试算' : '真发' }}</td>
+                <td class="text-no-wrap">{{ run.scanned }} / {{ run.due }} / {{ run.sent }}</td>
+                <td class="text-no-wrap">{{ run.skippedInterval }} / {{ run.escalated }}</td>
+                <td>
+                  <v-chip :color="statusOf(run).color" label size="x-small" :title="statusOf(run).hint"
+                    variant="tonal">{{ statusOf(run).text }}</v-chip>
+                </td>
+                <td class="text-no-wrap text-right">{{ run.ms }} ms</td>
+                <td class="text-right">
+                  <v-btn size="x-small" variant="text" @click="toggleRun(run.at)">
+                    {{ expandedRun === run.at ? '收起' : '明细' }}
+                  </v-btn>
+                </td>
+              </tr>
+
+              <!-- 明细：挡掉的原因 / 失败 / 这一轮该提醒哪些单 -->
+              <tr v-if="expandedRun === run.at">
+                <td class="run-detail" colspan="8">
+                  <div v-if="run.gate">被推送规则挡掉：{{ run.gate }}</div>
+                  <div v-if="run.fatal" class="text-error">跑批失败：{{ run.fatal }}</div>
+                  <template v-if="run.errors.length > 0">
+                    <div>失败 / 告警（{{ run.errors.length }} 条）：</div>
+                    <div v-for="(e, i) in run.errors" :key="i" class="pl-3">· {{ e }}</div>
+                  </template>
+                  <template v-if="run.tasks.length > 0">
+                    <div class="mt-1">这一轮该提醒的单（{{ run.tasks.length }} 条）：</div>
+                    <div v-for="t in run.tasks" :key="`${t.orderNo}-${t.level}`" class="pl-3">
+                      · {{ t.orderNo }} 第 {{ t.stepIndex }} 环 · 已等 {{ t.hours }} 工作日小时 ·
+                      {{ t.level === '5d' ? '升级' : '催办' }} · 待 {{t.waiting.map(m => m.name || m.email).join('、') || '—'
+                      }}
+                    </div>
+                  </template>
+                  <div v-if="!run.gate && !run.fatal && run.errors.length === 0 && run.tasks.length === 0">
+                    这一轮没有需要提醒的单，也没有错误。
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </v-table>
+      </div>
+    </v-sheet>
+
     <!-- 底部动作条：改的是一整份规则，所以只在保存时落库（与"点一下改一条"的角色设置不同） -->
-    <v-sheet class="d-flex align-center flex-wrap ga-3 mt-6 px-5 py-3" rounded="xl">
+    <v-sheet class="d-flex align-center flex-wrap ga-3 mt-6 p-4" rounded="15">
       <v-icon color="primary" size="16">mdi-information-outline</v-icon>
       <span class="text-[12px] text-medium-emphasis flex-grow-1">
         规则保存后立即生效；「恢复默认」= 回到 工作日 48 小时后开始、每 24 小时提醒当前审批人
@@ -310,280 +385,431 @@
 </template>
 
 <script lang="ts" setup>
-  import OrgTree from '@/components/OrgTree.vue'
-  import type { OrgSelectPayload, OrgSelectedUser } from '@/components/OrgTree.vue'
-  import PushPeopleList from '@/components/PushPeopleList.vue'
-  // 规则读写独立成模块（不放在 utils/collection：那边已经 import 了 notifySteps，会成环，见 pushRulesStore）
-  import {
-    loadPushRules,
-    PUSH_RULES_SETUP_ERROR,
-    resetPushRules,
-    savePushRules,
-  } from '@/utils/pushRulesStore'
-  import {
-    DEFAULT_PUSH_RULES,
-    normalizePerson,
-    personKeyOf,
-    PUSH_FREQUENCY_OPTIONS,
-    PUSH_INTERVAL_MAX,
-    PUSH_INTERVAL_MIN,
-    PUSH_INTERVAL_OPTIONS,
-    PUSH_TIME_RE,
-    pushCadenceText,
-    RECEIVER_MODE_OPTIONS,
-    type PushPerson,
-    type PushRules,
-  } from '@/utils/pushRules'
+// 执行日志（GET /api/reminders/log）与「立即试算」：打的是 app server（3002），不是 PocketBase
+import { fetchReminderLog, type ReminderLogPayload, type ReminderRunEntry, runReminderOnce } from '@/api/api'
+import OrgTree from '@/components/OrgTree.vue'
+import type { OrgSelectPayload, OrgSelectedUser } from '@/components/OrgTree.vue'
+import PushPeopleList from '@/components/PushPeopleList.vue'
+// 规则读写独立成模块（不放在 utils/collection：那边已经 import 了 notifySteps，会成环，见 pushRulesStore）
+import {
+  loadPushRules,
+  PUSH_RULES_SETUP_ERROR,
+  resetPushRules,
+  savePushRules,
+} from '@/utils/pushRulesStore'
+import {
+  DEFAULT_PUSH_RULES,
+  normalizePerson,
+  personKeyOf,
+  PUSH_FREQUENCY_OPTIONS,
+  PUSH_INTERVAL_MAX,
+  PUSH_INTERVAL_MIN,
+  PUSH_INTERVAL_OPTIONS,
+  PUSH_TIME_RE,
+  pushCadenceText,
+  RECEIVER_MODE_OPTIONS,
+  type PushPerson,
+  type PushRules,
+} from '@/utils/pushRules'
+// 时间展示（YYYY-MM-DD HH:mm:ss）：与首页表格同一套，别在本页另写一份
+import { formatDate } from '@/utils/utils'
+
+/*
+ * 页面只持有**一份草稿**：从库里读出来放进 draft，改的都是它，点「保存」才整份写回去。
+ * 为什么不改一处存一处（像角色设置那样）：这几项互相牵连（比如把口径从"当前审批人"
+ * 改成"仅指定人员"时要保证名单非空），半保存的状态没有任何业务意义。
+ */
+const draft = ref<PushRules>({ ...DEFAULT_PUSH_RULES })
+const custom = ref(false)
+const loading = ref(false)
+const saving = ref(false)
+const resetting = ref(false)
+const confirmReset = ref(false)
+
+const hint = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
+  show: false,
+  text: '',
+  color: 'success',
+})
+function showHint(text: string, color: 'success' | 'error' | 'warning' = 'warning') {
+  hint.value = { show: true, text, color }
+}
+
+const frequencyHint = computed(
+  () => PUSH_FREQUENCY_OPTIONS.find(o => o.value === draft.value.frequency)?.hint ?? '',
+)
+
+/**
+ * 推送间隔的下拉项：常用档位 + **当前值**（库里存着的那个数）。
+ *
+ * 为什么要并上当前值：库里可能存着一个不在档位里的数（比如以前手工填过 3），
+ * 不并进来的话 v-select 会显示空白 —— 用户看到的和库里存的不是一回事。
+ *
+ * 档位表本身就是升序的，所以**按位置插入**就够，不用再排序（也不动原数组）。
+ */
+const intervalOptions = computed(() => {
+  const current = Number(draft.value.intervalHours)
+  const values = PUSH_INTERVAL_OPTIONS.map(o => o.value)
+  if (Number.isFinite(current) && current >= PUSH_INTERVAL_MIN && !values.includes(current)) {
+    const at = values.findIndex(v => v > current)
+    values.splice(at < 0 ? values.length : at, 0, current)
+  }
+  return values.map(v => ({ value: v, title: `每 ${v} 小时` }))
+})
+
+/**
+ * 间隔的说明：档位里有就用它写的那句，否则给一句通用的（手工填的值没有文案）。
+ * 末尾统一带上"第二天重新起算" —— 那是用户最容易误解的一处（以为间隔会跨天累计、越推越晚）。
+ */
+const intervalHint = computed(() => {
+  const base = PUSH_INTERVAL_OPTIONS.find(o => o.value === Number(draft.value.intervalHours))?.hint
+    ?? '超时后按这个间隔重复提醒'
+  return `${base}；第二天从推送时间重新起算`
+})
+
+/** 「超时后会怎么推」的一句话（口径在 utils/pushRules，页面不自己拼字符串） */
+const cadenceText = computed(() => pushCadenceText(draft.value))
+
+/** 读规则：读失败回落默认规则（集合还没建时页面也要能打开），所以这里不需要 try/catch */
+async function reload() {
+  loading.value = true
+  try {
+    const res = await loadPushRules()
+    draft.value = res.rules
+    custom.value = res.custom
+  } finally {
+    loading.value = false
+  }
+}
+
+/* ==================== 选人（通讯录） ==================== */
+
+const pickerOpen = ref(false)
+const pickerTarget = ref<'receivers' | 'whitelist'>('receivers')
+const picked = ref<OrgSelectedUser | null>(null)
+
+function openPicker(target: 'receivers' | 'whitelist') {
+  pickerTarget.value = target
+  picked.value = null
+  pickerOpen.value = true
+}
+
+/** 通讯录里只能选**人**：点到部门时忽略并提示，否则会把部门名当成一个人存进白名单 */
+function onOrgSelect(payload: OrgSelectPayload | null) {
+  if (!payload) {
+    return
+  }
+  if (payload.type !== 'user') {
+    showHint('请在通讯录里点选成员，而不是部门')
+    return
+  }
+  picked.value = payload.user
+}
+
+function confirmPick() {
+  const user = picked.value
+  const person = normalizePerson(user)
+  if (!person) {
+    return
+  }
+  const target = pickerTarget.value
+  const list = draft.value[target]
+  if (list.some(p => personKeyOf(p) === personKeyOf(person))) {
+    showHint(`「${person.name}」已经在列表里了`)
+    return
+  }
+  list.push(person)
+  pickerOpen.value = false
 
   /*
-   * 页面只持有**一份草稿**：从库里读出来放进 draft，改的都是它，点「保存」才整份写回去。
-   * 为什么不改一处存一处（像角色设置那样）：这几项互相牵连（比如把口径从"当前审批人"
-   * 改成"仅指定人员"时要保证名单非空），半保存的状态没有任何业务意义。
+   * 加进白名单的人如果同时又在推送人员里，一定要说一声：白名单优先，
+   * 那两个地方都填了的话，用户会以为"填了就该收到"，结果一条都收不到。
    */
-  const draft = ref<PushRules>({ ...DEFAULT_PUSH_RULES })
-  const custom = ref(false)
-  const loading = ref(false)
-  const saving = ref(false)
-  const resetting = ref(false)
-  const confirmReset = ref(false)
-
-  const hint = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
-    show: false,
-    text: '',
-    color: 'success',
-  })
-  function showHint (text: string, color: 'success' | 'error' | 'warning' = 'warning') {
-    hint.value = { show: true, text, color }
+  if (target === 'whitelist' && draft.value.receivers.some(p => personKeyOf(p) === personKeyOf(person))) {
+    showHint(`「${person.name}」还在「推送人员」里，白名单优先 —— TA 不会收到推送`, 'warning')
+    return
   }
+  showHint(`已添加「${person.name}」`, 'success')
+}
 
-  const frequencyHint = computed(
-    () => PUSH_FREQUENCY_OPTIONS.find(o => o.value === draft.value.frequency)?.hint ?? '',
-  )
+function removePerson(target: 'receivers' | 'whitelist', person: PushPerson) {
+  draft.value[target] = draft.value[target].filter(p => personKeyOf(p) !== personKeyOf(person))
+}
 
-  /**
-   * 推送间隔的下拉项：常用档位 + **当前值**（库里存着的那个数）。
-   *
-   * 为什么要并上当前值：库里可能存着一个不在档位里的数（比如以前手工填过 3），
-   * 不并进来的话 v-select 会显示空白 —— 用户看到的和库里存的不是一回事。
-   *
-   * 档位表本身就是升序的，所以**按位置插入**就够，不用再排序（也不动原数组）。
+/* ==================== 保存 / 恢复默认 ==================== */
+
+/** 提交前的检查：能当场判定的都在这里拦住，别让跑批拿着不完整的规则空转 */
+function validate(): string | null {
+  if (!PUSH_TIME_RE.test(String(draft.value.sendTime ?? '').trim())) {
+    return '推送时间要填 09:00 这种格式'
+  }
+  const hours = Number(draft.value.overdueHours)
+  if (!Number.isFinite(hours) || hours <= 0) {
+    return '超时阈值要填大于 0 的工作日小时数'
+  }
+  /*
+   * 间隔必须在 1~168 小时之间：
+   *   0 / 负数会让"每次都发"（跑批每 tick 一条，比不推更糟）；
+   *   超过一周基本等于"不再重复"，那种需求应该直接关掉总开关，而不是填一个假数字。
+   * ⚠️ 跑批侧还会再收敛一次（normalizePushRules）—— 这里的拦截只是为了让用户当场看到问题。
    */
-  const intervalOptions = computed(() => {
-    const current = Number(draft.value.intervalHours)
-    const values = PUSH_INTERVAL_OPTIONS.map(o => o.value)
-    if (Number.isFinite(current) && current >= PUSH_INTERVAL_MIN && !values.includes(current)) {
-      const at = values.findIndex(v => v > current)
-      values.splice(at < 0 ? values.length : at, 0, current)
-    }
-    return values.map(v => ({ value: v, title: `每 ${v} 小时` }))
-  })
+  const interval = Number(draft.value.intervalHours)
+  if (!Number.isFinite(interval) || interval < PUSH_INTERVAL_MIN || interval > PUSH_INTERVAL_MAX) {
+    return `推送间隔要填 ${PUSH_INTERVAL_MIN}~${PUSH_INTERVAL_MAX} 之间的整数小时`
+  }
+  if (draft.value.receiverMode !== 'approver' && draft.value.receivers.length === 0) {
+    return '推送人员选了「指定人员」，但一个人都还没加'
+  }
+  return null
+}
 
-  /**
-   * 间隔的说明：档位里有就用它写的那句，否则给一句通用的（手工填的值没有文案）。
-   * 末尾统一带上"第二天重新起算" —— 那是用户最容易误解的一处（以为间隔会跨天累计、越推越晚）。
-   */
-  const intervalHint = computed(() => {
-    const base = PUSH_INTERVAL_OPTIONS.find(o => o.value === Number(draft.value.intervalHours))?.hint
-      ?? '超时后按这个间隔重复提醒'
-    return `${base}；第二天从推送时间重新起算`
-  })
+/** 写失败时的提示：环境没准备好（没跑迁移）就把原因原样说出来，其余换成通用文案 */
+function writeErrorHint(error: unknown): string {
+  return error instanceof Error && error.name === PUSH_RULES_SETUP_ERROR
+    ? error.message
+    : '保存失败，请稍后重试'
+}
 
-  /** 「超时后会怎么推」的一句话（口径在 utils/pushRules，页面不自己拼字符串） */
-  const cadenceText = computed(() => pushCadenceText(draft.value))
+async function save() {
+  const bad = validate()
+  if (bad) {
+    showHint(bad, 'warning')
+    return
+  }
+  saving.value = true
+  try {
+    await savePushRules(draft.value)
+    await reload()
+    showHint('推送规则已保存', 'success')
+  } catch (error) {
+    console.error('[alarmSetting] 保存推送规则失败:', error)
+    // 失败必须显式提示：静默失败的话，下次进页面又变回旧值，用户会以为界面在骗他
+    showHint(writeErrorHint(error), 'error')
+  } finally {
+    saving.value = false
+  }
+}
 
-  /** 读规则：读失败回落默认规则（集合还没建时页面也要能打开），所以这里不需要 try/catch */
-  async function reload () {
-    loading.value = true
-    try {
-      const res = await loadPushRules()
-      draft.value = res.rules
-      custom.value = res.custom
-    } finally {
-      loading.value = false
+async function runReset() {
+  resetting.value = true
+  try {
+    await resetPushRules()
+    await reload()
+    confirmReset.value = false
+    showHint('已恢复默认推送规则', 'success')
+  } catch (error) {
+    console.error('[alarmSetting] 恢复默认失败:', error)
+    showHint(writeErrorHint(error), 'error')
+  } finally {
+    resetting.value = false
+  }
+}
+
+/* ==================== 执行日志（只读） ==================== */
+
+const log = ref<ReminderLogPayload | null>(null)
+const logLoading = ref(false)
+const logError = ref('')
+const probing = ref(false)
+/** 哪一行的明细是展开的（同一时刻只展开一条，省得一屏全是明细） */
+const expandedRun = ref('')
+
+const runs = computed(() => log.value?.items ?? [])
+
+/** 进程内定时的情况：没开时说清"靠外部 cron"，别让人以为跑批坏了 */
+const timerText = computed(() => {
+  const t = log.value?.timer
+  if (!t) {
+    return '定时状态未知'
+  }
+  return t.enabled ? `进程内定时：每 ${t.intervalMin} 分钟` : '进程内定时未开启（靠外部 cron 打接口）'
+})
+
+/** 最近一轮是多久之前 —— "定时任务还活着没有"看这一眼最直观 */
+const lastRunText = computed(() => {
+  const at = runs.value[0]?.at
+  return at ? `；最近一轮 ${fromNow(at)}` : ''
+})
+
+const TRIGGER_META: Record<ReminderRunEntry['trigger'], { text: string, color?: string }> = {
+  timer: { text: '定时', color: 'success' },
+  http: { text: '外部 cron' },
+  manual: { text: '手动试算', color: 'info' },
+}
+
+/**
+ * 一轮的结果标签。判定顺序 = 严重程度：
+ * 跑批挂了 > 被规则整轮挡掉 > 有单条失败 > 试算 > 真发 > 间隔未到 > 没有超时单。
+ * 顺序不能乱 —— 比如"有错误"同时又"发了 3 条"时，得先让人看到"有错误"。
+ */
+function statusOf(run: ReminderRunEntry): { text: string, color?: string, hint?: string } {
+  if (run.fatal) {
+    return { text: '失败', color: 'error', hint: run.fatal }
+  }
+  if (run.gate) {
+    return { text: '被规则挡掉', color: 'warning', hint: run.gate }
+  }
+  if (run.errors.length > 0) {
+    return { text: `有 ${run.errors.length} 条错误`, color: 'warning', hint: run.errors.join('\n') }
+  }
+  if (run.dryRun) {
+    return {
+      text: run.due > 0 ? `试算：应提醒 ${run.due} 单` : '试算：无超时单',
+      hint: '试算只算不发，不会打扰任何人',
     }
   }
-
-  /* ==================== 选人（通讯录） ==================== */
-
-  const pickerOpen = ref(false)
-  const pickerTarget = ref<'receivers' | 'whitelist'>('receivers')
-  const picked = ref<OrgSelectedUser | null>(null)
-
-  function openPicker (target: 'receivers' | 'whitelist') {
-    pickerTarget.value = target
-    picked.value = null
-    pickerOpen.value = true
+  if (run.sent > 0) {
+    return { text: `已发 ${run.sent} 条`, color: 'success' }
   }
-
-  /** 通讯录里只能选**人**：点到部门时忽略并提示，否则会把部门名当成一个人存进白名单 */
-  function onOrgSelect (payload: OrgSelectPayload | null) {
-    if (!payload) {
-      return
-    }
-    if (payload.type !== 'user') {
-      showHint('请在通讯录里点选成员，而不是部门')
-      return
-    }
-    picked.value = payload.user
+  if (run.skippedInterval > 0) {
+    return { text: `间隔未到，跳过 ${run.skippedInterval} 单`, color: 'info' }
   }
+  return { text: '无超时单' }
+}
 
-  function confirmPick () {
-    const user = picked.value
-    const person = normalizePerson(user)
-    if (!person) {
-      return
-    }
-    const target = pickerTarget.value
-    const list = draft.value[target]
-    if (list.some(p => personKeyOf(p) === personKeyOf(person))) {
-      showHint(`「${person.name}」已经在列表里了`)
-      return
-    }
-    list.push(person)
-    pickerOpen.value = false
+function toggleRun(at: string) {
+  expandedRun.value = expandedRun.value === at ? '' : at
+}
 
-    /*
-     * 加进白名单的人如果同时又在推送人员里，一定要说一声：白名单优先，
-     * 那两个地方都填了的话，用户会以为"填了就该收到"，结果一条都收不到。
-     */
-    if (target === 'whitelist' && draft.value.receivers.some(p => personKeyOf(p) === personKeyOf(person))) {
-      showHint(`「${person.name}」还在「推送人员」里，白名单优先 —— TA 不会收到推送`, 'warning')
-      return
-    }
-    showHint(`已添加「${person.name}」`, 'success')
+/**
+ * "3 分钟前"。自己算而**不引 dayjs**：本文件没引它，而 relativeTime 插件是在
+ * utils/utils 里 extend 的 —— 依赖"顺手引了别的东西才生效"太脆。
+ */
+function fromNow(iso?: string): string {
+  const ms = iso ? Date.now() - Date.parse(iso) : Number.NaN
+  if (!Number.isFinite(ms) || ms < 0) {
+    return ''
   }
-
-  function removePerson (target: 'receivers' | 'whitelist', person: PushPerson) {
-    draft.value[target] = draft.value[target].filter(p => personKeyOf(p) !== personKeyOf(person))
+  const min = Math.floor(ms / 60_000)
+  if (min < 1) {
+    return '刚刚'
   }
-
-  /* ==================== 保存 / 恢复默认 ==================== */
-
-  /** 提交前的检查：能当场判定的都在这里拦住，别让跑批拿着不完整的规则空转 */
-  function validate (): string | null {
-    if (!PUSH_TIME_RE.test(String(draft.value.sendTime ?? '').trim())) {
-      return '推送时间要填 09:00 这种格式'
-    }
-    const hours = Number(draft.value.overdueHours)
-    if (!Number.isFinite(hours) || hours <= 0) {
-      return '超时阈值要填大于 0 的工作日小时数'
-    }
-    /*
-     * 间隔必须在 1~168 小时之间：
-     *   0 / 负数会让"每次都发"（跑批每 tick 一条，比不推更糟）；
-     *   超过一周基本等于"不再重复"，那种需求应该直接关掉总开关，而不是填一个假数字。
-     * ⚠️ 跑批侧还会再收敛一次（normalizePushRules）—— 这里的拦截只是为了让用户当场看到问题。
-     */
-    const interval = Number(draft.value.intervalHours)
-    if (!Number.isFinite(interval) || interval < PUSH_INTERVAL_MIN || interval > PUSH_INTERVAL_MAX) {
-      return `推送间隔要填 ${PUSH_INTERVAL_MIN}~${PUSH_INTERVAL_MAX} 之间的整数小时`
-    }
-    if (draft.value.receiverMode !== 'approver' && draft.value.receivers.length === 0) {
-      return '推送人员选了「指定人员」，但一个人都还没加'
-    }
-    return null
+  if (min < 60) {
+    return `${min} 分钟前`
   }
-
-  /** 写失败时的提示：环境没准备好（没跑迁移）就把原因原样说出来，其余换成通用文案 */
-  function writeErrorHint (error: unknown): string {
-    return error instanceof Error && error.name === PUSH_RULES_SETUP_ERROR
-      ? error.message
-      : '保存失败，请稍后重试'
+  const hr = Math.floor(min / 60)
+  if (hr < 24) {
+    return `${hr} 小时前`
   }
+  return `${Math.floor(hr / 24)} 天前`
+}
 
-  async function save () {
-    const bad = validate()
-    if (bad) {
-      showHint(bad, 'warning')
-      return
-    }
-    saving.value = true
-    try {
-      await savePushRules(draft.value)
-      await reload()
-      showHint('推送规则已保存', 'success')
-    } catch (error) {
-      console.error('[alarmSetting] 保存推送规则失败:', error)
-      // 失败必须显式提示：静默失败的话，下次进页面又变回旧值，用户会以为界面在骗他
-      showHint(writeErrorHint(error), 'error')
-    } finally {
-      saving.value = false
-    }
+async function reloadLog() {
+  logLoading.value = true
+  try {
+    log.value = await fetchReminderLog()
+    logError.value = ''
+  } catch (error) {
+    // 读不到必须说出来：这时列表是空的，不说的话看起来就像"跑批一次都没跑"
+    console.error('[alarmSetting] 读取执行日志失败:', error)
+    logError.value = error instanceof Error ? error.message : '读取执行日志失败'
+  } finally {
+    logLoading.value = false
   }
+}
 
-  async function runReset () {
-    resetting.value = true
-    try {
-      await resetPushRules()
-      await reload()
-      confirmReset.value = false
-      showHint('已恢复默认推送规则', 'success')
-    } catch (error) {
-      console.error('[alarmSetting] 恢复默认失败:', error)
-      showHint(writeErrorHint(error), 'error')
-    } finally {
-      resetting.value = false
-    }
+/**
+ * 「立即试算」：跑一遍 dry-run（**不发消息**），再把日志刷出来 —— 结果就落在下面的表里。
+ * 用 dry-run 而不是真发：这个按钮是给运维"确认口径对不对"用的，不该真打扰同事。
+ */
+async function runDryRun() {
+  probing.value = true
+  try {
+    const report = await runReminderOnce()
+    await reloadLog()
+    showHint(
+      report.due ? `试算完成：应提醒 ${report.due} 单（未发送）` : '试算完成：当前没有超时的单',
+      'success',
+    )
+  } catch (error) {
+    console.error('[alarmSetting] 试算失败:', error)
+    showHint(error instanceof Error ? error.message : '试算失败', 'error')
+  } finally {
+    probing.value = false
   }
+}
 
-  onMounted(() => {
-    void reload()
-  })
+onMounted(() => {
+  void reload()
+  // 日志与规则各读各的：日志读失败不该挡住规则编辑（反过来也一样）
+  void reloadLog()
+})
 </script>
 
 <style scoped>
+/* ===== 执行日志表格：字号压到 12px，与页面其它说明文字同一档 ===== */
+.run-table {
+  font-size: 12px;
+}
+
+.run-table :deep(th) {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* 展开的明细行：淡底色 + 小字号，与表体区分开（暗色主题单独给一档） */
+.run-detail {
+  background-color: rgba(28, 40, 72, 0.03);
+  font-size: 11.5px;
+  line-height: 1.8;
+}
+
+.v-theme--dark .run-detail {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
 .field-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
 }
 
 /* 三种推送口径：卡片式单选，点整块都能选中 */
 .mode-card {
-    display: flex;
-    align-items: center;
-    min-width: 200px;
-    padding: 6px 12px;
-    border: 1px solid rgba(28, 40, 72, 0.14);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: border-color 0.15s, background-color 0.15s;
+  display: flex;
+  align-items: center;
+  min-width: 200px;
+  padding: 6px 12px;
+  border: 1px solid rgba(28, 40, 72, 0.14);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
 }
 
 .mode-card:hover {
-    background-color: rgba(28, 40, 72, 0.04);
+  background-color: rgba(28, 40, 72, 0.04);
 }
 
 .mode-card-active {
-    border-color: rgb(var(--v-theme-primary));
-    background-color: color-mix(in srgb, rgb(var(--v-theme-primary)) 7%, transparent);
+  border-color: rgb(var(--v-theme-primary));
+  background-color: color-mix(in srgb, rgb(var(--v-theme-primary)) 7%, transparent);
 }
 
 .v-theme--dark .mode-card {
-    border-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .v-theme--dark .mode-card:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 .v-theme--dark .mode-card-active {
-    background-color: color-mix(in srgb, rgb(var(--v-theme-primary)) 18%, transparent);
+  background-color: color-mix(in srgb, rgb(var(--v-theme-primary)) 18%, transparent);
 }
 
 .mode-card :deep(.v-selection-control) {
-    --v-selection-control-size: 20px;
+  --v-selection-control-size: 20px;
 }
 
 /* 通讯录在弹窗里要有界高度（它自带的 max-height 是按整屏算的，弹窗里会高得离谱） */
 .approver-tree :deep(.org-sheet) {
-    max-height: 420px;
+  max-height: 420px;
 }
 
 .picked-box {
-    background-color: rgb(var(--v-theme-primary) / 7%);
-    border: 1px solid rgb(var(--v-theme-primary) / 22%);
-    border-radius: 10px;
+  background-color: rgb(var(--v-theme-primary) / 7%);
+  border: 1px solid rgb(var(--v-theme-primary) / 22%);
+  border-radius: 10px;
 }
 
 /* ===== 定时推送的四个条件框：尺寸与字号都比 Vuetify 的 compact 再小一档 =====
@@ -603,28 +829,28 @@
  * 要再调大小，按上面第 2 条的配平关系同时改「控件高 / 输入区高度」两个数。
  */
 .push-controls :deep(.v-field) {
-    --v-input-control-height: 36px;
-    --v-field-padding-top: 1px;
-    --v-field-padding-bottom: 1px;
-    font-size: 14px;
+  --v-input-control-height: 36px;
+  --v-field-padding-top: 1px;
+  --v-field-padding-bottom: 1px;
+  font-size: 14px;
 }
 
 .push-controls :deep(.v-field__input) {
-    min-height: 34px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-    font-size: 14px;
+  min-height: 34px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  font-size: 14px;
 }
 
 .push-controls :deep(.v-label) {
-    font-size: 14px;
+  font-size: 14px;
 }
 
 /* 后缀（工作日小时）与下拉箭头：显式垂直居中 —— 默认会靠上，字变小以后更明显 */
 .push-controls :deep(.v-field__append-inner),
 .push-controls :deep(.v-field__prepend-inner) {
-    align-self: center;
-    padding-top: 0;
+  align-self: center;
+  padding-top: 0;
 }
 
 /* ===== 「工作日小时」这类**后缀文字**：把 Vuetify 给它单独加的高度清掉 =====
@@ -642,14 +868,14 @@
  */
 .push-controls :deep(.v-text-field__suffix),
 .push-controls :deep(.v-text-field__prefix) {
-    min-height: 0;
-    padding-top: 7px;
-    padding-bottom: 0;
+  min-height: 0;
+  padding-top: 7px;
+  padding-bottom: 0;
 }
 
 /* 「推送频率」的按钮组也在这一行：一起收一档，否则它比旁边三个框明显高一截 */
 .push-controls :deep(.v-btn-toggle .v-btn) {
-    --v-btn-height: 32px;
-    font-size: 13px;
+  --v-btn-height: 32px;
+  font-size: 13px;
 }
 </style>

@@ -131,7 +131,8 @@ export async function getDepartmentUsers(openId: string): Promise<{ code: number
 
 /**
  * 用户的企业与部门信息（登录时落库到 users 集合）。
- * company_name 取的是顶层祖先部门名 —— 飞书没有公开的「查企业名」接口。
+ * company_name 是服务端写死的常量（server/config.ts 的 companyName）——
+ * 不从部门树推导，因为飞书顶层节点常常是「总经理」这类职位部门，推导出来的必然是职位名。
  */
 export interface UserOrgData {
   department_id: string
@@ -139,7 +140,7 @@ export interface UserOrgData {
   department_name: string
   /** 完整路径，形如「总公司 / 财务部 / 财务BP组」 */
   department_path: string
-  /** 企业名（顶层祖先部门名） */
+  /** 企业名（服务端写死的常量，不取自飞书组织架构） */
   company_name: string
 }
 
@@ -685,4 +686,92 @@ export async function getWord(): Promise<YiyanData | undefined> {
   } catch (e) {
     console.log(e)
   }
+}
+
+/* ==================== 定时跑批的执行日志（「提醒设置」页读它） ==================== */
+
+/*
+ * 这两条打的是 **app server**（`/api/reminders/*` 由 vite 代理到 3002），不是 PocketBase。
+ * 字段与 server/reminderLog.ts 的 ReminderRunEntry 一一对应 —— 那边是事实源，改口径从那边改。
+ *
+ * ⚠️ 与「清空 BI 数据」那几个接口不同，这里**不带 Authorization**：服务端这两个口子
+ *    本来就不校验身份（跑批要能被外部 cron 无凭据触发，见 server/index.ts）。
+ *    所以执行日志的可见范围 = 能打开「提醒设置」页的人。要收紧就在服务端加
+ *    assertSuperAdmin（server/pbAdmin.ts 已有现成的），前端再补上 token。
+ */
+
+/** 一轮跑批里"该提醒哪些单"的明细 */
+export interface ReminderRunTask {
+  orderNo: string
+  /** 第几环（从 1 开始，给人看的） */
+  stepIndex: number
+  /** 已等待的工作日小时数 */
+  hours: number
+  /** '48h' 日常催办 / '5d' 升级 */
+  level: string
+  /** 这一环还没办的人 */
+  waiting: Array<{ name?: string, email?: string }>
+}
+
+/** 一轮跑批的记录 */
+export interface ReminderRunEntry {
+  /** 这一轮开始的时刻（ISO） */
+  at: string
+  /** timer = 进程内定时 / http = 外部 cron / manual = 页面「立即试算」 */
+  trigger: 'timer' | 'http' | 'manual'
+  /** true = 只算不发（dry-run） */
+  dryRun: boolean
+  /** 耗时（毫秒） */
+  ms: number
+  scanned: number
+  due: number
+  sent: number
+  skippedInterval: number
+  noEmail: number
+  escalated: number
+  intervalHours: number
+  /** 被推送规则整轮挡掉的原因（有值 = 这轮连库都没查） */
+  gate?: string
+  /** 单条失败 / 告警 */
+  errors: string[]
+  /** 跑批本身抛异常（有它就说明这轮是失败的） */
+  fatal?: string
+  tasks: ReminderRunTask[]
+}
+
+/** GET /api/reminders/log 的返回体 */
+export interface ReminderLogPayload {
+  /** 本次服务启动时刻 —— 日志只覆盖它之后（进程内缓冲，**重启即清空**） */
+  since: string
+  /** 进程内定时的开关（enabled=false 表示靠外部 cron 打接口） */
+  timer: { enabled: boolean, intervalMin: number, send: boolean }
+  /** 服务端的留存上限（页面据此说明"最多留多少轮 / 每轮多少条明细"） */
+  limits: { entries: number, tasks: number }
+  /** 最近若干轮，**最新的在最前** */
+  items: ReminderRunEntry[]
+}
+
+/** 读执行日志（「提醒设置」页的「执行日志」板块） */
+export async function fetchReminderLog (): Promise<ReminderLogPayload> {
+  const res = await fetch('/api/reminders/log')
+  const payload = await res.json().catch(() => null)
+  if (!res.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.msg || `读取执行日志失败：HTTP ${res.status}`)
+  }
+  return payload.data as ReminderLogPayload
+}
+
+/**
+ * 立即跑一次（**dry-run**，只算不发）。
+ *
+ * 带 `src=manual`：这一轮在执行日志里会记为「页面手动试算」——
+ * 不带的话它和外部 cron 的记录长得一样，会被误读成"定时任务自己跑过"。
+ */
+export async function runReminderOnce (): Promise<Partial<ReminderRunEntry>> {
+  const res = await fetch('/api/reminders/run?src=manual', { method: 'POST' })
+  const payload = await res.json().catch(() => null)
+  if (!res.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.msg || `试算失败：HTTP ${res.status}`)
+  }
+  return payload as Partial<ReminderRunEntry>
 }

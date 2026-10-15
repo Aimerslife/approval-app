@@ -348,6 +348,105 @@ export async function getOrdersByRows (
 }
 
 /**
+ * 按任务状态筛数据行时，**允许拼进 filter 的值个数上限**。
+ *
+ * 为什么是一条硬线而不是"尽量多塞"：filter 是走 URL 的（PB 的 getList 用 GET），
+ * 值一多就会撞上 PB 或反向代理的请求行长度限制，而那时的表现是"一筛选就查不出数据"
+ * —— 排查的人会去怀疑筛选逻辑，不会想到是 URL 太长。所以宁可提前报错。
+ *
+ * 160 个值 ≈ 80 张单 ≈ 5.8KB 的 filter（实测每值约 37 字符），
+ * 离 nginx 默认的 8KB 请求行上限留了一点余量 —— 但不能更宽了。
+ */
+export const MAX_STATUS_FILTER_VALUES = 160
+
+/**
+ * 取审批单关联的**数据行键**（`relation` + `sync_key`）—— 「工作台」按任务状态筛数据行用。
+ *
+ * ## 为什么需要它
+ *
+ * 「任务状态」是页面按行关联 `approval_chain` **算出来**的（见 workStream 的 loadTaskStatus），
+ * `bi_rows` 里没有这一列。所以"按状态筛数据行"只能反过来查：先拿到相关单的关联键，
+ * 再拼成 bi_rows 的查询条件（见 utils/biQuery 的 matchAny / matchNone）。
+ *
+ * ## 口径必须与 getOrdersByRows 一致
+ *
+ * 同样返回 `relation` **和** `sync_key`（id 会因 bi_rows 重写而失效，所以要叠业务键）。
+ * 不一致的后果很难查：状态列写着「进行中」，按「进行中」筛却筛不出来。
+ *
+ * ## 一次取全量，不按状态分四次查
+ *
+ * 单据是几十~几百的量级（bi_rows 是 8000+），一次拉回来由调用方分组更省事，
+ * 也少一个"状态常量传错"的机会。
+ */
+export interface OrderRowKey {
+  /** approval_chain.status（0 进行中 / 1 已通过 / 2 已驳回，见 types/approval 的 APPROVAL_STATUS） */
+  status: number
+  /** 关联的 bi_rows 记录 id（可能已因 BI 重写而失效，所以只当兜底） */
+  relation: string
+  syncKey: string
+}
+
+/** 一次最多拉多少张单：超过就不再往下走（拉回来也拼不进 filter，见 MAX_STATUS_FILTER_VALUES） */
+const MAX_ORDER_KEYS_SCAN = 2000
+
+export async function getOrderRowKeys (): Promise<OrderRowKey[]> {
+  const items = await pb.collection('approval_chain').getFullList<{
+    status?: number
+    relation?: string
+    sync_key?: string
+  }>({
+    fields: 'status,relation,sync_key',
+    // 多的那些注定用不了，先按时间倒序取一批 —— 历史单排在后面，反正也塞不进 filter
+    sort: '-created',
+  })
+
+  if (items.length > MAX_ORDER_KEYS_SCAN) {
+    throw new Error(
+      `审批单超过 ${MAX_ORDER_KEYS_SCAN} 张，已无法可靠地按任务状态筛选（当前 ${items.length} 张）`,
+    )
+  }
+
+  return items.map(it => ({
+    status: Number(it.status ?? 0),
+    relation: String(it.relation ?? ''),
+    syncKey: String(it.sync_key ?? ''),
+  }))
+}
+
+/**
+ * 把一组单摊成 `{ column: values }` 形式的关联键条件。
+ *
+ * `column` 固定两个（`id` / `sync_key`）—— 调用方不用自己记列名，
+ * 但为什么是这两列写在 getOrderRowKeys 的说明里。
+ *
+ * 空值一律丢掉：`sync_key` 为空的单（历史数据）如果拼成 `sync_key = ""`，
+ * 会变成"匹配所有 sync_key 为空的行"—— 那是完全错误的一批数据。
+ */
+export function orderKeyGroups (
+  orders: OrderRowKey[],
+): Array<{ column: string, values: string[] }> {
+  const ids: string[] = []
+  const keys: string[] = []
+  for (const o of orders) {
+    if (o.relation) {
+      ids.push(o.relation)
+    }
+    if (o.syncKey) {
+      keys.push(o.syncKey)
+    }
+  }
+  return [
+    { column: 'id', values: [...new Set(ids)] },
+    { column: 'sync_key', values: [...new Set(keys)] },
+  ]
+}
+
+/** 一组关联键条件里总共有多少个值（用于和 MAX_STATUS_FILTER_VALUES 比） */
+export function orderKeyGroupCount (groups: Array<{ values: string[] }>): number {
+  return groups.reduce((n, g) => n + g.values.length, 0)
+}
+
+/**
  * 取审批流**模板**列表（app_chain）。
  *
  * ⚠️ 别和 getApprovalOrder 搞混：这里是**模板**（app_chain），那边是**审批单**（approval_chain）。

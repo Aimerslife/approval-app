@@ -1,0 +1,41 @@
+# 超时提醒跑批 —— 放到 /etc/systemd/system/approval-reminder.service
+#
+# 由 approval-reminder.timer 每 10 分钟拉起一次（本文件是 oneshot：跑完就退出）。
+# 部署时 `systemctl enable --now approval-reminder.timer` 即可，**不需要再手工配 crontab**。
+#
+# ## 为什么用 systemd timer 而不是 crontab
+#
+#   · 随代码一起部署（就在 deploy/ 里）—— 新机器 / 换机器不用再去手工编辑 crontab，
+#     少一个"部署漏做一步、而且不报错、只表现为提醒不发"的地方；
+#   · 日志进 journald：`journalctl -u approval-reminder` 就能看到每轮跑的结果，
+#     与 approval-app 用同一种方式排查，不用去翻 /var/log/cron；
+#   · 机器重启后自动恢复，且失败会被 systemd 标出来（`systemctl status`）。
+#
+# ## 为什么打 HTTP 而不是直接跑一个 node 脚本
+#
+#   发飞书消息要 lark client、要读「提醒设置」里的规则、还要往「执行日志」里记一轮 ——
+#   这些都在 app server 进程里。走 HTTP 就是复用那一份，不重复建客户端，
+#   也不会出现"脚本自己发了消息却不进执行日志"这种排查时最坑的情况。
+#
+# ## 为什么打 127.0.0.1:3002 而不是公网域名
+#
+#   本机直连 app server，**绕过 nginx** —— 少一个"nginx 漏配 /api/reminders 就静默失效"的点。
+
+[Unit]
+Description=Approval overdue reminder batch (one-shot, driven by approval-reminder.timer)
+# 服务必须先活着：本 unit 只是向它发一个 POST
+After=approval-app.service
+Wants=approval-app.service
+
+[Service]
+Type=oneshot
+User=approval
+# ?send=1 = 真发消息。**不发不发由规则决定**：总开关 / 工作日 / 不早于 sendTime
+# 这三道闸门在服务端判断（utils/pushRules 的 shouldPushNow），挡掉时会在执行日志里写明原因，
+# 所以这里"每 10 分钟都打一次"是安全的 —— 打到点之前的那几次什么都不发。
+ExecStart=/usr/bin/curl -fsS -X POST http://127.0.0.1:3002/api/reminders/run?send=1
+# -f 让 HTTP 4xx/5xx 变成非 0 退出码 → systemd 记成失败，journalctl 里一眼能看到
+# 卡住就别让它一直挂着（下一轮马上又来了）
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal

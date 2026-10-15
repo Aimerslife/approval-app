@@ -79,7 +79,7 @@
 
 .page-bg,
 .bg-app {
-  background-color: #eef1f6;
+  background-color: #F6F6F6;
 }
 
 .v-theme--dark .page-bg,
@@ -96,7 +96,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  // font-size: 15px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
   color: rgb(var(--v-theme-on-surface));

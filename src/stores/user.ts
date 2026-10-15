@@ -24,7 +24,7 @@ export interface UserInfo {
   preferences?: UserPreferences
   /** 飞书租户标识：登录时与 VITE_COMPANY_ID 比对，只有匹配才允许登录 */
   tenant_key?: string
-  /** 企业名（取用户所在部门的顶层祖先部门名，见 server 的 /api/feishu/user-org） */
+  /** 企业名（服务端写死的常量，见 server/config.ts 的 companyName；登录时落库） */
   company_name?: string
   /** 所在部门名 */
   department?: string

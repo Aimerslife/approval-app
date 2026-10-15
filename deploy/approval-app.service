@@ -17,6 +17,10 @@ User=approval
 Group=approval
 WorkingDirectory=/opt/approval
 EnvironmentFile=/etc/approval/env
+# 「提醒设置」里的「不早于 09:00」是按**本进程时区**判断的（utils/pushRules 的 shouldPushNow
+# 用 now.getHours()），所以这里必须显式钉住业务时区 —— 否则服务器默认 UTC 时，
+# 配的 09:00 会变成北京时间 17:00 才发，而且不报任何错，只是"提醒来得不是时候"。
+Environment=TZ=Asia/Shanghai
 # 生产跑 tsx（与开发同一个入口，不做编译）；better-sqlite3 是原生模块，
 # 所以安装依赖时**不能**用 --production（见 deploy/README.md）
 ExecStart=/usr/bin/env node --import tsx server/index.ts

@@ -83,6 +83,20 @@ export default defineConfig({
   },
   server: {
     port: 3001,
+    /*
+     * 允许哪些域名访问。不配的话 vite 只应答 localhost，其它 Host 一律 403 ——
+     * 报错就是「Blocked request. This host ("…") is not allowed.」。
+     *
+     * 这里是给**内网穿透演示**用的（cpolar 分配的 xxx.r17.cpolar.top）：
+     *   · 用前导点写法 `.cpolar.top` = 该域**及其所有子域**都放行 —— 隧道域名每次重启都会变，
+     *     写死某一个（如 556d2544.r17.cpolar.top）下次换个隧道又得改一次配置；
+     *   · 以后换别的穿透服务，按同样写法补一条即可（如 '.ngrok-free.app'、'.trycloudflare.com'）。
+     *
+     * ⚠️ 这条校验的本意是防 **DNS rebinding**：放行之后，**任何知道该域名的人**都能打开这个
+     *    开发服务 —— 连带下面三个代理前缀（/api、/files、/_/），也就是 PocketBase 的数据接口
+     *    与**后台登录页**都会一起暴露出去。演示完请把隧道关掉；开着的时候别用弱口令超管账号。
+     */
+    allowedHosts: ['.cpolar.top'],
     watch: {
       ignored: [
         '**/auth-state.json',
@@ -124,8 +138,22 @@ export default defineConfig({
         target: 'http://127.0.0.1:3002',
         changeOrigin: true,
       },
+      // 超时提醒（跑批 / 执行日志）也在 app server（3002）上 —— 同上面几条，
+      // **必须声明在下面的 '/api' 之前**，否则会被兜底规则转给 PocketBase(8091)：
+      // 「提醒设置」页读执行日志、点「立即试算」都会 404。
+      '/api/reminders': {
+        target: 'http://127.0.0.1:3002',
+        changeOrigin: true,
+      },
       '/api': 'http://127.0.0.1:8091',
       'files': 'http://127.0.0.1:8091',
+      /*
+       * PocketBase **自带后台界面**（顶栏「Collection」要跳的那个）。
+       * 它和 `/api`、`/files` 是**同一个 PB 实例**的不同路径（0.23+ 是 `/_/`），
+       * 所以这里只多开一条前缀，目标还是 8091。
+       * 不代理的话，`/_/` 会落到 vite 的 SPA 兜底上 —— 打开看到的是前端首页而不是后台。
+       */
+      '/_/': 'http://127.0.0.1:8091',
     },
   },
 })

@@ -46,6 +46,20 @@ export const config = {
   feishuAppId: str(process.env.FEISHU_APP_ID),
   feishuAppSecret: str(process.env.FEISHU_APP_SECRET),
 
+  /**
+   * 企业名：**写死**在这里，不从飞书组织架构推导。
+   *
+   * 为什么不用"沿 parent 部门上溯取顶层部门名"：飞书通讯录的顶层节点常常是
+   * **职位部门**而不是企业本身（很多租户把「总经理」建成顶层节点），于是
+   * 「用户设置」页的企业一栏会显示成"总经理"。飞书也没有公开的"查企业名"接口，
+   * 拿部门树套企业名本质上是猜。
+   *
+   * 本系统是**单租户**（登录时用 VITE_COMPANY_ID 限定飞书租户_key，见 utils/oauth.ts），
+   * 所以企业名就是一个常量，没必要从组织架构猜 —— 猜错了还是错，写死反而稳定。
+   * 换公司/换租户时改这一行（或用 FEISHU_COMPANY_NAME 覆盖）。
+   */
+  companyName: str(process.env.FEISHU_COMPANY_NAME, '广州延迅科技有限公司'),
+
   /** PB 超级管理员（特权写操作用；见文件头说明） */
   pbAdminEmail: str(process.env.PB_ADMIN_EMAIL),
   pbAdminPassword: str(process.env.PB_ADMIN_PASSWORD),

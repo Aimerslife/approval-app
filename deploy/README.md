@@ -57,9 +57,14 @@ sudo nano /etc/approval/env          # 照 deploy/env.example 填；必填只有
 
 # 4) 守护进程
 sudo cp deploy/approval-pb.service deploy/approval-app.service /etc/systemd/system/
+# 超时提醒：一个 oneshot 单元 + 一个每 10 分钟的定时器（见第四节）
+sudo cp deploy/approval-reminder.service deploy/approval-reminder.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now approval-pb approval-app
+# 定时器 enable 即生效，不需要再手工配 crontab
+sudo systemctl enable --now approval-reminder.timer
 journalctl -u approval-pb -u approval-app -n 50 --no-pager   # 看启动日志
+systemctl list-timers approval-reminder.timer                # 看下次触发时间
 ```
 
 启动日志里会有一行配置自检（**只报"配没配"，不打印任何密钥值**）：
@@ -99,16 +104,40 @@ server {
 
 > `/api/reminders/run?send=1` 会**真的发消息**，建议在 nginx 上限制来源或只从本机 cron 调用。
 
-## 四、定时催办（二选一）
+## 四、定时催办（超时提醒怎么被触发）
+
+**默认方式：systemd timer，部署即生效，无需人工操作。**
 
 ```bash
-# 推荐：系统 cron —— 进程重启不漏跑，多实例也不会重复发
-# 每 10 分钟打一次；具体要不要发由「提醒设置」里的推送时间/间隔决定
-*/10 * * * * curl -s -X POST 'http://127.0.0.1:3002/api/reminders/run?send=1' >/dev/null
+sudo systemctl enable --now approval-reminder.timer   # 首次部署时已在上面的第 4 步执行
+systemctl list-timers approval-reminder.timer         # 下次触发时间 / 上次触发时间
+journalctl -u approval-reminder -n 30 --no-pager      # 每轮跑了什么（成功=HTTP 200）
 ```
 
-或进程内定时（`.env` 里 `REMINDER_INTERVAL_MIN=30` + `REMINDER_SEND=1`）——
-但**tick 要明显小于推送间隔**，否则"每 4 小时催一次"会变成"每 tick 才检查一次"。
+`approval-reminder.timer` 每 10 分钟拉起一次 `approval-reminder.service`，
+后者向 `http://127.0.0.1:3002/api/reminders/run?send=1` 发一个 POST。
+**"打"是廉价的，"发不发"由「提醒设置」里的规则决定** —— 总开关、是否工作日、
+不早于 sendTime 这三道闸门都在服务端判断（`utils/pushRules` 的 `shouldPushNow`），
+被挡掉时会在「执行日志」里写明原因，所以每 10 分钟打一次是安全的。
+
+两种备选（**与 timer 二选一，别同时开**，否则白跑）：
+
+```bash
+# 备选 ①：crontab —— 不能改 systemd 时的退路
+*/10 * * * * curl -s -X POST 'http://127.0.0.1:3002/api/reminders/run?send=1' >/dev/null
+
+# 备选 ②：进程内定时 —— 在 /etc/approval/env 里设（改完 restart approval-app）
+REMINDER_INTERVAL_MIN=30   # 每 30 分钟跑一轮
+REMINDER_SEND=1            # 不设这行就永远只算不发（dry-run）
+```
+
+> **两个"间隔"别搞混**（源码说明见 `server/index.ts` 末尾）：
+> **tick**（timer / `REMINDER_INTERVAL_MIN`）= 多久检查一次，决定"到点后最迟晚多久发"；
+> **推送间隔**（页面里配的 `intervalHours`）= 同一单两次提醒至少隔多久。
+> **tick 必须明显小于推送间隔** —— 页面里最小档是 1 小时，所以 tick 取 10~30 分钟。
+>
+> 另外「不早于 09:00」是按**服务器时区**判断的，`approval-app.service` 里已经显式设了
+> `TZ=Asia/Shanghai`，别去依赖服务器默认时区。
 
 ## 五、更新一版
 
@@ -126,6 +155,14 @@ yarn install --production=false
 sudo systemctl restart approval-app
 ```
 
+> **只有改过 `deploy/*.service` / `*.timer` 时才需要**（改源码不用）：
+> ```bash
+> sudo cp deploy/approval-*.service deploy/approval-*.timer /etc/systemd/system/
+> sudo systemctl daemon-reload
+> sudo systemctl restart approval-app approval-reminder.timer
+> ```
+> `approval-reminder.timer` 是常驻的，改完必须 restart 才会重新读配置（`daemon-reload` 只重读 unit 定义）。
+>
 > **数据库不在更新包里**：`pb_data/` 只在首次部署或迁移数据时拷一次。
 > 以后每次改表结构都是新加一个 `pb_migrations/*.js`（PB 重启时自动执行）。
 
@@ -139,4 +176,6 @@ sudo systemctl restart approval-app
 - [ ] nginx 那 6 条 app server 路由在 `/api` 兜底**之前**
 - [ ] HTTPS 证书就绪（飞书网页授权回调通常要求 https）
 - [ ] 域名已备案（国内轻量云 + 域名访问必须）
-- [ ] cron 催办可用；跑一次 `POST /api/reminders/run`（不带 send）看 `tasks` 是否符合预期
+- [ ] `approval-reminder.timer` 已 enable（`systemctl list-timers` 能看到下次触发时间）
+- [ ] 超时提醒可用：先跑一次 `POST /api/reminders/run`（**不带** send）看 `tasks` 是否符合预期，
+      再等一轮 timer（或看 `journalctl -u approval-reminder`）确认真发的条数对得上

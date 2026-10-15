@@ -7,8 +7,8 @@
 
   <v-tabs-window v-model="tab">
     <v-tabs-window-item value="home">
-      <v-container class="py-2 px-4 h-[calc(100vh-80px)] bg-app" fluid>
-        <v-sheet class="overflow-hidden mt-3 p-4" rounded="15">
+      <v-container class="h-[calc(100vh-80px)] bg-app" fluid>
+        <v-sheet class="overflow-hidden mt-3 p-4 border border-[#E8E8E8]" rounded="15">
           <div class="block-title">审批信息</div>
 
           <!-- 当前审批单：同一个 `approver` 字段在在办单里是「当前审批人」（表格已不摆这一列，筛选仍可按它挑单） -->
@@ -52,15 +52,9 @@
     </v-tabs-window-item>
 
     <v-tabs-window-item value="history">
-      <v-container class="py-2 px-4 h-[calc(100vh-80px)] bg-app" fluid>
-        <v-sheet class="p-3 mt-3" rounded="8px">
+      <v-container class="h-[calc(100vh-80px)] bg-app" fluid>
+        <v-sheet class="p-3 mt-3 border border-[#E8E8E8]" rounded="15">
           <div class="block-title">历史审批单</div>
-
-          <!--
-            筛选条件：与 mine.vue 共用同一个组件（加条件只改 utils/approvalFilters 的定义表）。
-            这里的 `approver` 是**最后办理的人**（已办结的单那一列就是它），所以下拉改叫「最后办理人」；
-            与当前审批单页签共用同一份条件，那边同一个字段叫「当前审批人」。
-          -->
           <ApprovalFilterBar :dirty="filtersDirty" :filters="filters" :options="filterOptionsMap"
             :select-labels="{ approver: '最后办理人' }" @apply="applyFilters" @patch="patchFilters"
             @reset="resetFilters" />

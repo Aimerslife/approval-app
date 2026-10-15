@@ -9,9 +9,26 @@
           </v-icon-btn>
 
           <span
-            class="brand-name text-[14px] font-bold mt-0.5 cursor-pointer"
-            @click="routerGo('/')"
-          >🆈🅰🅽🆇🆄🅽</span>
+            class="brand-name text-[14px] font-bold cursor-pointer"
+            @click="routerGo('/')">🆈🅰🅽🆇🆄🅽</span>
+          <!--
+            「Collection」= 打开 PocketBase 自带后台（数据浏览 / 集合管理），**新标签页**打开：
+            后台是一整套独立界面，在本页里跳过去会把当前页面的状态丢掉。
+            地址与代理见 src/pocketbase.ts 的 PB_ADMIN_URL（后台与数据 API 是同一个 PB 实例）。
+
+            **只给超级管理员看**（canOpenPbAdmin 走 utils/permissions 的动作表，不在这里写角色比较）：
+            后台能直接浏览 / 修改所有集合（users、审批单、BI 镜像都在里面），
+            所以这个入口比"清空 BI 数据"还宽 —— 管理员及以上都能用的功能不该包含它。
+          -->
+          <div
+            v-if="canOpenPbAdmin"
+            class="brand-name font-bold cursor-pointer"
+            title="打开 PocketBase 后台（Collection）"
+            @click="openPbAdmin"
+          >
+            Collection
+            <v-icon color="#ffffff" size="18">mdi-database-outline</v-icon>
+          </div>
         </div>
 
         <v-spacer />
@@ -199,9 +216,11 @@
   import logo from '@/assets/logo_.png'
   import UserAvatar from '@/components/UserAvatar.vue'
   import { drawerSet, isEditorFullscreen } from '@/composables/useEditorFullscreen'
+  // PB 后台地址（顶栏「Collection」用）—— 与数据 API 同一个 PB 实例，只是路径不同，见该文件说明
+  import { PB_ADMIN_URL } from '@/pocketbase'
   import { usePendingStore } from '@/stores/pending'
   import { useUserStore } from '@/stores/user'
-  import { canAccess } from '@/utils/permissions'
+  import { canAccess, canAct } from '@/utils/permissions'
 
   // 主题跟随 createVuetify 的 light/dark 主题，并记住用户上次的选择
   const theme = useTheme()
@@ -245,6 +264,24 @@
   async function handleLogout () {
     await userStore.logout()
     router.push('/login')
+  }
+
+  /**
+   * 顶栏「Collection」入口**要不要显示**：只给超级管理员。
+   *
+   * 走 `utils/permissions` 的动作表（`pb:admin`），不在这里拿角色字符串比较 ——
+   * 那张表是权限的唯一事实源，改口径只改一处（侧边栏菜单的 canAccess 就是这么用的）。
+   */
+  const canOpenPbAdmin = computed(() => canAct(userStore.appRole, 'pb:admin'))
+
+  /**
+   * 顶栏「Collection」：新标签页打开 PocketBase 自带后台。
+   *
+   * `noopener`：后台是另一套应用，没必要让它拿到本页的 `window` 引用
+   * （不加的话新窗口能通过 `window.opener` 反操作本页，安全评审里这条是常规要求）。
+   */
+  function openPbAdmin () {
+    window.open(PB_ADMIN_URL, '_blank', 'noopener')
   }
   const route = useRoute()
   const isPublic = computed(() => route.meta.public === true)

@@ -17,7 +17,8 @@
     "type-check": "vue-tsc --build --force",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
-    "gen:flow": "tsx scripts/gen-inventory-flow.ts"
+    "gen:flow": "tsx scripts/gen-inventory-flow.ts",
+    "backfill:company": "tsx scripts/backfillCompanyName.ts"
   },
   "dependencies": {
     "@fontsource/roboto": "^5.2.10",

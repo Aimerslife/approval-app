@@ -8,6 +8,14 @@
         variant="outlined" hide-details flat single-line class="filter-select" :label="ctl.label" :items="ctl.items"
         :menu-props="{ contentClass: 'filter-menu' }">
       </v-select>
+      <!--
+        「任务状态」不能像上面那样由 SELECT_CONFIGS 驱动：选项是固定的四个（TASK_STATUS_FILTER_ITEMS），
+        而且它不是 bi_rows 的列 —— 条件是反查关联单拼出来的（见 taskStatusQuery）。
+      -->
+      <v-select v-model="draft.taskStatus" clearable density="compact" variant="outlined" hide-details flat
+        single-line class="filter-select" label="任务状态" :items="TASK_STATUS_FILTER_ITEMS"
+        :menu-props="{ contentClass: 'filter-menu' }">
+      </v-select>
       <div class="d-flex align-center ga-2">
         <v-btn color="surface-variant" variant="flat" size="small" @click="resetFilters">
           <span>重置</span>
@@ -17,8 +25,9 @@
       <div class="ms-auto d-flex align-center ga-2">
         <span v-if="selectedIds.length" class="text-[12px] text-medium-emphasis">已选 {{ selectedIds.length }} 条</span>
         <v-btn color="#0052D9" variant="flat" size="small" prepend-icon="mdi-flash" :loading="starting"
-          @click="startTasks">{{ starting ? batchText : '开启任务' }}</v-btn>
-      </div>   
+          @click="startTasks"><span class="mb-1">{{ starting ? batchText : '开启任务' }}</span></v-btn>
+        <v-icon-btn icon="mdi-bug" size="30" @click=""></v-icon-btn>
+      </div>
     </v-sheet>
     <div class="d-flex align-center justify-space-between">
       <div class="d-flex align-center ga-2">
@@ -59,11 +68,6 @@
         <v-chip :color="value == '是' ? 'primary' : 'success'" size="x-small">
           <span>{{ value == '是' ? '灯具' : '非灯具' }}</span></v-chip>
       </template>
-      <!--
-        任务状态：常驻**右侧固定列**（见 headers 里的 fixed: 'end'）。
-        插槽名必须与脚本里的 TASK_STATUS_KEY 一致 —— 它不是 bi_rows 的字段，
-        而是按行关联 approval_chain 算出来的，所以不进「列设置」面板。
-      -->
       <template v-slot:item.__task_status__="{ item }">
         <v-chip v-bind="taskChip(item.id)" size="x-small" class="text-[11px]">{{ taskOf(item.id).text }}</v-chip>
       </template>
@@ -119,7 +123,11 @@ import {
 import { useUserStore } from '@/stores/user'
 import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
 // 建审批单的 PB 调用都在 collection.ts 里，页面只负责接线
-import { createApprocalModel, getApprovalFirstByFilter, getOrdersByRow, getOrdersByRows } from '@/utils/collection'
+// 「任务状态」筛选要反查关联单（状态不在 bi_rows 里，见 taskStatusQuery）
+import {
+  createApprocalModel, getApprovalFirstByFilter, getOrderRowKeys, getOrdersByRow, getOrdersByRows,
+  MAX_STATUS_FILTER_VALUES, orderKeyGroupCount, orderKeyGroups,
+} from '@/utils/collection'
 // 建单时把行数据转成条件求值用的业务上下文（去千分位、摊平 data 快照）
 import { toFlowContext } from '@/utils/approvalFlow'
 /*
@@ -221,7 +229,13 @@ function exportColumns(): ExportColumn[] {
 async function exportToExcel() {
   loading.value = true
   try {
-    const all = await fetchAllBiRows(currentQuery({ page: undefined, perPage: undefined }))
+    // 导出同样遵守「任务状态」筛选 —— 否则"界面筛过的"和"导出出去的"两处口径不一致，
+    // 而且没人会去核对导出的行数和表格上的总数
+    const all = await fetchAllBiRows(currentQuery({
+      page: undefined,
+      perPage: undefined,
+      ...(await taskStatusQuery()),
+    }))
     /*
      * 任务状态是按行关联单据算出来的，页面上只算过**当前页**这一批；
      * 导出是全量，先把全量状态补齐 —— 否则导出里除当前页外都会显示成「未开启任务」（假数据）。
@@ -673,6 +687,8 @@ type FilterKey =
   | 'type' | 'sale' | 'model' | 'manager' | 'department'
   | 'category1' | 'category2' | 'lamp'
   | 'group' | 'platform' | 'warehouse'
+  // 「任务状态」不在 SELECT_CONFIGS 里 —— 它不是 bi_rows 的列，是关联单据算出来的（见 taskStatusQuery）
+  | 'taskStatus'
 
 const DEAD_COLUMN = biColumnOf('是否属于呆滞库存') ?? 'is_dead'
 const FIXED_EQUALS: Record<string, string> = { [DEAD_COLUMN]: '0' }
@@ -682,8 +698,6 @@ const SELECT_CONFIGS: { key: FilterKey; field: string; mode: 'eq' | 'includes' }
   // { key: 'model', field: '主MODEL', mode: 'eq' },
   { key: 'manager', field: '组长', mode: 'eq' },
   { key: 'department', field: '部门', mode: 'eq' },
-  { key: 'category1', field: '一级品类', mode: 'eq' },
-  { key: 'category2', field: '二级品类', mode: 'eq' },
   // { key: 'lamp', field: '是否属于灯具', mode: 'eq' },
   { key: 'group', field: '组别', mode: 'eq' },
   { key: 'platform', field: '平台', mode: 'eq' },
@@ -727,18 +741,104 @@ function currentQuery(extra: Partial<BiRowQuery> = {}): BiRowQuery {
   }
 }
 
+/**
+ * 「任务状态」下拉的选项。
+ *
+ * ⚠️ 必须与 statusView() 的文案**逐字一致**：不一致的话，用户在下拉里选一个界面上
+ *    根本看不到的词，只会以为筛选坏了。「全部」不放进选项 —— 清空（clearable）就是全部。
+ *
+ * 类型是 string[] 而不是字面量元组：draft.taskStatus 的类型来自 FilterKey 那套
+ * `Record<FilterKey, string | null>`，收窄成字面量会让 v-model 对不上。
+ * （代价是改了 statusView 的文案这里不会编译报错，所以上面那句提醒要当真。）
+ *
+ * 没收录 statusView 的「状态未知 / 状态 N」：那是库里出现未知 status 时的兜底文案，
+ * 属于脏数据 —— 那种行四个选项都筛不到（它有关联单，所以不算"未开启任务"），
+ * 总行数看起来会"少几个人"。真遇到了应该去修数据，不是在这儿加个筛选项把它藏起来。
+ */
+const TASK_STATUS_FILTER_ITEMS: string[] = ['未开启任务', '进行中', '已通过', '已驳回']
+
+/**
+ * 「任务状态」筛选 → 查询条件片段。
+ *
+ * ## 为什么要异步
+ *
+ * 任务状态存在 `approval_chain`，`bi_rows` 里**没有这一列** —— 它是页面上按行关联算出来的
+ * （见 loadTaskStatus）。所以只能先反查关联单拿到键，再拼成 bi_rows 的条件
+ * （utils/biQuery 的 matchAny / matchNone）。
+ *
+ * ## 口径必须与状态列一致
+ *
+ * 状态列取的是 `currentOrderOf()`：**进行中优先**，否则最新那张。于是：
+ *   · 进行中 = 关联到 status=0 的单；
+ *   · 已通过 = 关联到 status=1 的单，且**没有** status=0 的单；
+ *   · 已驳回 = 同理，基于 status=2；
+ *   · 未开启 = 与任何单都不关联。
+ * 少了"排除进行中"这一步，一行既有历史已通过的单、又有当前进行中的单时，
+ * 按「已通过」和「进行中」都能筛出来 —— 而列上只显示「进行中」。
+ */
+async function taskStatusQuery(): Promise<Partial<BiRowQuery>> {
+  const wanted = applied.value.taskStatus
+  if (!wanted) {
+    return {}
+  }
+
+  const orders = await getOrderRowKeys()
+  const pending = orders.filter(o => o.status === APPROVAL_STATUS.PENDING)
+
+  if (wanted === '未开启任务') {
+    const groups = orderKeyGroups(orders)
+    guardTaskFilterSize(groups, orders.length)
+    return { matchNone: groups }
+  }
+
+  const target = wanted === '进行中'
+    ? pending
+    : orders.filter(o => o.status === (wanted === '已通过' ? APPROVAL_STATUS.APPROVED : APPROVAL_STATUS.REJECTED))
+  const groups = orderKeyGroups(target)
+  guardTaskFilterSize(groups, target.length)
+
+  const extra: Partial<BiRowQuery> = { matchAny: groups }
+  if (wanted !== '进行中' && pending.length > 0) {
+    extra.matchNone = orderKeyGroups(pending)
+  }
+  return extra
+}
+
+/**
+ * 条件值太多就**明确报错**，不静默截断。
+ *
+ * 两种坏表现都指向同一件事：条件塞不下。截断是"筛出来的行莫名少了一批"；
+ * URL 太长是 PB 或反向代理直接拒掉，看起来像"一筛选就没数据"。两种都很难往这里想。
+ */
+function guardTaskFilterSize(groups: Array<{ column: string, values: string[] }>, orders: number) {
+  const n = orderKeyGroupCount(groups)
+  if (n > MAX_STATUS_FILTER_VALUES) {
+    throw new Error(
+      `「${applied.value.taskStatus}」涉及 ${orders} 张单，需要 ${n} 个查询条件`
+      + `（上限 ${MAX_STATUS_FILTER_VALUES}），无法按任务状态筛选。请先用其它条件收窄范围。`,
+    )
+  }
+}
+
 let lastQueryKey = ''
 
 /** 读当前页。库里存的是数字（供排序 / 比较），千分位只在显示时加 */
 async function loadPage(force = false) {
-  const query = currentQuery()
-  const key = JSON.stringify(query)
-  if (!force && key === lastQueryKey) return
-  lastQueryKey = key
-
   loading.value = true
   fetchError.value = ''
   try {
+    /*
+     * query 挪进 try 里构造：任务状态筛选要先反查关联单（异步），
+     * 反查失败 / 条件值超限时走下面同一个 catch —— 把原因显示在页头，而不是静默不筛
+     * （静默不筛最坑：用户以为筛过了，看到的其实是全部数据）。
+     */
+    const query = currentQuery(await taskStatusQuery())
+    const key = JSON.stringify(query)
+    if (!force && key === lastQueryKey) {
+      return
+    }
+    lastQueryKey = key
+
     const res = await fetchBiRows(query)
     rows.value = res.rows.map(formatDatas)
     // 原始行留一份（见 rawRows 的说明）：建单时快照进单据，供分支条件按业务数据选路
@@ -796,6 +896,8 @@ const draft = reactive<{ search: string; dateRange: Date[] } & Record<FilterKey,
   group: null,
   platform: null,
   warehouse: null,
+  // 不在 SELECT_CONFIGS 里：它的选项是固定四个（见 TASK_STATUS_FILTER_ITEMS），且要反查关联单
+  taskStatus: null,
 })
 
 /** 快照草稿。dateRange 必须复制：直接展开会与 draft 共享同一个数组引用 */
@@ -811,6 +913,9 @@ const activeFilterCount = computed(() => {
   let n = 0
   if (f.search.trim()) n++
   for (const c of SELECT_CONFIGS) if (f[c.key]) n++
+  // 任务状态不在 SELECT_CONFIGS 里（它不是 bi_rows 的列），单独算 —— 漏了它的话，
+  // 页头不会显示"已启用 N 项筛选"，用户会以为筛选没生效
+  if (f.taskStatus) n++
   if (f.dateRange.length) n++
   return n
 })
@@ -867,6 +972,8 @@ function resetFilters() {
   draft.dateRange = []
   // 用 SELECT_CONFIGS 驱动，以后加筛选项不会再漏清
   for (const cfg of SELECT_CONFIGS) draft[cfg.key] = null
+  // 任务状态不在 SELECT_CONFIGS 里，得单独清（漏了它就是"重置之后还筛着"）
+  draft.taskStatus = null
   applyFilters()
 }
 

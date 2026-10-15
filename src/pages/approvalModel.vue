@@ -1,6 +1,6 @@
 <template>
-  <v-container class="h-[calc(100vh-32px)] bg-app d-flex flex-column" fluid>
-    <v-sheet class="model-sheet d-flex flex-column border-dashed border-accent p-5" rounded>
+  <v-container class="h-[calc(100vh-32px)] bg-app d-flex" fluid>
+    <v-sheet class="model-sheet border border-[#E8E8E8] p-4" rounded="15">
       <div class="d-flex align-center justify-space-between">
         <div class="block-title">审批模板</div>
 
@@ -101,14 +101,11 @@
             <v-icon size="20">mdi-delete-outline</v-icon>
             <span class="text-[14px] ml-1">删除审批模板</span>
           </v-card-title>
-
           <v-card-text>
             <span class="text-[13px]">删除后将无法恢复，请确认是否删除？</span>
           </v-card-text>
-
           <template #actions>
             <v-btn class="ms-auto" color="error" size="small" text="取消" @click="dialog = false" />
-
             <v-btn color="primary" size="small" text="确认" variant="tonal" @click="removeNode" />
           </template>
         </v-card>
@@ -120,15 +117,12 @@
             <v-icon size="18">mdi-arrow-up-bold-box-outline</v-icon>
             <span class="text-[14px] ml-1">移入正本</span>
           </v-card-title>
-
           <v-card-text>
             <v-text-field v-model="streamName" clearable hint="名字里不能再带「- 副本」；改好确认，这张就出现在正本里"
               label="正本名称" persistent-hint :rules="[streamNameRule]" variant="outlined" />
           </v-card-text>
-
           <template #actions>
             <v-btn class="ms-auto" color="error" size="small" text="取消" @click="dialog = false" />
-
             <v-btn color="primary" size="small" text="移入正本" variant="tonal" @click="promoteNode" />
           </template>
         </v-card>

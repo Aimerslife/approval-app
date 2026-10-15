@@ -1,14 +1,19 @@
 <template>
   <v-container class="py-2 px-4 min-h-[100vh] bg-app d-flex flex-column" fluid>
     <!-- 上：当前待办（我名下的在办单） -->
-    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column" rounded="15">
+    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column border border-[#E8E8E8]" rounded="15">
       <div class="block-title">当前审批</div>
 
-      <div class="p-2 d-flex items-center justify-between gap-4 max-w-[600px]">
+      <!-- 容器最大宽度放宽到 720：多了一个「进度」下拉，600px 下三个控件会被压得很窄 -->
+      <div class="p-2 d-flex items-center justify-between gap-4 max-w-[720px]">
         <v-text-field v-model="search" density="compact" flat class="filter-input" hide-details label="搜索"
           prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" />
         <v-select v-model="modelFilter" class="filter-select" clearable density="compact" flat hide-details
           :items="modelOptions" label="主MODEL" :menu-props="{ contentClass: 'filter-menu' }" single-line
+          variant="outlined" />
+        <!-- 进度：正常 / 超时 / 滞留。候选是固定三档（见 progressOptions），不是从当前数据里派生的 -->
+        <v-select v-model="progressFilter" class="filter-select" clearable density="compact" flat hide-details
+          :items="progressOptions" label="进度" :menu-props="{ contentClass: 'filter-menu' }" single-line
           variant="outlined" />
         <v-btn color="#0052D9" size="small" variant="flat">确认</v-btn>
       </div>
@@ -53,7 +58,7 @@
     </v-sheet>
 
     <!-- 下：历史审批（我经手过的已办结单） -->
-    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column" rounded="15">
+    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column border border-[#E8E8E8]" rounded="15">
       <div class="d-flex align-center justify-space-between">
         <div class="block-title">历史审批</div>
         <span class="text-[12px] text-medium-emphasis">
@@ -218,6 +223,7 @@ import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/app
  * 纯函数模块 —— 阈值的来源（提醒设置里的超时阈值）由本页读出来后传进去，见下方 pushRules。
  */
 import {
+  APPROVAL_PROGRESS_LIST,
   APPROVAL_PROGRESS_META,
   approvalProgressDetail,
   type ApprovalProgress,
@@ -404,12 +410,24 @@ const search = ref('')
 
 const typeFilter = ref<string | null>(null)
 const modelFilter = ref<string | null>(null)
+/** 「进度」筛选：正常 / 超时 / 滞留（与表格里那一列同源，见 toRow 的 processText） */
+const progressFilter = ref<string | null>(null)
 
 const dateRange = ref<(Date | string)[]>([])
 
 const modelOptions = computed(() =>
   [...new Set(pendingRows.value.map(r => r.主MODEL))].filter(v => v && v !== '—'),
 )
+
+/**
+ * 「进度」的候选项：**固定三档**，不从当前数据里派生。
+ *
+ * 与旁边的主MODEL 刻意不同 —— 型号是开放集合（没出现过的型号选不到也合理），
+ * 而进度是三档枚举：哪怕此刻一张滞留的单都没有，「滞留」也该出现在下拉里，
+ * 否则用户会以为这个功能不存在，而不是"现在没有这种单"。
+ * 文案与顺序取自 APPROVAL_PROGRESS_LIST / _META（表格里的 chip 用的就是它们），别在本页重抄。
+ */
+const progressOptions = APPROVAL_PROGRESS_LIST.map(v => APPROVAL_PROGRESS_META[v].text)
 
 function isoDay(v: Date | string) {
   return typeof v === 'string' ? v.slice(0, 10) : `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
@@ -420,6 +438,8 @@ const filteredRows = computed(() =>
     // 与表格里显示的状态同源（见 toRow）：按**展示文案**比，避免"表格显示待定、筛选按通过"这种错位
     if (typeFilter.value && r.statusText !== typeFilter.value) return false
     if (modelFilter.value && r.主MODEL !== modelFilter.value) return false
+    // 与「进度」列显示的是同一个值（processText 来自 APPROVAL_PROGRESS_META），按文案比
+    if (progressFilter.value && r.processText !== progressFilter.value) return false
     if (dateRange.value.length > 0) {
       // created 是 '2026-09-17 02:05:41.542Z'，前 10 位就是日期，可直接按字典序比
       const day = r.created.slice(0, 10)
@@ -440,6 +460,7 @@ function resetFilters() {
   search.value = ''
   typeFilter.value = null
   modelFilter.value = null
+  progressFilter.value = null
   dateRange.value = []
 }
 
