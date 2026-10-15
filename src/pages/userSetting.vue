@@ -6,7 +6,7 @@
         <div class="block-title">基本设置</div>
         <v-chip color="primary" label size="small" variant="tonal">账号信息</v-chip>
       </div>
-      <v-sheet class="overflow-hidden mb-4 border border-[#E8E8E8] p-4" rounded="15">
+      <v-sheet class="overflow-hidden mb-4 card-border p-4" rounded="15">
         <template v-for="(item, i) in basicListItems" :key="item.key">
           <div class="setting-row">
             <div class="setting-row-label">{{ item.title }}</div>
@@ -51,7 +51,7 @@
         控制「呆滞库存数据」中字段列的展示，关闭后数据列表将隐藏对应列。
       </p>
 
-      <v-sheet  class="overflow-hidden mb-4 border border-[#E8E8E8] p-4" rounded="15">
+      <v-sheet  class="overflow-hidden mb-4 card-border p-4" rounded="15">
         <div class="d-flex align-center justify-space-between px-5 py-3">
           <div>
             <v-icon class="mr-2" color="primary" icon="mdi-table-eye" size="16" />
@@ -73,7 +73,7 @@
       </v-sheet>
       <div class="block-title mb-2">程序信息</div>
 
-      <v-sheet  class="overflow-hidden mb-8 border border-[#E8E8E8] p-4" rounded="15">
+      <v-sheet  class="overflow-hidden mb-8 card-border p-4" rounded="15">
         <template v-for="(item, i) in appListItems" :key="item.key">
           <div class="setting-row">
             <div class="setting-row-label">{{ item.title }}</div>

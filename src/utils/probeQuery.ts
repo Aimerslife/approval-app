@@ -1,6 +1,7 @@
 import type { ApprovalFlow } from '@/types/approval'
 import pb from '@/pocketbase.ts'
 import { collectProbes } from '@/utils/approvalProbe'
+import { probeQueryKey } from '@/utils/pbRequestKeys'
 import { bindFilterParams } from '@/utils/rotationQuery'
 
 /** 查询结果：节点 id → 是否存在记录 */
@@ -35,7 +36,16 @@ export async function resolveProbes (
       }
     }
     try {
-      const res = await pb.collection(collection).getList(1, 1, filter ? { filter } : {})
+      /*
+       * 按**集合**分请求键（见 utils/pbRequestKeys）：探针查哪张表是用户配的，
+       * 可能撞上页面正在读的同一张表；而这里是"查不出来就抛错"的，
+       * 被取消会被当成"查询失败"、让这一条建单失败 —— 必须与别的读隔开。
+       */
+      const res = await pb.collection(collection).getList(1, 1, {
+        // 没写 filter 时不带这个参数（与改造前一致），省得给 PB 传一个空条件
+        ...(filter ? { filter } : {}),
+        requestKey: probeQueryKey(collection),
+      })
       answers[id] = res.totalItems > 0
     } catch (e) {
       // PB 的 400 文案对配置者没有意义（通常是列名不对），把原始信息带上便于定位

@@ -28,6 +28,33 @@ export const pb = new PocketBase(PB_URL)
  */
 export const PB_ADMIN_URL = new URL('/_/', PB_URL).href
 
+/**
+ * ## ⚠️ 自动取消：同一集合的并发**清单**请求会互相顶掉
+ *
+ * SDK 默认开着自动取消：发新请求前会 `cancelRequest(key)`，把**同键的旧请求 abort 掉**，
+ * 键取 `requestKey || method + path`。坑在这个 path 是 `baseCrudPath`
+ * （`/api/collections/<集合>/records`）—— **不含查询串**，于是
+ * **同一集合的并发 GET 清单请求，不管 sort / filter 是否相同，都会互相取消**
+ * （`getFullList` / `getList` / `getFirstListItem` 都走这条路，源码里 `getList` 就是
+ * `send(this.baseCrudPath, options)`）。
+ *
+ * 后果很隐蔽：被 abort 的那条抛错，而项目里这些读函数**大都 catch 成空结果**
+ * （见 collection.ts 的 `return []`、approvalTypeStore 的"按没有覆盖处理"），
+ * 于是页面上只看到"数据莫名空白 / 覆盖莫名全变回默认"，**一条报错都没有**。
+ * 已经踩过一次：模板管理页同时读 `getApproval`（表格）与 `getApprovalOptions`（下拉），
+ * 从审批类型详情页返回时两个请求恰好并发，表格整块空白。
+ *
+ * 所以：**同一集合、不同用途的清单读取，各自显式给一个 `requestKey`**——
+ * 全部键登记在 `utils/pbRequestKeys`（那里也是新增读入口时该去看的第一处）。
+ *   · 不同用途 → 键不同 → 互不打扰；
+ *   · 同一用途重复发（连点两次）→ 键相同 → 旧的仍被取消，这正是 SDK 的初衷
+ *     （别让先发的旧结果盖住后发的新结果）；
+ *   · 同一用途但**参数不同**（按 scope 读、按集合读探针）→ 键里要带上那个参数，
+ *     否则两个不同条件会互相取消（见 pbRequestKeys 里的两个 `xxxKey()` 函数）。
+ *
+ * `getOne` 不用管：path 带 id，天然不撞。`getFirstListItem` 也不用管：
+ * SDK 自己按 filter 生成了键（源码里的 `one_by_filter_<path>_<filter>`）。
+ */
 pb.authStore.loadFromCookie(document.cookie)
 
 // 监听登录状态变化，同步写入cookie（页面刷新保持登录）

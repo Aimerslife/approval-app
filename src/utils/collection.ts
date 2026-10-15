@@ -5,6 +5,11 @@ import type { WarehouseRow } from '@/utils/warehouse'
 import pb from '@/pocketbase.ts'
 import { APPROVAL_STATUS, branchTerminalMapOf, rebuildChain } from '@/types/approval'
 import { sendArrivedNotifies } from '@/utils/notifySteps'
+/*
+ * 清单请求的请求键：本文件好几处读的是**同一张表的不同用途**，不给键的话会互相取消
+ * （默认键不含查询串，见 pbRequestKeys 的文件头）。
+ */
+import { PB_REQUEST_KEY } from '@/utils/pbRequestKeys'
 // 「引用模板」的引用关系收集（纯逻辑，只依赖类型）：删除模板前查"有没有别的模板引用了它"
 import { collectTemplateRefs } from '@/utils/templateRef'
 // 仓库清单的取舍口径是纯逻辑（PB 有记录就全用它，否则回落默认值），放在 utils/warehouse 里
@@ -89,19 +94,41 @@ export async function getDocumentByOne (id: string): Promise<DocumentModel | und
   }
 }
 
-// 保存文档
-export async function saveDocument (content: any, id: string, published: boolean) {
-  console.log('saveDocument', content, id, published)
+/**
+ * 保存文档正文（编辑器里按 Ctrl+S 走这里）。
+ *
+ * 只写 `content` 与 `published`：**不碰** `title` / `subscribe` / `status` ——
+ * 那几项归 `publishDocument` 管；保存顺手覆盖，会把刚发布时写进去的信息改掉。
+ *
+ * 返回口径同 `publishDocument` / `deleteApproval`（`{ code, message }`）：**失败要能让人看见**。
+ * ⚠️ 原来这里是 catch 后 `return error`，而调用方不看返回值 —— 于是「保存失败」照样弹「已保存!」。
+ * 新增的文档（还没落库、没有 id）与网络抖动都会走到这里，属于最典型的静默失败。
+ * 调用方（pages/editRule 的 onSave）**必须**按 `code` 决定提示文案。
+ */
+export async function saveDocument (content: string, id: string, published: boolean) {
+  if (!id) {
+    console.warn('[collection] saveDocument 缺少文档 id（多半是新增的文档还没落库）')
+    return {
+      code: -1,
+      message: '这篇文档还没有保存过（没有可写入的记录）：请从列表页进入已有文档再改',
+    }
+  }
   try {
-    const res = await pb.collection('document').update<DocumentModel>(id, {
+    await pb.collection('document').update<DocumentModel>(id, {
       content,
       published,
     })
-    console.log('保存文档成功', res)
-    return res
+    console.log('保存文档成功', id)
+    return {
+      code: 0,
+      message: '文档已保存',
+    }
   } catch (error) {
-    console.error('保存文档失败', error)
-    return error
+    console.error('[collection] 保存文档失败:', error)
+    return {
+      code: -1,
+      message: '保存失败，请稍后重试',
+    }
   }
 }
 
@@ -294,6 +321,7 @@ export async function getOrdersByRow (biRowId: string, syncKey?: string): Promis
   const res = await pb.collection('approval_chain').getList<ApprovalOrder>(1, 50, {
     filter: conds.join(' || '),
     sort: '-created',
+    requestKey: PB_REQUEST_KEY.orderByRow,
   })
   return res.items
 }
@@ -331,9 +359,11 @@ export async function getOrdersByRows (
   const out: ApprovalOrder[] = []
   const seen = new Set<string>()
   for (let i = 0; i < conds.length; i += ORDER_FILTER_CHUNK) {
+    // 分块之间是 await 串行的，共用同一个键不会自我取消（见 pbRequestKeys 的口径）
     const items = await pb.collection('approval_chain').getFullList<ApprovalOrder>({
       filter: conds.slice(i, i + ORDER_FILTER_CHUNK).join(' || '),
       sort: '-created',
+      requestKey: PB_REQUEST_KEY.orderByRows,
     })
     // 分块之间可能重复命中（同一张单的 relation 在块 1、sync_key 在块 2），按单 id 去重
     for (const item of items) {
@@ -398,6 +428,7 @@ export async function getOrderRowKeys (): Promise<OrderRowKey[]> {
     fields: 'status,relation,sync_key',
     // 多的那些注定用不了，先按时间倒序取一批 —— 历史单排在后面，反正也塞不进 filter
     sort: '-created',
+    requestKey: PB_REQUEST_KEY.orderRowKeys,
   })
 
   if (items.length > MAX_ORDER_KEYS_SCAN) {
@@ -461,7 +492,10 @@ export async function getApproval (): Promise<ApprovalModal[]> {
      * 只取前 10 条会让页签里的数字和内容都不对（副本可能一条都看不见）。
      * 模板是几十条的量级，与 getApprovalOptions 同一取舍 —— 那边也要选到任意一张。
      */
-    return await pb.collection('app_chain').getFullList<ApprovalModal>({ sort: 'name' })
+    return await pb.collection('app_chain').getFullList<ApprovalModal>({
+      sort: 'name',
+      requestKey: PB_REQUEST_KEY.chainList,
+    })
   } catch (error) {
     console.error(error)
     return []
@@ -505,7 +539,7 @@ export async function getApprovalFirstByFilter (filter: string): Promise<Approva
 // 获取一条产品数据
 export async function getProduct () {
   try {
-    const res = await pb.collection('bi_rows').getList(1, 1, {})
+    const res = await pb.collection('bi_rows').getList(1, 1, { requestKey: PB_REQUEST_KEY.biRowsOne })
     console.log('获取单条产品成功', res)
     return res
   } catch (error) {
@@ -548,7 +582,10 @@ export async function getTemplateFlowForRef (
  */
 export async function getApprovalOptions (): Promise<{ id: string, name: string, status: number }[]> {
   try {
-    const res = await pb.collection('app_chain').getFullList<ApprovalModal>({ sort: 'name' })
+    const res = await pb.collection('app_chain').getFullList<ApprovalModal>({
+      sort: 'name',
+      requestKey: PB_REQUEST_KEY.chainOptions,
+    })
     return res.map(r => ({ id: r.id, name: String(r.name ?? ''), status: Number(r.status ?? 0) }))
   } catch (error) {
     console.error('[collection] 读取模板列表失败:', error)
@@ -565,7 +602,9 @@ export async function getApprovalOptions (): Promise<{ id: string, name: string,
  */
 export async function findTemplatesUsing (templateId: string): Promise<{ id: string, name: string }[]> {
   try {
-    const list = await pb.collection('app_chain').getFullList<ApprovalModal>()
+    const list = await pb.collection('app_chain').getFullList<ApprovalModal>({
+      requestKey: PB_REQUEST_KEY.chainRefs,
+    })
     return list
       .filter(rec => rec.id !== templateId)
       .filter(rec => collectTemplateRefs(rec.chain?.flow).some(u => u.refTemplateId === templateId))
@@ -613,6 +652,7 @@ export async function getApprovalOrder (): Promise<ApprovalOrder[]> {
       filter: '',
       expand: 'relation',
       sort: '-created',
+      requestKey: PB_REQUEST_KEY.orderList,
     })
   } catch (error) {
     console.error(error)
@@ -836,7 +876,7 @@ export async function loadWarehouses (): Promise<WarehouseList> {
   try {
     overrides = await pb
       .collection(WAREHOUSE_COLLECTION)
-      .getFullList<WarehouseRecord>({ sort: 'parent,name' })
+      .getFullList<WarehouseRecord>({ sort: 'parent,name', requestKey: PB_REQUEST_KEY.warehousesList })
   } catch (error) {
     console.warn('[warehouse] 读取维护表失败（多半是还没应用迁移），先用默认清单:', error)
   }
@@ -859,7 +899,9 @@ export async function saveWarehouses (rows: readonly WarehouseRow[]): Promise<vo
   }
 
   try {
-    const existing = await pb.collection(WAREHOUSE_COLLECTION).getFullList<WarehouseRecord>()
+    const existing = await pb.collection(WAREHOUSE_COLLECTION).getFullList<WarehouseRecord>({
+      requestKey: PB_REQUEST_KEY.warehousesWrite,
+    })
 
     // 先删：改名/改分类 = 键变了，旧行必须先走，否则后面的 create 会撞唯一索引
     for (const rec of existing) {
@@ -882,7 +924,9 @@ export async function saveWarehouses (rows: readonly WarehouseRow[]): Promise<vo
 /** 恢复默认：清空维护表（之后 `loadWarehouses` 会回落到 utils/warehouse.ts 的默认清单） */
 export async function resetWarehouses (): Promise<void> {
   try {
-    const existing = await pb.collection(WAREHOUSE_COLLECTION).getFullList<WarehouseRecord>()
+    const existing = await pb.collection(WAREHOUSE_COLLECTION).getFullList<WarehouseRecord>({
+      requestKey: PB_REQUEST_KEY.warehousesReset,
+    })
     for (const rec of existing) {
       await pb.collection(WAREHOUSE_COLLECTION).delete(rec.id)
     }

@@ -6,7 +6,7 @@
       <div class="text-[12px] text-medium-emphasis mt-1">管理成员所属角色与权限</div>
     </div>
     <!-- 成员表格卡片 -->
-    <v-sheet class="overflow-hidden border border-[#E8E8E8] px-4 pt-4 pb-2" rounded="15">
+    <v-sheet class="overflow-hidden card-border px-4 pt-4 pb-2" rounded="15">
       <!-- 卡片工具栏：成员数 + 搜索 -->
       <div class="d-flex align-center flex-wrap ga-4 pr-5 pl-2 pt-1 pb-3">
         <div class="flex-grow-1">
@@ -18,7 +18,7 @@
       </div>
       <v-divider />
       <v-data-table v-model:page="page" density="compact" :headers="headers" hover :items="data" class="text-[12px]"
-        :items-per-page="itemsPerPage" :search="search" >
+        :items-per-page="itemsPerPage" :loading="memberLoading" :search="search" >
         <template #item.avatar_url="{ value }">
           <v-avatar color="primary" size="30" variant="tonal">
             <v-img v-if="value" :src="value" />
@@ -63,7 +63,7 @@
       <div class="font-bold block-title">人员配置</div>
       <div class="text-[12px] text-medium-emphasis mt-1">管理团队默认审批人员</div>
     </div>
-    <v-sheet class="overflow-hidden border border-[#E8E8E8] px-4 pt-4 pb-2" rounded="15">
+    <v-sheet class="overflow-hidden card-border px-4 pt-4 pb-2" rounded="15">
       <div class="d-flex align-center flex-wrap ga-4 pr-5 pl-2 pt-1 pb-3">
         <div class="flex-grow-1">
           <span class="text-[13px] text-medium-emphasis">
@@ -107,7 +107,7 @@
       <div class="font-bold block-title">仓库配置</div>
       <div class="text-[12px] text-medium-emphasis mt-1">管理仓库对应类型</div>
     </div>
-    <v-sheet class="overflow-hidden border border-[#E8E8E8] px-4 pt-4 pb-2" rounded="15">
+    <v-sheet class="overflow-hidden card-border px-4 pt-4 pb-2" rounded="15">
       <div class="d-flex align-center flex-wrap ga-4 pr-5 pl-2 pt-1 pb-3">
         <div class="flex-grow-1 d-flex align-center ga-2">
           <span class="text-[13px] text-medium-emphasis">
@@ -348,11 +348,23 @@ import {
 
 const currentRole = ref('')
 const data = ref<UserInfo[]>([])
+/**
+ * 成员列表取数中（挂到「成员」那张表的 `:loading` 上）。
+ *
+ * 与同文件的 approverLoading / warehouseLoading 同一套写法：进去置 true、复位放 finally，
+ * 请求失败时表格不会永久停在加载态（这张表原来连标志都没有，进来先是"空表一闪"）。
+ */
+const memberLoading = ref(false)
 async function getDatas() {
-  const res = await getUserInfo()
-  data.value = res
-  currentRole.value = res[0].role || 'normal'
-  console.log(res)
+  memberLoading.value = true
+  try {
+    const res = await getUserInfo()
+    data.value = res
+    currentRole.value = res[0].role || 'normal'
+    console.log(res)
+  } finally {
+    memberLoading.value = false
+  }
 }
 const model = ref(false)
 const search = ref('')

@@ -2,6 +2,8 @@ import pb from '@/pocketbase.ts'
 // 查询条件的纯逻辑（列名翻译 / 转义 / filter 拼装）在 @/utils/biQuery ——
 // 那里不依赖 PocketBase 客户端，能被 tsx 直接跑单测
 import { type BiRowQuery, buildBiFilter } from '@/utils/biQuery'
+// 请求键：bi_rows 有多个读入口（分页列表 / 导出全量 / 轮询取数 / 探针），不给键会互相取消
+import { PB_REQUEST_KEY } from '@/utils/pbRequestKeys'
 /**
  * 字段对齐规则（别名表 / 枚举值归一化 / 字段名清洗）已下沉到 `@/utils/productFields`，
  * 因为**上传 Excel 的表头匹配要用完全同一套规则** —— 写两份迟早不一致。
@@ -560,6 +562,7 @@ export async function fetchBiRows(
       filter: buildBiFilter(q),
       ...(q.sort ? { sort: q.sort } : {}),
       fields: 'id,data',
+      requestKey: PB_REQUEST_KEY.biRowsPage,
     },
   )
   return {
@@ -576,6 +579,7 @@ export async function fetchAllBiRows(q: BiRowQuery): Promise<Record<string, unkn
     ...(q.sort ? { sort: q.sort } : {}),
     fields: 'id,data',
     batch: 500,
+    requestKey: PB_REQUEST_KEY.biRowsAll,
   })
   return items.map(it => ({ ...it.data, id: it.id }))
 }

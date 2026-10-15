@@ -1,7 +1,7 @@
 <template>
   <v-container class="py-2 px-4 min-h-[100vh] bg-app d-flex flex-column" fluid>
     <!-- 上：当前待办（我名下的在办单） -->
-    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column border border-[#E8E8E8]" rounded="15">
+    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column card-border" rounded="15">
       <div class="block-title">当前审批</div>
 
       <!-- 容器最大宽度放宽到 720：多了一个「进度」下拉，600px 下三个控件会被压得很窄 -->
@@ -21,8 +21,8 @@
       <v-divider class="mt-3" />
 
       <v-data-table v-model:page="page" class="text-[12px] mine-table" border density="compact" fixed-header
-        :headers="headers" fixed-footer hover :items="filteredRows" :items-per-page="itemsPerPage" striped="odd"
-        @click:row="handleRowClick">
+        :headers="headers" fixed-footer hover :items="filteredRows" :items-per-page="itemsPerPage" :loading="loading"
+        striped="odd" @click:row="handleRowClick">
         <template #item.order_no="{ value }">
           <span class="font-bold">{{ value }}</span>
         </template>
@@ -58,7 +58,7 @@
     </v-sheet>
 
     <!-- 下：历史审批（我经手过的已办结单） -->
-    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column border border-[#E8E8E8]" rounded="15">
+    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column card-border" rounded="15">
       <div class="d-flex align-center justify-space-between">
         <div class="block-title">历史审批</div>
         <span class="text-[12px] text-medium-emphasis">
@@ -74,7 +74,7 @@
 
       <v-data-table v-model:page="historyPage" class="text-[12px] mine-table" border density="compact" fixed-footer
         fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
-        striped="odd" @click:row="handleRowClick">
+        :loading="loading" striped="odd" @click:row="handleRowClick">
         <template #item.order_no="{ value }">
           <span class="font-bold">{{ value }}</span>
         </template>
@@ -381,6 +381,15 @@ function toRow(order: ApprovalOrder): ApprovalRow {
 
 /** 全部审批单（approval_chain），已按创建时间倒序 —— 见 getApprovalOrder */
 const orders = ref<ApprovalOrder[]>([])
+
+/**
+ * 审批单取数中 —— 「当前」「历史」两张表**共用**这一个 flag。
+ *
+ * 两张表是同一份 orders 的两个切面（见下面的 pendingRows / historyRows），
+ * 一次请求同时喂它们；拆成两个 flag 只会一个先亮一个后亮，反而像出了两次错。
+ * 写法与仓库其余表格一致：进去置 true、复位放 finally（失败也不会卡在加载态）。
+ */
+const loading = ref(false)
 
 /**
  * 「超时阈值」的来源：与「提醒设置」的推送规则**同源** —— 那边把阈值改成 24，
@@ -710,8 +719,13 @@ function onDrawerSubmit(payload: NodeSubmitPayload) {
 }
 
 async function getDatas() {
-  orders.value = await getApprovalOrder()
-  console.log(orders.value)
+  loading.value = true
+  try {
+    orders.value = await getApprovalOrder()
+    console.log(orders.value)
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(() => {

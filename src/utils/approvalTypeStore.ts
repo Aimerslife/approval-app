@@ -11,6 +11,7 @@ import type { ApprovalTypeOverrideMap } from './approvalTypes'
  */
 import { pb } from '@/pocketbase'
 import { normalizeTypeOverride } from './approvalTypes'
+import { approvalTypesLoadKey, PB_REQUEST_KEY } from './pbRequestKeys'
 
 const APPROVAL_TYPES_COLLECTION = 'approval_types'
 
@@ -59,6 +60,17 @@ function scopeFieldsOf (scope: ApprovalTypeScope): { scope: string, template: st
     : { scope: 'template', template: scope.templateId }
 }
 
+/**
+ * 取数用的请求键 —— 统一登记在 `utils/pbRequestKeys`（机制见那里的文件头）。
+ * 这里只多一层映射：**按 scope 分键**（全局层与各张模板层会并发读 —— 页面同时要全局层与模板层、
+ * 切作用域时两轮重叠），共用键会让它们互相取消，而本文件的读失败一律回落成
+ * "这一层没有覆盖"，界面上的表现就是**配过的覆盖显示成默认**。
+ * 同一层重复读仍然会互相取消（旧结果不该盖住新结果）。
+ */
+function overrideLoadKeyOf (scope: ApprovalTypeScope): string {
+  return approvalTypesLoadKey(scope.kind === 'global' ? 'global' : scope.templateId)
+}
+
 /** 页面顶部那个「已自定义 / 默认」标记要的数据 */
 export interface ApprovalTypeLoadResult {
   /** code → 该层的覆盖（库里没有 = 空对象） */
@@ -77,7 +89,11 @@ export async function loadApprovalTypeOverrides (scope: ApprovalTypeScope): Prom
   try {
     const rows = await pb
       .collection(APPROVAL_TYPES_COLLECTION)
-      .getFullList<ApprovalTypeRow>({ sort: '-updated', filter: scopeFilterOf(scope) })
+      .getFullList<ApprovalTypeRow>({
+        sort: '-updated',
+        filter: scopeFilterOf(scope),
+        requestKey: overrideLoadKeyOf(scope),
+      })
     const overrides: ApprovalTypeOverrideMap = {}
     for (const row of rows) {
       const code = String(row.code ?? '').trim()
@@ -118,6 +134,7 @@ export async function saveApprovalTypeOverride (
     const rows = await coll.getFullList<ApprovalTypeRow>({
       sort: '-updated',
       filter: `${scopeFilterOf(scope)} && code = "${target}"`,
+      requestKey: PB_REQUEST_KEY.approvalTypesWrite,
     })
     const existing = rows[0]
     if (override === null) {
@@ -153,7 +170,10 @@ export async function saveApprovalTypeOverride (
 export async function resetApprovalTypeScope (scope: ApprovalTypeScope): Promise<void> {
   try {
     const coll = pb.collection(APPROVAL_TYPES_COLLECTION)
-    const rows = await coll.getFullList<ApprovalTypeRow>({ filter: scopeFilterOf(scope) })
+    const rows = await coll.getFullList<ApprovalTypeRow>({
+      filter: scopeFilterOf(scope),
+      requestKey: PB_REQUEST_KEY.approvalTypesReset,
+    })
     for (const row of rows) {
       await coll.delete(row.id)
     }

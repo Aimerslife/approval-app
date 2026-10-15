@@ -22,10 +22,6 @@ const router = createRouter({
       component: () => import('@/pages/home.vue'),
     },
     {
-      path: '/home/newStream',
-      component: () => import('@/pages/newStream.vue'),
-    },
-    {
       path: '/analyze',
       component: () => import('@/pages/analyze.vue'),
     },
@@ -51,16 +47,16 @@ const router = createRouter({
       path: '/createStream',
       component: () => import('@/pages/createStream.vue'),
     },
-    {
-      path: '/register',
-      component: () => import('@/pages/register.vue'),
-      meta: { public: true },
-    },
-    {
-      path: '/sendEmail',
-      component: () => import('@/pages/sendEmail.vue'),
-      meta: { public: true },
-    },
+    // {
+    //   path: '/register',
+    //   component: () => import('@/pages/register.vue'),
+    //   meta: { public: true },
+    // },
+    // {
+    //   path: '/sendEmail',
+    //   component: () => import('@/pages/sendEmail.vue'),
+    //   meta: { public: true },
+    // },
     {
       path: '/editRule',
       component: () => import('@/pages/editRule.vue'),

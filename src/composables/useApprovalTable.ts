@@ -1,6 +1,6 @@
 import type { ApprovalOrder } from '@/types/approval'
 import { APPROVAL_STATUS } from '@/types/approval'
-import { computed, markRaw, reactive, shallowRef } from 'vue'
+import { computed, markRaw, reactive, ref, shallowRef } from 'vue'
 import {
   applyApprovalFilters,
   applyFilterPatch,
@@ -102,10 +102,26 @@ export function useApprovalTable () {
   const pendingList = computed(() => applyApprovalFilters(pendingRows.value, applied))
   const historyList = computed(() => applyApprovalFilters(historyRows.value, applied))
 
+  /**
+   * 取数中 —— 两个页面（home / mine）的 v-data-table 都把它挂到 `:loading` 上。
+   *
+   * ⚠️ flag 放在这里而不是各页面：`load()` 是这份数据的**唯一入口**（两个页面共用），
+   * 跟着它走就不会出现"某个页面自己拉了一份、忘了置位"。
+   *
+   * 写法与仓库其余表格一致（workStream / setDatas 的 loadPage）：进去先置 true，
+   * 复位放 `finally` —— 请求抛错时也不会把表格永久卡在"加载中"。
+   */
+  const loading = ref(false)
+
   /** 取数：全量拉一次 —— 与 v-data-table 的客户端分页/排序配套，筛选在本地做 */
   async function load () {
-    // markRaw：连元素这层也不建代理（这些快照是只读的，不需要响应式）
-    orders.value = (await getApprovalOrder()).map(o => markRaw(o))
+    loading.value = true
+    try {
+      // markRaw：连元素这层也不建代理（这些快照是只读的，不需要响应式）
+      orders.value = (await getApprovalOrder()).map(o => markRaw(o))
+    } finally {
+      loading.value = false
+    }
   }
 
   /**
@@ -133,6 +149,7 @@ export function useApprovalTable () {
     pendingList,
     historyList,
     load,
+    loading,
     applyUpdated,
   }
 }

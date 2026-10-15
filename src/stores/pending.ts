@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import pb from '@/pocketbase.ts'
 import { APPROVAL_STATUS } from '@/types/approval'
+import { PB_REQUEST_KEY } from '@/utils/pbRequestKeys'
 
 /**
  * 周期刷新间隔。
@@ -47,8 +48,14 @@ export const usePendingStore = defineStore('pending', () => {
     if (loading.value) return
     loading.value = true
     try {
+      /*
+       * 显式请求键（见 utils/pbRequestKeys）：这个 COUNT 在**每次路由切换 / 每 60s / 窗口聚焦**
+       * 时都会发，和页面自己的单据列表（approval_chain:list）几乎必然并发 ——
+       * 不给键的话两者会互相取消，重的那个是"进列表页整屏空白"。
+       */
       const res = await pb.collection('approval_chain').getList(1, 1, {
         filter: `status = ${APPROVAL_STATUS.PENDING}`,
+        requestKey: PB_REQUEST_KEY.orderPendingCount,
       })
       count.value = res.totalItems
     } catch (error) {

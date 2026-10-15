@@ -585,6 +585,18 @@ export function isFieldVisible (field: TypeField, values: Record<string, unknown
   return field.showWhen.in.includes(cur)
 }
 
+/**
+ * **一组**字段的一行摘要 —— 列表里"选中这个结论要填什么"那一列。
+ *
+ * 空数组（= 不额外要东西）也要说清楚，**别留空白**：空白看上去像"没配好"，
+ * 而这其实是一个正常且常见的配置。审批类型列表页与详情页左列表**共用**这一句话
+ * （只此一处，别在两处各写一份：改文案时一定会漏一处）。
+ */
+export function typeFieldsSummaryOf (fields: readonly TypeField[] | undefined): string {
+  const list = fields ?? []
+  return list.length === 0 ? '不需要额外填写' : list.map(f => f.label || f.key).join('、')
+}
+
 /** 字段的一行摘要（列表里不展开也能看个大概：`接收数量 · 数字 · 必填`） */
 export function fieldSummaryOf (field: TypeField): string {
   const controlTitle = TYPE_CONTROL_OPTIONS.find(o => o.value === field.control)?.title ?? field.control

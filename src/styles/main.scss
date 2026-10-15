@@ -1,26 +1,11 @@
 @use './flow-theme';
+// Markdown 编辑器/预览的暗色适配（详见该文件说明）
+@use './markdown-theme';
 
 @layer vuetify-overrides {
   code, pre, .v-code {
     font-family: var(--v-font-mono);
   }
-
-  /* =========================================================
-     表格分隔线：更细、更浅（所有 v-data-table 统一）
-     =========================================================
-     Vuetify 的表格线默认是 `thin solid rgba(var(--v-border-color), var(--v-border-opacity))`
-     —— thin = 1px，浅色主题 --v-border-opacity 是 0.12（深色 0.25）。
-     数据页那种「border + fixed-header + striped」的大表行多线密，1px + 12% 偏重、抢视线，
-     这里统一收成 0.5px + 透明度减半（高 DPI 上是真正的发丝线，普通屏也会因色变淡而显细）。
-
-     两个坑：
-       · 竖线（gridlines 的 border-right）不动 —— 网格需要骨架，只把"下划线"变浅；
-       · 表头/表尾那两条线在 Vuetify 里是 **inset 阴影**（--fixed-header / --fixed-footer），
-         不是 border，必须单独改 box-shadow，否则它俩会比行线重一档。
-
-     放在 vuetify-overrides 层：它排在 vuetify-components 之后（见文件头），
-     不必靠选择器权重去压 Vuetify 的默认值。
-     ========================================================= */
   .v-table > .v-table__wrapper > table > tbody > tr > td,
   .v-table > .v-table__wrapper > table > tbody > tr > th,
   .v-table > .v-table__wrapper > table > thead > tr > td,
@@ -45,19 +30,10 @@
     font-size: 12px;
     // padding: 0;
     > .v-select {
-      /*
-       * 下拉箭头那侧也收一收：它默认靠 `--v-field-padding-after` 留白，而那个变量
-       * Vuetify 全库**没有定义**（那条 padding-inline-* 声明会被丢弃），所以这里直接给值。
-       */
+
       .v-field__append-inner {
         padding-inline: 4px;
       }
-
-      /*
-       * 框的内边距：Vuetify 默认 左右 16px / 上 8px / 下 4px（VField.css 里 .v-field 的
-       * --v-field-padding-*），配 12px 的字太松。左右收到 8px / 4px，上下归零。
-       * 框的高矮由 --v-input-control-height 决定 —— 想更矮就单独覆盖那一个变量。
-       */
       .v-field {
         // --v-field-padding-start: 8px;
         --v-field-padding-end: 4px;
@@ -91,10 +67,19 @@
   min-height: 100vh;
 }
 
+.card-border.card-border {
+  border: 1px solid #E8E8E8;
+}
+
+.v-theme--dark .card-border.card-border {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
 /* 区块标题：左侧品牌蓝竖条 + 主题文字色 */
 .block-title {
   display: flex;
   align-items: center;
+  margin-left: 2px;
   gap: 8px;
   font-size: 15px;
   font-weight: 600;

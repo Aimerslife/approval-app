@@ -5,6 +5,7 @@ import { toFlowContext } from '@/utils/approvalFlow'
 import { collectRotations, ROTATION_DEFAULTS, rotationLabel, type RotationGroup } from '@/utils/approvalRotation'
 import { BI_ROW_FIELD_BY_KEY } from '@/utils/biRowFields'
 import { sameTeamGroups } from '@/utils/groupApprovers'
+import { PB_REQUEST_KEY } from '@/utils/pbRequestKeys'
 import { bindFilterParams, translateFilterFields } from '@/utils/rotationQuery'
 
 /**
@@ -158,7 +159,10 @@ export async function resolveRotationGroups (
    *  · 行条件写成「主MODEL + 同团队」时可能几十到几百行 —— 过滤已下推到服务端，
    *    不要拿回数据再筛（那等于把整表拉回来）。
    */
-  const rows = await pb.collection('bi_rows').getFullList<Record<string, unknown>>({ filter })
+  const rows = await pb.collection('bi_rows').getFullList<Record<string, unknown>>({
+    filter,
+    requestKey: PB_REQUEST_KEY.biRowsRotation,
+  })
 
   /** 组名 → 该组各行（已转成条件求值上下文） */
   const byGroup = new Map<string, Array<Record<string, unknown>>>()

@@ -1,4 +1,5 @@
 import pb from '@/pocketbase.ts'
+import { PB_REQUEST_KEY } from '@/utils/pbRequestKeys'
 // 规则的类型 / 默认值 / 收敛与字段映射都在 pushRules（纯函数，服务端跑批读的是同一份）
 import {
   DEFAULT_PUSH_RULES,
@@ -56,7 +57,7 @@ export async function loadPushRules (): Promise<PushRulesLoadResult> {
   try {
     const list = await pb
       .collection(PUSH_RULES_COLLECTION)
-      .getList<PushRulesRecord>(1, 1, { sort: '-updated' })
+      .getList<PushRulesRecord>(1, 1, { sort: '-updated', requestKey: PB_REQUEST_KEY.pushRulesLoad })
     const rec = list.items[0]
     return rec ? { rules: pushRulesFromRecord(rec), custom: true } : { rules: DEFAULT_PUSH_RULES, custom: false }
   } catch (error) {
@@ -76,7 +77,7 @@ export async function savePushRules (rules: PushRules): Promise<void> {
   try {
     const existing = await pb
       .collection(PUSH_RULES_COLLECTION)
-      .getList<PushRulesRecord>(1, 1, { sort: '-updated' })
+      .getList<PushRulesRecord>(1, 1, { sort: '-updated', requestKey: PB_REQUEST_KEY.pushRulesWrite })
     const payload = pushRulesToRecord(rules)
     const rec = existing.items[0]
     if (rec) {
@@ -92,7 +93,9 @@ export async function savePushRules (rules: PushRules): Promise<void> {
 /** 恢复默认：删掉记录（之后 `loadPushRules` 会回落到 utils/pushRules 的默认规则） */
 export async function resetPushRules (): Promise<void> {
   try {
-    const existing = await pb.collection(PUSH_RULES_COLLECTION).getFullList<PushRulesRecord>()
+    const existing = await pb.collection(PUSH_RULES_COLLECTION).getFullList<PushRulesRecord>({
+      requestKey: PB_REQUEST_KEY.pushRulesReset,
+    })
     for (const rec of existing) {
       await pb.collection(PUSH_RULES_COLLECTION).delete(rec.id)
     }

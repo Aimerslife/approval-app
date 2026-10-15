@@ -8,7 +8,7 @@
   <v-tabs-window v-model="tab">
     <v-tabs-window-item value="home">
       <v-container class="h-[calc(100vh-80px)] bg-app" fluid>
-        <v-sheet class="overflow-hidden mt-3 p-4 border border-[#E8E8E8]" rounded="15">
+        <v-sheet class="overflow-hidden mt-3 p-4 card-border" rounded="15">
           <div class="block-title">审批信息</div>
 
           <!-- 当前审批单：同一个 `approver` 字段在在办单里是「当前审批人」（表格已不摆这一列，筛选仍可按它挑单） -->
@@ -20,7 +20,7 @@
 
           <v-data-table v-model:page="page" class="text-[12px]" border density="compact" fixed-header :headers="pendingHeaders"
             fixed-footer hover :items="pendingList" :items-per-page="itemsPerPage" items-per-page-text="每页条数"
-            striped="odd" @click:row="handleRowClick">
+            :loading="loading" striped="odd" @click:row="handleRowClick">
             <template #item.order_no="{ value }">
               <span class="font-bold">{{ value }}</span>
             </template>
@@ -53,7 +53,7 @@
 
     <v-tabs-window-item value="history">
       <v-container class="h-[calc(100vh-80px)] bg-app" fluid>
-        <v-sheet class="p-3 mt-3 border border-[#E8E8E8]" rounded="15">
+        <v-sheet class="p-3 mt-3 card-border" rounded="15">
           <div class="block-title">历史审批单</div>
           <ApprovalFilterBar :dirty="filtersDirty" :filters="filters" :options="filterOptionsMap"
             :select-labels="{ approver: '最后办理人' }" @apply="applyFilters" @patch="patchFilters"
@@ -63,7 +63,7 @@
 
           <v-data-table v-model:page="page" class="text-[12px]" border density="compact" :headers="historyHeaders"
             fixed-header hover fixed-footer :items="historyList" :items-per-page="itemsPerPage"
-            :items-per-page-options="[20, 50, 100, 200]" items-per-page-text="每页条数" striped="odd"
+            :items-per-page-options="[20, 50, 100, 200]" items-per-page-text="每页条数" :loading="loading" striped="odd"
             @click:row="handleRowClick">
             <template #bottom>
               <div class="text-center pt-2">
@@ -250,6 +250,7 @@ const {
   pendingList,
   historyList,
   load,
+  loading,
   applyUpdated,
 } = useApprovalTable()
 

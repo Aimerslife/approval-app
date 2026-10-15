@@ -1,9 +1,8 @@
 <template>
-  <div class="d-flex align-center gap-1 mb-">
-    <v-icon-btn size="20" @click="$router.back()">
+  <div class="d-flex align-center gap-1">
+    <v-icon-btn size="20" @click="$router.back()" variant="text">
       <v-icon :icon="props.icon" size="20" />
     </v-icon-btn>
-
     <span class="text-[13px]">{{ props.title }}</span>
   </div>
 </template>
@@ -12,8 +11,7 @@
     icon?: string
     title?: string
   }>(), {
-    icon: 'mdi-arrow-left',
+    icon: 'mdi-chevron-left',
     title: '回到首页',
   })
 </script>
-<style scoped lang="scss"></style>

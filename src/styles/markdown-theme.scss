@@ -1,0 +1,409 @@
+/**
+ * v-md-editor（Markdown 编辑器 + 预览）的暗色适配。
+ *
+ * ## 为什么需要这个文件
+ *
+ * 文档的配色**写死在厂家主题里**，全是浅色常量，跟 Vuetify 的明暗主题毫无关系：
+ *
+ *   · `lib/theme/style/github.css` —— 正文 `#24292e`、链接 `#0366d6`、引用 `#6a737d`、
+ *     分隔线 `#e1e4e8`、表格行 `#fff` / 斑马 `#f6f8fa`、行内代码 `rgba(27,31,35,.05)`、
+ *     代码块 `#f6f8fa`、代码高亮 `.hljs{color:#333;background:#f8f8f8}`；
+ *   · `lib/style/base-editor.css` —— **整个编辑器外壳 `background-color:#fff`**，
+ *     工具栏边框 `#ddd`、图标 `#595959`、hover `#f5f5f5`、菜单底 `#fff`；
+ *   · `codemirror/lib/codemirror.css` —— 编辑区文字 `black`、行号槽 `#f7f7f7`、光标 `black`。
+ *
+ * 于是切到暗色后：详情页（pages/logic.vue）是"深色底上的近黑色字"，
+ * 编辑页（pages/editRule.vue）干脆是一整块白底 —— 就是"文档主题没跟着变"。
+ *
+ * ## 覆盖面与写法
+ *
+ * 只写**暗色档**（浅色档一个字节都不动，厂家原样生效），与 main.scss 的
+ * `.card-border` / `.bg-app` 是同一套路：浅色默认 + `.v-theme--dark` 覆盖。
+ *
+ * 外层 `.v-theme--dark.v-theme--dark` 把**同一个类名写两遍**，是把整块规则的特异性
+ * 抬到 (0,2,0) 起 —— 厂家的 `.github-markdown-body table tr` 是 (0,2,0)、
+ * `.v-md-editor` 是 (0,1,0)，加上前缀后我们是 (0,2,0)/(0,3,0) 起步，
+ * **不必去赌 CSS 的引入顺序**（这正是 main.scss 里 `.card-border` 踩过的坑）。
+ *
+ * Vuetify 把 `v-theme--dark` 挂在 `v-app` 的根元素上，编辑器与预览都在其内部，
+ * 因此这套规则只靠 CSS 就跟着主题切换，不需要任何 JS 参与
+ * （与 flow-theme.scss 的做法一致）。
+ *
+ * ## 编辑器外壳走主题变量，文档正文走"文档自己的配色"
+ *
+ * 外壳（工具栏 / 菜单 / 边框 / 悬停）属于应用界面，用 `rgb(var(--v-theme-*))`
+ * 这些主题变量，深浅色天然一致；正文是"文档的排版"，它有自己的一套（GitHub Dark），
+ * 见下面的 $md-* 变量。
+ *
+ * ⚠️ 本文件在 `.v-theme--dark { }` **内部只用 `//` 行注释**：块注释写在这里会被 Sass
+ *    当成"挂在父选择器上的注释"，编译出一堆 `.v-theme--dark.v-theme--dark { }` 空规则
+ *    （与 main.scss 的 `@layer` 不同 —— 那里不是选择器，块注释只当普通注释输出）。
+ */
+
+// 文档正文配色（GitHub Dark）。文字/标题/引用/链接/边框/代码块这几档取自 GitHub 的暗色规范
+$md-text: #c9d1d9;
+$md-heading: #e6edf3;
+$md-muted: #8b949e;
+$md-link: #58a6ff;
+$md-border: #30363d;
+$md-code-bg: #161b22;
+$md-inline-code-bg: rgba(110, 118, 129, 0.4);
+$md-danger: #f85149;
+
+.v-theme--dark.v-theme--dark {
+  // 外壳统一用这几个，省得每条规则都写一长串 var()
+  --md-chrome-border: rgba(var(--v-border-color), var(--v-border-opacity));
+  --md-chrome-text: rgba(var(--v-theme-on-surface), 0.86);
+  --md-chrome-dim: rgba(var(--v-theme-on-surface), 0.45);
+  --md-chrome-hover: rgba(var(--v-theme-on-surface), 0.08);
+  --md-chrome-active: rgba(var(--v-theme-on-surface), 0.16);
+
+  // ==================== 1. 编辑器外壳 ====================
+
+  // 厂家的 `background-color:#fff` 是整个白底的来源；用主题表面色盖掉
+  .v-md-editor {
+    background-color: rgb(var(--v-theme-surface));
+  }
+
+  .v-md-editor__toolbar {
+    border-bottom-color: var(--md-chrome-border);
+  }
+
+  .v-md-editor__toolbar-divider:before {
+    border-left-color: var(--md-chrome-border);
+  }
+
+  .v-md-editor__toolbar-item {
+    color: var(--md-chrome-text);
+  }
+
+  .v-md-editor__toolbar-item:hover {
+    background: var(--md-chrome-hover);
+  }
+
+  // 激活态（按下 / 当前模式）要明显高于 hover，否则深色下两档分不出来
+  .v-md-editor__toolbar-item--active,
+  .v-md-editor__toolbar-item--active:hover {
+    background: var(--md-chrome-active);
+  }
+
+  // 插入表格 / emoji 的浮层：厂家是白底 + #595959 字
+  .v-md-editor__menu {
+    background-color: rgb(var(--v-theme-surface));
+  }
+
+  .v-md-editor__menu-item {
+    color: var(--md-chrome-text);
+  }
+
+  .v-md-editor__menu-item:hover {
+    background-color: var(--md-chrome-hover);
+  }
+
+  // 工具栏按钮的 tooltip：厂家是 #fff 字 + #878787 底（深色下这种灰偏亮，压一压）
+  .v-md-editor__tooltip {
+    color: rgb(var(--v-theme-on-surface));
+    background-color: var(--md-chrome-active);
+  }
+
+  // 分栏（编辑 / 预览）与目录：这几条边框厂家写的是 #ddd
+  .v-md-editor__left-area {
+    border-right-color: var(--md-chrome-border);
+  }
+
+  .v-md-editor--left-area-reverse .v-md-editor__left-area {
+    border-left-color: var(--md-chrome-border);
+  }
+
+  .v-md-editor--editable .v-md-editor__editor-wrapper {
+    border-right-color: var(--md-chrome-border);
+  }
+
+  .v-md-editor__left-area-title,
+  .v-md-editor__toc-nav-item {
+    color: var(--md-chrome-text);
+  }
+
+  .v-md-editor__left-area-title:after {
+    border-bottom-color: var(--md-chrome-border);
+  }
+
+  // ==================== 2. CodeMirror 编辑区 ====================
+
+  // 这一档只压得住厂家那套**单个类名**的规则（codemirror.css 的 `.CodeMirror{color:black}` 等）。
+  // `.CodeMirror` 自身不设底色（白底来自上面的 .v-md-editor），这里只要把字号色改掉。
+  .CodeMirror {
+    color: var(--md-chrome-text);
+  }
+
+  .CodeMirror-gutters {
+    border-right-color: var(--md-chrome-border);
+    background-color: transparent;
+  }
+
+  .CodeMirror-linenumber,
+  .CodeMirror-guttermarker-subtle {
+    color: var(--md-chrome-dim);
+  }
+
+  .CodeMirror-guttermarker {
+    color: var(--md-chrome-text);
+  }
+
+  .CodeMirror-cursor {
+    border-left-color: rgb(var(--v-theme-on-surface));
+  }
+
+  .CodeMirror div.CodeMirror-secondarycursor {
+    border-left-color: var(--md-chrome-dim);
+  }
+
+  // 横竖滚动条交汇处那一小块，厂家写死 white，深色下是块白斑
+  .CodeMirror-scrollbar-filler,
+  .CodeMirror-gutter-filler {
+    background-color: transparent;
+  }
+
+  // ⚠️ 上面那一档**压不住**这里：厂家还给编辑区写了一套**四个类名**的链 ——
+  //    `.v-md-editor .codemirror-wrapper.codemirror-reset .CodeMirror{color:#2c3e50}`
+  //    以及同链上的 Markdown 语法色 `.cm-*`，特异性是 (0,4,0)，比上面的 (0,3,0) 高一档。
+  //    不照着它的链写，左侧编辑区的文字与语法色**完全不会跟着主题变** ——
+  //    表现就是"背景黑了、字还是原来的近黑色"（也就是"左侧编辑区没有变化"）。
+  //    这里逐条对齐厂家的链，加上主题前缀后是 (0,6,0)，稳压它。
+  .v-md-editor .codemirror-wrapper.codemirror-reset {
+    .CodeMirror {
+      color: var(--md-chrome-text);
+    }
+
+    // 内容为空时的占位提示（厂家 #c0c4cc）
+    .CodeMirror-empty {
+      color: var(--md-chrome-dim);
+    }
+
+    // Markdown 标题 / 链接 / URL（厂家 #1890ff）
+    .cm-header,
+    .cm-link,
+    .cm-url {
+      color: $md-link;
+    }
+
+    // ⚠️ 这两组**顺序不能调**：厂家把 `.cm-link` 同时写进上面那组(#1890ff)和这一组，
+    //    靠"后写的赢"让它落到这一组。这里照抄同样的分组与顺序，只换色值，
+    //    同步改写会悄悄改掉编辑区里的配色关系。
+    .cm-comment,
+    .cm-link,
+    .cm-quote,
+    .cm-variable-2:not(.cm-url) {
+      color: var(--md-chrome-text);
+    }
+
+    // 选中底色（厂家 #d1dae6，深色下是一块浅灰）
+    .CodeMirror-selected {
+      background: rgba(76, 132, 255, 0.28);
+    }
+  }
+
+  // ==================== 3. 预览正文（.github-markdown-body） ====================
+
+  .github-markdown-body {
+    color: $md-text;
+
+    a {
+      color: $md-link;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+      color: $md-heading;
+    }
+
+    // 厂家给 h1/h2 加了条下框线（#eaecef），h6 是灰字（#6a737d）
+    h1,
+    h2 {
+      border-bottom-color: $md-border;
+    }
+
+    h6 {
+      color: $md-muted;
+    }
+
+    h1 .octicon-link,
+    h2 .octicon-link,
+    h3 .octicon-link,
+    h4 .octicon-link,
+    h5 .octicon-link,
+    h6 .octicon-link {
+      color: $md-heading;
+    }
+
+    hr {
+      background-color: $md-border;
+    }
+
+    blockquote {
+      color: $md-muted;
+      border-left-color: $md-border;
+    }
+
+    .absent {
+      color: $md-danger;
+    }
+
+    // 表格：行底色厂家写死 #fff、斑马行 #f6f8fa，深色下要整片换掉
+    table td,
+    table th {
+      border-color: $md-border;
+    }
+
+    table tr {
+      background-color: transparent;
+      border-top-color: $md-border;
+    }
+
+    table tr:nth-child(2n) {
+      background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    // 图片底：厂家的 #fff 是为了兜住裂图时的 alt 文字，深色下换成同族深色
+    img {
+      background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    kbd {
+      color: $md-text;
+      background-color: $md-code-bg;
+      border-color: $md-border;
+      box-shadow: inset 0 -1px 0 $md-border;
+    }
+
+    // 图注（frame）里的两处写死色：边框 #dfe2e5、文字 #24292e
+    span.frame > span {
+      border-color: $md-border;
+    }
+
+    span.frame span span {
+      color: $md-text;
+    }
+
+    // 行内代码：厂家是 rgba(27,31,35,.05)，在深色上等于没有底色
+    code,
+    tt {
+      background-color: $md-inline-code-bg;
+    }
+
+    // 代码块：外层 wrapper 与 pre 都写死 #f6f8fa，两处都要盖
+    pre,
+    div[class*='v-md-pre-wrapper-'] {
+      background-color: $md-code-bg;
+    }
+
+    // pre 内的文字厂家写的是 #444d56，深色下几乎不可见
+    pre code,
+    pre tt {
+      color: $md-text;
+    }
+
+    div[class*='v-md-pre-wrapper-'].line-numbers-mode:after {
+      background-color: $md-code-bg;
+      border-right-color: $md-border;
+    }
+
+    div[class*='v-md-pre-wrapper-'].line-numbers-mode .line-numbers-wrapper {
+      color: $md-muted;
+    }
+
+    .csv-data .blob-num {
+      background: transparent;
+    }
+
+    .csv-data th {
+      background: $md-code-bg;
+    }
+
+    // ==================== 4. 代码高亮（hljs） ====================
+    // 厂家那套 token 色（teal / #d14 / #900 / navy / #009926 …）是给白底配的，
+    // 这里按 GitHub Dark 的同名色值重排 —— 选择器分组与厂家保持一致，
+    // 只换颜色，不改变"哪个 class 算哪一类"的对应关系。
+
+    .hljs {
+      color: $md-text;
+      // 底色交给外层 wrapper，避免和 wrapper 的底色叠出两种色
+      background: transparent;
+    }
+
+    .hljs-comment,
+    .hljs-quote {
+      color: $md-muted;
+    }
+
+    .hljs-keyword,
+    .hljs-selector-tag,
+    .hljs-subst {
+      color: #ff7b72;
+    }
+
+    .hljs-literal,
+    .hljs-number,
+    .hljs-tag .hljs-attr,
+    .hljs-template-variable,
+    .hljs-variable {
+      color: #79c0ff;
+    }
+
+    .hljs-doctag,
+    .hljs-string {
+      color: #a5d6ff;
+    }
+
+    .hljs-section,
+    .hljs-selector-id,
+    .hljs-title {
+      color: #ff7b72;
+    }
+
+    .hljs-class .hljs-title,
+    .hljs-type {
+      color: #d2a8ff;
+    }
+
+    .hljs-attribute,
+    .hljs-name,
+    .hljs-tag {
+      color: #7ee787;
+    }
+
+    .hljs-link,
+    .hljs-regexp {
+      color: #a5d6ff;
+    }
+
+    .hljs-bullet,
+    .hljs-symbol {
+      color: #f2cc60;
+    }
+
+    .hljs-built_in,
+    .hljs-builtin-name {
+      color: #ffa657;
+    }
+
+    .hljs-meta {
+      color: $md-muted;
+    }
+
+    // diff 的增删行：厂家是浅粉 / 浅绿块，深色下是两块刺眼的亮斑，换成"深底浅字"
+    .hljs-deletion {
+      color: #ffdcd7;
+      background: #67060c;
+    }
+
+    .hljs-addition {
+      color: #aff5b4;
+      background: #033a16;
+    }
+  }
+}

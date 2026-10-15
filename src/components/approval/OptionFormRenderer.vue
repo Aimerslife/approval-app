@@ -42,6 +42,7 @@
           hide-details="auto"
           :items="itemsOf(field)"
           :label="field.label"
+          :menu-props="{ contentClass: 'filter-menu' }"
           :model-value="valueOf(field.key)"
           :rules="rulesFor(field)"
           variant="outlined"
@@ -369,8 +370,9 @@
  * 控件里的字号统一 12px（= 这一页其它小字）：
  * Vuetify 默认 1rem（16px）在这套 12-13px 的界面里明显偏大，也会把旁注挤成"两块不同大小的字"。
  * 输入框里的文字是 .v-field__input（下拉显示已选项用的也是它），标签是 .v-label，后缀是 .v-field__suffix。
- * ⚠️ 下拉的**弹层选项**被 teleport 到 body，不在本组件作用域里，这里管不到（要一起变小得配
- * menu-props 的 contentClass + 一段全局样式）。
+ * ⚠️ 下拉的**弹层选项**被 teleport 到 body，不在本组件作用域里，上面这几条 :deep() 管不到 ——
+ * 那部分走 v-select 上的 `:menu-props="{ contentClass: 'filter-menu' }"` 配全局的 .filter-menu
+ * （见 styles/main.scss），字号同样是 12px。要调就改那份全局样式，别在这里再抄一份。
  */
 .option-form-renderer :deep(.v-field__input),
 .option-form-renderer :deep(.v-field__suffix),

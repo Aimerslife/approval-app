@@ -648,7 +648,6 @@
 import type { OrgSelectPayload } from '@/components/OrgTree.vue'
 import type {
   ApprovalChainItem,
-  ApprovalFlow,
   ApprovalNodeData,
   ApprovalOptionGroup,
   BranchCondition,
