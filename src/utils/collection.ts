@@ -1,6 +1,6 @@
 import type { ApprovalAttachment, ApprovalChain, ApprovalFlow, ApprovalModal, ApprovalOrder, FlowGraph } from '@/types/approval'
-// 只要类型：组别→默认审批人的"覆盖记录"形状（合并口径见 utils/groupApprovers）
-import type { GroupApproverOverride } from '@/utils/groupApprovers'
+// 只要类型：团队/部门 → 默认审批人的"覆盖记录"形状（合并口径见 utils/groupApprovers）
+import type { DeptApproverOverride, GroupApproverOverride } from '@/utils/groupApprovers'
 import type { WarehouseRow } from '@/utils/warehouse'
 import pb from '@/pocketbase.ts'
 import { APPROVAL_STATUS, branchTerminalMapOf, rebuildChain } from '@/types/approval'
@@ -729,25 +729,25 @@ export interface UserInfo {
   name?: string
   role?: string
 }
-export async function getUserInfo (page = 1, perPage = 50): Promise<UserInfo[]> {
+/**
+ * 取**全部**成员（「角色设置」页那张表）。
+ *
+ * ⚠️ 必须 `getFullList` 而不是 `getList(page, perPage)`：后者只返回**一页**
+ * （原来写死 50 条），第 51 个人之后直接看不见，而且不报错 ——
+ * 表现就是"成员列表不全"。getFullList 内部按 batch 自动翻页，一次给全。
+ *
+ * ⚠️ 能不能读到别人还取决于 users 集合的 `listRule`：PB 给 auth 集合的默认值是
+ * `id = @request.auth.id`，那会把结果在**服务端**砍到只剩调用者自己一条
+ * （前端给多大的 perPage 都没用）。超级管理员看全部由
+ * pb_migrations/1792108800_updated_users_rules.js 放行。
+ */
+export async function getUserInfo (): Promise<UserInfo[]> {
   try {
-    const res = await pb.collection('users').getList<UserInfo>(page, perPage, {
+    const res = await pb.collection('users').getFullList<UserInfo>({
       fields: 'id,avatar_url,created,email,name,role,department,department_path,tenant_key',
+      requestKey: PB_REQUEST_KEY.usersList,
     })
-    console.log('获取用户信息成功', res.items.length, '条')
-    return res.items
-  } catch (error) {
-    console.error('获取用户信息失败:', error)
-    // 列表接口失败时返回空数组，保证调用方拿到的类型稳定为 UserInfo[]
-    return []
-  }
-}
-// 更新用户权限
-export async function updateUserRole (id: string, role: string) {
-  try {
-    const res = await pb.collection('users').update(id, {
-      role,
-    })
+    console.log('获取用户信息成功', res.length, '条')
     return res
   } catch (error) {
     console.error('获取用户信息失败:', error)
@@ -756,11 +756,28 @@ export async function updateUserRole (id: string, role: string) {
   }
 }
 
-/* ==================== 组别默认审批人（覆盖值） ==================== */
+/**
+ * 更新某个用户的角色。
+ *
+ * ⚠️ 这里**故意不 catch**：调用方（角色设置页）要在成功后刷新列表、失败时给出提示，
+ * 吞掉错误会让"改了没生效"变成静默失败 —— 旧实现照抄了上面读函数的 catch，
+ * 失败也返回 `[]`，前端根本分辨不出来。
+ *
+ * 改的不是自己时，需要 users 的 `updateRule` 放行超级管理员
+ * （见 pb_migrations/1792108800_updated_users_rules.js），否则 PB 返回 403。
+ */
+export async function updateUserRole (id: string, role: string) {
+  return pb.collection('users').update(id, { role })
+}
+
+/* ==================== 组别（团队）默认审批人（覆盖值） ==================== */
 
 /**
  * 组别 → 默认审批人 的**覆盖值**：只存"在角色设置里通过通讯录换过的人"。
  * 默认值维护在 `utils/organazation.ts`，两者的合并口径见 `utils/groupApprovers`。
+ *
+ * ⚠️ 表名与字段名沿用历史叫法（`group_approvers` / `group`，见迁移 1789700000）：
+ * 界面上这一层叫「团队」，但库里不改名 —— 改名要连带迁移与线上数据，不值当。
  */
 const GROUP_APPROVER_COLLECTION = 'group_approvers'
 
@@ -772,7 +789,7 @@ const GROUP_APPROVER_COLLECTION = 'group_approvers'
 type GroupApproverRecord = GroupApproverOverride & { id: string }
 
 /**
- * 读全部覆盖记录（按组别名排序）。
+ * 读全部覆盖记录（按团队名排序）。
  *
  * ⚠️ 失败时返回**空数组**而不是抛错：集合可能还没建（PB 没应用 1789700000 迁移），
  * 那种情况下页面应当照常显示文件里的默认值，而不是整页报错。
@@ -789,10 +806,10 @@ export async function getGroupApproverOverrides (): Promise<GroupApproverOverrid
 }
 
 /**
- * 写入某组别的审批人（同组 upsert）。
+ * 写入某团队的审批人（同名团队 upsert）。
  *
- * 为什么先查再写、而不是直接 create 靠唯一索引兜底：那样第二次改同一组会直接报错，
- * 而且错误信息对用户没有意义；先拿到 id 才能"改"它。记录数不增长 —— 同组始终一条。
+ * 为什么先查再写、而不是直接 create 靠唯一索引兜底：那样第二次改同一团队会直接报错，
+ * 而且错误信息对用户没有意义；先拿到 id 才能"改"它。记录数不增长 —— 同一团队始终一条。
  *
  * 失败**向上抛**（与读取相反）：这是"改数据"的动作，静默失败会让用户以为改好了。
  */
@@ -815,7 +832,7 @@ export async function saveGroupApprover (row: {
     : await pb.collection(GROUP_APPROVER_COLLECTION).create<GroupApproverOverride>({ ...row })
 }
 
-/** 恢复默认：删掉该组别的覆盖记录（本来就没有则什么都不做） */
+/** 恢复默认：删掉该团队的覆盖记录（本来就没有则什么都不做） */
 export async function deleteGroupApproverOverride (group: string): Promise<void> {
   const existing = await pb
     .collection(GROUP_APPROVER_COLLECTION)
@@ -827,12 +844,70 @@ export async function deleteGroupApproverOverride (group: string): Promise<void>
   }
 }
 
+/* ==================== 部门审批人（覆盖值） ==================== */
+
+/**
+ * 部门 → 部门审批人 的**覆盖值**：与上面团队那套同构，只有唯一键不同（`dept`）。
+ *
+ * 一行一个**部门**（`parent`），同一部门下的团队共用这一个审批人；
+ * 默认值仍是 `organazation.ts` 的 `parentManager`（合并口径见 utils/groupApprovers）。
+ */
+const DEPT_APPROVER_COLLECTION = 'dept_approvers'
+
+type DeptApproverRecord = DeptApproverOverride & { id: string }
+
+/**
+ * 读全部部门审批人覆盖记录（按部门名排序）。
+ *
+ * ⚠️ 失败时返回**空数组**而不是抛错：集合可能还没建（PB 没应用 1792200000 迁移），
+ * 那时页面照常显示文件里的默认值，只是换不了人。
+ */
+export async function getDeptApproverOverrides (): Promise<DeptApproverOverride[]> {
+  try {
+    return await pb
+      .collection(DEPT_APPROVER_COLLECTION)
+      .getFullList<DeptApproverRecord>({ sort: 'dept' })
+  } catch (error) {
+    console.warn('[groupApprovers] 读取部门审批人覆盖记录失败（多半是还没应用 1792200000 迁移）:', error)
+    return []
+  }
+}
+
+/**
+ * 写入某部门的审批人（同部门 upsert）。
+ *
+ * 与 saveGroupApprover 一样先查再写（唯一索引只用来兜底，不靠它报错），
+ * 失败**向上抛** —— 这是"改数据"，静默失败会让用户以为改好了。
+ */
+export async function saveDeptApprover (row: DeptApproverOverride): Promise<DeptApproverOverride> {
+  const existing = await pb
+    .collection(DEPT_APPROVER_COLLECTION)
+    .getFirstListItem<DeptApproverRecord>(pb.filter('dept = {:d}', { d: row.dept }))
+    .catch(() => null)
+
+  return existing
+    ? await pb.collection(DEPT_APPROVER_COLLECTION).update<DeptApproverOverride>(existing.id, { ...row })
+    : await pb.collection(DEPT_APPROVER_COLLECTION).create<DeptApproverOverride>({ ...row })
+}
+
+/** 恢复默认：删掉该部门的覆盖记录（本来就没有则什么都不做） */
+export async function deleteDeptApproverOverride (dept: string): Promise<void> {
+  const existing = await pb
+    .collection(DEPT_APPROVER_COLLECTION)
+    .getFirstListItem<DeptApproverRecord>(pb.filter('dept = {:d}', { d: dept }))
+    .catch(() => null)
+
+  if (existing) {
+    await pb.collection(DEPT_APPROVER_COLLECTION).delete(existing.id)
+  }
+}
+
 /* ==================== 仓库（仓位）清单 ==================== */
 
 /**
  * 在「角色设置 → 仓库设置」里维护的仓库清单。
  *
- * 与「组别 → 默认审批人」的差别：那边是**逐行覆盖**（默认值为主、只换个人），
+ * 与「团队 → 默认审批人」的差别：那边是**逐行覆盖**（默认值为主、只换个人），
  * 这里是**整表替换** —— 仓库要能新增、改名、删除，逐行覆盖表达不了"删掉某一项"。
  * 所以口径是：本表有记录就完全以它为准；一条都没有就回落到 `utils/warehouse.ts` 的默认值。
  */

@@ -37,6 +37,7 @@
         <LoopCardCanvas
           v-if="canvasReady"
           class="mt-3"
+          :early-exits="earlyExits"
           :graph="draft"
           :outer-approvals="outerApprovals"
         />
@@ -78,6 +79,11 @@
      * 供内部连线选「提前结束轮询 → 跳到卡片外哪个环节」（见 LoopCardCanvas 的同名 prop）。
      */
     outerApprovals?: { id: string, label: string }[]
+    /**
+     * 卡片上已经接出去的**「提前跳出」出线**（可以多条）：透传给内部画布当快捷候选，
+     * 环内那条「提前结束轮询」可以直接选"跳到哪一条"（见 LoopCardCanvas 的同名 prop）。
+     */
+    earlyExits?: { id: string, label: string, targetId: string }[]
   }>()
 
   const emit = defineEmits<{
@@ -163,7 +169,7 @@
     }
   }
 
-  const footNote = '内部环节的默认审批人是「本环的组负责人」（展开时按这一环轮到的组解析），可改成固定部门负责人或组织管理员'
+  const footNote = '内部环节的默认审批人是「本环的组负责人」（展开时按这一环轮到的组解析），可改成固定团队负责人或组织管理员'
 </script>
 
 <style lang="scss" scoped>

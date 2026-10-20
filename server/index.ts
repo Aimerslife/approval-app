@@ -10,7 +10,7 @@ import { fetchBiToken, runBiSync, uploadRows } from './biSync'
 import { assertRequiredKeys, config, configSummary, optionalWarnings } from './config'
 // 本次实际加载到的 env 文件列表：启动日志打出来，省得"我改了怎么没生效"要靠猜
 import { loadedEnvFiles } from './env'
-import { deleteApprovalOrder } from './orderDelete'
+import { deleteApprovalOrder, deleteHistoryOrders } from './orderDelete'
 import { purgeBiData as runPurgeBiData } from './purgeData'
 // 跑批执行日志（进程内环形缓冲）：「提醒设置」页的「执行日志」板块读它，见 server/reminderLog.ts
 import { readReminderRuns, recordReminderRun, type ReminderTrigger } from './reminderLog'

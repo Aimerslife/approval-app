@@ -35,7 +35,7 @@ import { APPROVAL_RESULTS } from '@/types/approval'
  *   · number / text / textarea —— 输入框三兄弟；
  *   · select / radio —— 选项类；`auto` = **按选项数自动**（≤ RADIO_MAX 用单选，否则下拉，
  *     与改造前的 useOptionRadios 同口径）；
- *   · team —— 「选择接收组别 / 选择接收团队」那种"点开选一个人/团队"的复合控件（`pick` 决定粒度）；
+ *   · team —— 「选择接收团队 / 选择接收部门」那种"点开选一个团队/部门"的复合控件（`pick` 决定粒度）；
  *   · none —— 不渲染控件（只在数据里占位，如"选中即写死某字段"的类型）。
  */
 export type TypeControl = 'number' | 'text' | 'textarea' | 'select' | 'radio' | 'auto' | 'team' | 'none'
@@ -92,6 +92,13 @@ export interface TypeField {
   max?: number
   /** 必须**小于**该来源的值（见 TypeLimitSource） */
   limit?: TypeLimitSource
+  /**
+   * 上限是否**允许等于**（默认 false = 必须严格小于）。
+   *
+   * 为什么两种都要：接收类里「部分接收」必须小于剩余（等于就该走全部接收），
+   * 而「接收」是"能接多少填多少"，接完剩余（等于上限）是完全正常的结果。
+   */
+  limitInclusive?: boolean
   /** 没填时预填上限（改造前的"接收"就是这个行为） */
   prefillFromLimit?: boolean
   /** 取到上限时只读（改造前的"接收"就是这个行为） */
@@ -172,6 +179,7 @@ export const TYPE_CATEGORY: Readonly<Record<string, string>> = {
   not_receive: '常规',
   pending: '常规',
   receive: '接收类',
+  receive_qty: '接收类',
   part_receive: '接收类',
   recycle: '处置类',
   supplier_recycle: '处置类',
@@ -283,6 +291,21 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
     }],
     effects: ['receive_ledger'],
   },
+  // 接收：数量可填、**不大于**剩余（可以等于 —— 正好接完也是正常结果），写接收台账
+  receive_qty: {
+    fields: [{
+      key: 'qty',
+      label: '接收数量',
+      control: 'number',
+      required: true,
+      unit: '件',
+      integer: true,
+      limit: 'receive_cap',
+      limitInclusive: true,
+    }],
+    effects: ['receive_ledger'],
+    note: '填这一环接收的数量，不能大于剩余接收数量（等于剩余即接完）',
+  },
   // 回收 / 供应商回收：数量 + 金额，上限是**总库存**（组件 187-193 / 1136-1147 / 1370-1379）
   recycle: {
     fields: [
@@ -323,16 +346,16 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
       },
     ],
   },
-  // 选接收组别 / 选接收团队：点开选人，选中即记为接收方并终结流程（组件 226-252 / 1407-1422）
+  // 选接收团队 / 选接收部门：点开选人，选中即记为接收方并终结流程（组件 226-252 / 1407-1422）
   pick_members: {
-    fields: [{ key: 'members', label: '选择接收组别', control: 'team', pick: 'group' }],
-    effects: ['receiver'],
-    note: '选中接收组别后流程即结束，后面的环节不再需要办理',
-  },
-  pick_team: {
-    fields: [{ key: 'members', label: '选择接收团队', control: 'team', pick: 'team' }],
+    fields: [{ key: 'members', label: '选择接收团队', control: 'team', pick: 'group' }],
     effects: ['receiver'],
     note: '选中接收团队后流程即结束，后面的环节不再需要办理',
+  },
+  pick_team: {
+    fields: [{ key: 'members', label: '选择接收部门', control: 'team', pick: 'team' }],
+    effects: ['receiver'],
+    note: '选中接收部门后流程即结束，后面的环节不再需要办理',
   },
   /*
    * 其余结论（通过 / 驳回 / 不接收 / 建议返工 / 建议弃置 / 市场需求不足 / 待定 / 7 个原因分类）
@@ -497,6 +520,7 @@ function normalizeField (raw: unknown): TypeField | null {
     ...(min === undefined ? {} : { min }),
     ...(max === undefined ? {} : { max }),
     ...(limit ? { limit } : {}),
+    ...(o.limitInclusive === true ? { limitInclusive: true } : {}),
     ...(o.prefillFromLimit === true ? { prefillFromLimit: true } : {}),
     ...(o.readonlyWhenFull === true ? { readonlyWhenFull: true } : {}),
     ...(options.length > 0 ? { options } : {}),

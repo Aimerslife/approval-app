@@ -25,6 +25,35 @@
     box-shadow: inset 0 0.5px 0 rgba(var(--v-border-color), calc(var(--v-border-opacity) * 0.5));
   }
 
+  /* ===== 输入类控件的边框统一调浅一档（下拉选择框、文本框、自动完成都吃这条）=====
+   *
+   * outlined 变体的边框 = 「currentColor + --v-field-border-opacity」，**颜色跟随主题**
+   * （浅色主题下是 on-surface 深灰、暗色主题自动反过来），所以"浅一些"只动不透明度 ——
+   * 写死 #E8E8E8 这类浅灰，暗色主题下会变成一圈刺眼的高光（与 .card-border 同一套路：
+   * 浅色给值、暗色另给一份，能少一处是一处）。
+   *
+   * Vuetify 的三档默认值（见 Vuetify 的 VField.sass）：
+   *   · 静态 .38；
+   *   · hover 直接跳到 --v-high-emphasis-opacity（.87）—— 比静态深一倍多，跳得很突兀；
+   *   · focus 是 1（边框几乎全黑）—— 这一档**保留不动**：那是"正在编辑"的提示，
+   *     压下去就和普通状态分不清了（error 态改的是 color 而不是不透明度，同样不受影响）。
+   *
+   * 只想改下拉、不动文本框：给下面两个选择器加一层 `.v-select ` 前缀即可
+   * （`.v-select .v-field--variant-outlined .v-field__outline { … }`）。
+   */
+  .v-field--variant-outlined .v-field__outline {
+    --v-field-border-opacity: 0.2;
+  }
+
+  /* hover 也收一档。这条与 Vuetify 自己的 `.v-field:hover .v-field__outline` **特异性相同**
+   * （都是 (0,3,0)），赢在 layer 顺序：Vuetify 的 main.css 里声明的是
+   *   @layer vuetify-core, vuetify-components, vuetify-overrides, vuetify-utilities ——
+   * 本文件整块都在 vuetify-overrides 里，所以同分时按"后面的 layer 胜出"。
+   * （上面那条静态的不靠顺序，(0,2,0) 已经压过 Vuetify 的 (0,1,0)。） */
+  .v-field--variant-outlined:hover .v-field__outline {
+    --v-field-border-opacity: 0.4;
+  }
+
 
   .v-data-table-footer__items-per-page {
     font-size: 12px;
@@ -163,6 +192,7 @@
   .v-field__append-inner {
     align-self: center;
     padding-top: 0;
+
   }
 
   .v-field__prepend-inner {

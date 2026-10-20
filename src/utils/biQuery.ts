@@ -10,14 +10,20 @@
  * I/O（getList / getFullList）留在 api.ts。
  */
 import { BI_ROW_FIELD_BY_KEY } from './biRowFields'
+import { resolveFieldKey } from './productFields'
 
 /**
  * 中文列 key → PB 的 ASCII 列名。
  * bi_rows 的列名是 ASCII（PB 不接受中文列名），而页面用的是中文 key，
  * 筛选 / 排序都要翻译一次，否则 PB 会报「字段不存在」。
+ *
+ * ⚠️ 列名改过名（组别→团队、是否属于呆滞库存→是否属于待评估库存）之后，
+ *    已经配好的**老模板 / 老筛选条件**里写的还是旧 key —— 所以先过一遍 resolveFieldKey
+ *    的别名表再查，否则那些条件会突然变成"字段不存在"（写条件的人看不出哪里错了）。
  */
 export function biColumnOf (chineseKey: string): string | undefined {
-  return BI_ROW_FIELD_BY_KEY[chineseKey]?.field
+  const key = String(chineseKey ?? '').trim()
+  return BI_ROW_FIELD_BY_KEY[key]?.field ?? BI_ROW_FIELD_BY_KEY[resolveFieldKey(key)]?.field
 }
 
 /**

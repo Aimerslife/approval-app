@@ -1,4 +1,6 @@
 import { BI_ROW_FIELD_BY_KEY } from '@/utils/biRowFields'
+// 列名别名表：条件里写的可能是**改名前的**中文列名（组别 / 是否属于呆滞库存），先归一到当前列名
+import { resolveFieldKey } from '@/utils/productFields'
 
 /**
  * 轮转「行条件」（`RotationSpec.rowFilter`）的解析与参数绑定。
@@ -19,9 +21,9 @@ import { BI_ROW_FIELD_BY_KEY } from '@/utils/biRowFields'
  *
  * `{:字段名}` 按**当前审批单的行数据**取值（中文列名，与条件字段同一套），例如：
  *
- *     主MODEL = {:主MODEL} && 是否属于呆滞库存 = "否" && 销售状态 ~ "在售"
+ *     主MODEL = {:主MODEL} && 是否属于待评估库存 = "无需评估" && 销售状态 ~ "在售"
  *
- * 读作"与当前单同主MODEL、非呆滞、且在售" —— 这就是"当前审批单数据与表格数据的对比"。
+ * 读作"与当前单同主MODEL、无需评估、且在售" —— 这就是"当前审批单数据与表格数据的对比"。
  *
  * ⚠️ 两种必须**抛错**而不是静默的情况（都会让条件恒不命中，或直接抛底层错误）：
  *   1. 字段名不在当前单的数据里（列名写错）；
@@ -97,7 +99,7 @@ function scanFilter (raw: string, onIdent: (name: string) => string): string {
 /**
  * 中文列名 → PocketBase 列名。
  *
- * ⚠️ 这一步不能省：**PB 的列名是 ASCII**（`主MODEL` → `main_model`、`是否属于呆滞库存` → `is_dead`），
+ * ⚠️ 这一步不能省：**PB 的列名是 ASCII**（`主MODEL` → `main_model`、`是否属于待评估库存` → `is_dead`），
  * 中文名只存在于 `data` JSON 快照里。而本项目的惯例是条件里写**中文列名**
  * （分支条件、提醒文案都是），所以用户写出来的 filter 一定是中文的 ——
  * 直接交给 pb 会被服务端拒成 400（实测踩过：建单失败）。
@@ -105,15 +107,21 @@ function scanFilter (raw: string, onIdent: (name: string) => string): string {
  * 不在映射表里的标识符原样保留：可能是 `true`/`false`/`null` 这类关键字。
  */
 export function translateFilterFields (raw: string): string {
-  return scanFilter(raw, name => BI_ROW_FIELD_BY_KEY[name]?.field ?? name)
+  const fieldOf = (name: string) =>
+    BI_ROW_FIELD_BY_KEY[name]?.field ?? BI_ROW_FIELD_BY_KEY[resolveFieldKey(name)]?.field ?? name
+  return scanFilter(raw, fieldOf)
 }
 
-/** filter 里出现的**列名**（不含占位符与字符串字面量里的内容） */
+/** filter 里出现的**列名**（不含占位符与字符串字面量里的内容）。旧列名会先归一到当前列名 */
 export function filterFieldNames (raw: string): string[] {
   const out: string[] = []
   scanFilter(raw, name => {
-    if (!FILTER_KEYWORDS.has(name) && !out.includes(name)) {
-      out.push(name)
+    if (!FILTER_KEYWORDS.has(name)) {
+      // 归一化后再收：老条件写「组别」时，校验那边比对的是「团队」，不归一会被判成"不是已知的数据列"
+      const key = resolveFieldKey(name)
+      if (!out.includes(key)) {
+        out.push(key)
+      }
     }
     return name
   })

@@ -11,15 +11,6 @@
           <span
             class="brand-name text-[14px] font-bold cursor-pointer"
             @click="routerGo('/')">🆈🅰🅽🆇🆄🅽</span>
-          <!--
-            「Collection」= 打开 PocketBase 自带后台（数据浏览 / 集合管理），**新标签页**打开：
-            后台是一整套独立界面，在本页里跳过去会把当前页面的状态丢掉。
-            地址与代理见 src/pocketbase.ts 的 PB_ADMIN_URL（后台与数据 API 是同一个 PB 实例）。
-
-            **只给超级管理员看**（canOpenPbAdmin 走 utils/permissions 的动作表，不在这里写角色比较）：
-            后台能直接浏览 / 修改所有集合（users、审批单、BI 镜像都在里面），
-            所以这个入口比"清空 BI 数据"还宽 —— 管理员及以上都能用的功能不该包含它。
-          -->
           <div
             v-if="canOpenPbAdmin"
             class="brand-name font-bold cursor-pointer"
@@ -154,9 +145,7 @@
             </div>
           </div>
         </v-sheet>
-
         <v-divider />
-
         <v-list nav>
           <v-list-item
             v-for="(item, index) in links"

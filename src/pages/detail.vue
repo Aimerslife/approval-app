@@ -53,7 +53,7 @@
               <template #productGroupDefault="{ row }">
                 <div v-if="visible('供应商')">供应商：{{ row['供应商'] }}</div>
                 <div v-if="visible('组长')">组长：{{ row['组长'] }}</div>
-                <div v-if="visible('组别')">组别：{{ row['组别'] }}</div>
+                <div v-if="visible('团队')">团队：{{ row['团队'] }}</div>
                 <div v-if="visible('部门')">部门：{{ row['部门'] }}</div>
               </template>
 
@@ -64,9 +64,9 @@
               </template>
 
               <template #remainDefault="{ row }">
-                <!-- BI 的「是否属于呆滞库存」取值是「呆滞」/空，不是「是」 -->
-                <vxe-tag v-if="visible('是否属于呆滞库存')" :status="row['是否属于呆滞库存'] === '呆滞' ? 'danger' : 'success'">
-                  {{ row['是否属于呆滞库存'] === '呆滞' ? '呆滞' : '正常' }}
+                <!-- BI 的「是否属于待评估库存」取值是「待评估 / 无需评估」，不是「是/否」 -->
+                <vxe-tag v-if="visible('是否属于待评估库存')" :status="row['是否属于待评估库存'] === '待评估' ? 'danger' : 'success'">
+                  {{ row['是否属于待评估库存'] === '待评估' ? '待评估' : '正常' }}
                 </vxe-tag>
               </template>
 
@@ -189,8 +189,13 @@
   const userStore = useUserStore()
 
   /**
-   * BI 的「销售状态」是逗号分隔的多值组合（实测有「停售,删除,在售」「不完整,删除,在售」等 8 种），
-   * 简单的等值查表会全部落到 info，这里按包含关系取色：优先停售 > 在售 > 未知。
+   * 销售状态取色：优先停售 > 在售 > 未知。
+   *
+   * 入库时这列已经按内容归一化成「在售 / 停售」两个值
+   * （见 productFields.ts 的 BI_VALUE_CONTAINS：值里出现「在售」就是在售，其余非空值算停售），
+   * 所以这里其实用不到「包含」。保留包含判定是为了**兼容库里还没重传的旧行** ——
+   * 那些行存的仍是 BI 原始的多值串（「停售,删除,在售」「不完整,删除,在售」等 8 种），
+   * 等值查表会全部落到 info。等库里的数据全部重传/重同步之后，这里可以简化成等值判断。
    */
   function saleStatusOf (v: unknown): VxeComponentStatusType {
     const s = String(v ?? '')
@@ -309,7 +314,7 @@
       { field: 'saleTime', title: '开售时间', minWidth: 150, slots: { default: 'saleTimeDefault' } },
       { field: 'productGroup', title: '组织信息', minWidth: 150, slots: { default: 'productGroupDefault' } },
       { field: 'platform', title: '平台', width: 130, slots: { default: 'platformDefault' } },
-      { field: 'remain', title: '呆滞情况', width: 60, slots: { default: 'remainDefault' } },
+      { field: 'remain', title: '是否属于待评估库存', width: 60, slots: { default: 'remainDefault' } },
       { field: 'saleStatus', title: '在售情况', width: 60, slots: { default: 'statusDefault' } },
       { field: 'type', title: '品类', width: 150, align: 'center', slots: { default: 'typeDefault' } },
       { field: 'productAmount', title: '库存数量', width: 120, slots: { default: 'productAmountDefault' } },
@@ -363,9 +368,9 @@
     图片链接: ['图片链接'],
     productInfo: ['产品名称', '是否属于灯具', 'SKU', 'SPU', '主MODEL', '参考MSKU'],
     saleTime: ['最早开售日期-SKU', '拓业部最早时间-SPU'],
-    productGroup: ['供应商', '组长', '组别', '部门'],
+    productGroup: ['供应商', '组长', '团队', '部门'],
     platform: ['仓位', '店铺', '平台'],
-    remain: ['是否属于呆滞库存'],
+    remain: ['是否属于待评估库存'],
     saleStatus: ['销售状态'],
     type: ['一级品类', '二级品类'],
     productAmount: ['FBA在仓', 'FBA在途', '海外仓在仓', '海外仓在途'],
@@ -382,7 +387,7 @@
     sales: ['SKU近一年月平均销量', 'SPU近一年月平均销量'],
   }
 
-  /** 整列字段全被关掉时把列本身隐藏，避免留一列空白（如默认全关的「呆滞情况」） */
+  /** 整列字段全被关掉时把列本身隐藏，避免留一列空白（如默认全关的「是否属于待评估库存」） */
   function syncColumnVisibility () {
     const cols = gridOptions.columns
     if (!cols) return

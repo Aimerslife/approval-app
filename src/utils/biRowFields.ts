@@ -36,14 +36,17 @@ const RAW: Row[] = [
   ['拓业部最早时间-SPU', 'expand_first_sale_date', 'text', '拓业部最早时间-SPU'],
   ['供应商', 'supplier', 'text', '自产/外购'],
   ['组长', 'leader', 'text', '组长'],
-  ['组别', 'group_name', 'text', '组别'],
+  // 「组别」已改名为「团队」（BI 数据列跟着 BI 的叫法走；PB 列名仍沿用 group_name，不动表结构）
+  ['团队', 'group_name', 'text', '团队'],
   ['部门', 'department', 'text', '部门'],
   ['仓位', 'warehouse', 'text', '仓位'],
   ['店铺', 'shop', 'text', '店铺'],
   ['平台', 'platform', 'text', '平台'],
   ['亚马逊呆滞条件', 'dead_rule_amazon', 'text', '亚马逊呆滞条件'],
   ['拓业部呆滞条件', 'dead_rule_expand', 'text', '拓业部呆滞条件'],
-  ['是否属于呆滞库存', 'is_dead', 'text', '呆滞情况'],
+  // 「是否属于呆滞库存 / 呆滞情况」已改名为「是否属于待评估库存」，
+  // 取值也从 0(呆滞)/1(未呆滞) 变成中文「待评估 / 无需评估」；PB 列名仍沿用 is_dead
+  ['是否属于待评估库存', 'is_dead', 'text', '是否属于待评估库存'],
   ['销售状态', 'sale_status', 'text', '销售状态'],
   ['一级品类', 'category1', 'text', '一级品类'],
   ['二级品类', 'category2', 'text', '二级品类'],
@@ -152,20 +155,21 @@ export const BI_ROW_META_FIELDS = [
 /**
  * sync_key 的组成部分（按顺序用 `|` 拼接）。
  *
- * **现用口径：SKU + 店铺 + 仓位 + 组别 + 是否属于呆滞库存。**
+ * **现用口径：SKU + 团队 + 仓位 + 是否属于待评估库存 + 店铺。**
  *
- * ⚠️ 最后那段是「值」而不是「标识」：呆滞列必须**先归一化**再拼键
- *   （0 = 呆滞 / 1 = 未呆滞，映射见 productFields.ts 的 BI_VALUE_MAP）。
+ * ⚠️ 最后那段是「值」而不是「标识」：待评估列必须**先归一化**再拼键
+ *   （统一成 `待评估` / `无需评估`，映射见 productFields.ts 的 BI_VALUE_MAP）。
  *   归一化由 resolveFieldValue 在做键之前完成（BI 走 normalizeBiRows、
  *   Excel 走 parseExcelSheet），所以两种来源拼出来的键是一致的。
- *   如果哪天绕过这两条路直接调 makeSyncKey，记得值已经是 '0' / '1'。
+ *   如果哪天绕过这两条路直接调 makeSyncKey，记得值已经是归一化后的中文词。
  *
  * 历史（同一份 8017 行 BI 数据，每次只改一个维度，用来判断粒度够不够）：
  *   只用 SKU      → 158 个冲突，去重后 1761 行
  *   + 仓位        →  24 个冲突，去重后 1854 行
  *   + 店铺        →   5 个冲突，去重后 1899 行
  *   + 部门        →   0 个冲突（当时用它收尾）
- *   后来「部门」换成「组别」，现在再并入「是否属于呆滞库存」。
+ *   后来「部门」换成「组别」，再并入「是否属于呆滞库存」；
+ *   现在是「组别→团队」「是否属于呆滞库存→是否属于待评估库存」，并把「团队」提到了「仓位」之前。
  *   判断标准始终是那两个数字，一起看：
  *     `conflicts` 还多      → 粒度不够，不同的行被当成同一行互相覆盖；
  *     `unique` 掉得厉害     → 粒度太细，本来是同一行的被拆成了多条。
@@ -175,6 +179,8 @@ export const BI_ROW_META_FIELDS = [
  *   新键跟它们对不上 → 同一批数据会被当成新行再插一遍，旧行留着变成 orphan
  *   （表里于是出现两份数据）。所以改键之后，要么先清空该 component 的行，
  *   要么用 `?prune=1` 跑一次**完整批次**（prune 删的正是「库里存在但本批没有」的行）。
+ *   本轮改名同理：库里 is_dead 还存着 '0'/'1'、键里那一段也对不上，
+ *   **必须清空该 component 的行后重新全量同步一次**。
  *
  * ⚠️ 为什么不能用 normalizeBiRows 生成的 `id`，也不能用「整行 hash」：
  *   `id` 是「累积行号 + 页内下标」，而 BI 的分页不稳定
@@ -184,8 +190,9 @@ export const BI_ROW_META_FIELDS = [
  *
  * 服务端同步（server/biSync.ts）与 Excel 上传（server/index.ts 的 /api/bi/upload）
  * 都用这一个定义，保证「上传的行」和「BI 同步的行」在库里是同一批。
+ * 前端这份是**唯一来源**，服务端那份是它的手抄副本 —— 改名时两边都要动。
  */
-export const SYNC_KEY_FIELDS = ['SKU', '店铺', '仓位', '组别', '是否属于呆滞库存'] as const
+export const SYNC_KEY_FIELDS = ['SKU', '团队', '仓位', '是否属于待评估库存', '店铺'] as const
 
 /** 计算 sync_key。第一段 SKU 必须有值，否则返回 ''（调用方应跳过该行） */
 export function makeSyncKey(row: Record<string, unknown>): string {

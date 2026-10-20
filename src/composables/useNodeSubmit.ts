@@ -120,13 +120,8 @@ export function useNodeSubmit (options: {
       payload.done(false)
       return null
     }
-    // 审批意见必填：留空提交等于没留痕，后续追溯时看不出为什么这么判。
-    // 判空要 trim：全是空格等于没写（ApprovalNode 提交前已 trim，这里再兜一道）
-    if (!(payload.opinion ?? '').trim()) {
-      options.onMessage?.('请填写审批意见', 'warning')
-      payload.done(false)
-      return null
-    }
+    // 审批意见**选填**（需求变更：不再强制留痕）。提交前仍会 trim（见 ApprovalHandleForm），
+    // 空串就当作没写，落库时不做特殊处理。
 
     // stepId 由 flow + decisions **重算**得出，不从页面注入 ——
     // 注入的话，页面手里那份 stepIds 一旦和当前 decisions 不同步，
@@ -168,20 +163,20 @@ export function useNodeSubmit (options: {
       const rebuilt = rebuildChain(flow, decisions, terminalMap, context)
 
       /*
-       * 3.5 「选择接收组别 / 选择接收团队」：只校验"选了没有"，**不往后续环节写人**。
+       * 3.5 「选择接收团队 / 选择接收部门」：只校验"选了没有"，**不往后续环节写人**。
        *
        * 为什么不填充下一环（早先那版写过，已按业务口径改掉）：
-       * 这两条都是**终结**结论 —— 接收方是结果（谁接下这批货），不是下一环的审批人。
+       * 这两个结论码都是**终结**结论 —— 接收方是结果（谁接下这批货），不是下一环的审批人。
        * 选完之后流程即结束、后面的环节不再展开，也就没人有权限办 ——
        * 终止这件事由 rebuildChain 按 CLOSE_FLOW_RESULTS 完成（见 types/approval.ts）。
-       * 选中的**组别 / 团队**记在本环节的办理流水里（decisions[].extra.members），
-       * 时间线按「接收组别」或「接收团队」展示（粒度看 ReceiverTeam.pick）。
+       * 选中的**团队 / 部门**记在本环节的办理流水里（decisions[].extra.members），
+       * 时间线按「接收团队」或「接收部门」展示（粒度看 ReceiverTeam.pick）。
        *
        * 没选人仍然拦下来（与"审批意见必填"同一档）：这条结论就是"选了谁"，不选等于没办。
        */
       if ((payload.result === PICK_MEMBERS_RESULT || payload.result === PICK_TEAM_RESULT)
         && !hasPickedMember(payload.extra?.members)) {
-        options.onMessage?.(payload.result === PICK_TEAM_RESULT ? '请选择接收团队' : '请选择接收组别', 'warning')
+        options.onMessage?.(payload.result === PICK_TEAM_RESULT ? '请选择接收部门' : '请选择接收团队', 'warning')
         payload.done(false)
         return null
       }
@@ -239,7 +234,7 @@ export function useNodeSubmit (options: {
 }
 
 /**
- * 「选择接收组别」是否真的选了人。
+ * 「选择接收团队」是否真的选了团队。
  * 兼容两种形状：单选时 `extra.members` 是成员对象，多选时是成员数组。
  */
 function hasPickedMember (raw: unknown): boolean {

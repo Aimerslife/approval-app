@@ -55,11 +55,34 @@ export const PB_ADMIN_URL = new URL('/_/', PB_URL).href
  * `getOne` 不用管：path 带 id，天然不撞。`getFirstListItem` 也不用管：
  * SDK 自己按 filter 生成了键（源码里的 `one_by_filter_<path>_<filter>`）。
  */
+/**
+ * 登录态 cookie 的写入属性。
+ *
+ * ⚠️ `secure` **必须显式给**：SDK 的 `exportToCookie()` 默认值是
+ * `{ secure: true, sameSite: true, httpOnly: true, path: "/" }`
+ * （见 node_modules/pocketbase/dist/pocketbase.es.mjs 里的 defaults），
+ * 而浏览器**只在安全上下文里接受带 `Secure` 的 cookie** —— https 或 **localhost**。
+ *
+ * 于是部署到 `http://<IP 或域名>` 时这个 cookie 会被**静默丢弃**
+ * （`document.cookie = ...` 不报错、控制台没有任何提示），
+ * `loadFromCookie()` 刷新后读到空 → `authStore.isValid` 为 false →
+ * 路由守卫把用户送去 `/login`。表现正是「登录后能正常用，一按 F5 就回登录页」。
+ *
+ * 本地开发永远复现不出来：`http://localhost` 被浏览器当作可信来源，Secure cookie 特例放行。
+ */
+const AUTH_COOKIE_OPTIONS = {
+  // 必须 false：这个 cookie 由 JS 读写（loadFromCookie / document.cookie），
+  // httpOnly 的 cookie 在 document.cookie 里读不到，登录态就恢复不了。
+  httpOnly: false,
+  // 按当前协议自适应：https 下带 Secure，http 下不带（带了必被浏览器丢弃）。
+  secure: location.protocol === 'https:',
+}
+
 pb.authStore.loadFromCookie(document.cookie)
 
 // 监听登录状态变化，同步写入cookie（页面刷新保持登录）
-pb.authStore.onChange((token, model) => {
-  document.cookie = pb.authStore.exportToCookie({ httpOnly: false })
+pb.authStore.onChange(() => {
+  document.cookie = pb.authStore.exportToCookie(AUTH_COOKIE_OPTIONS)
 })
 
 export default pb

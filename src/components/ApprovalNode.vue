@@ -1,15 +1,10 @@
 <template>
-  <!--
-    弃置段：`discard-zone` 这个类决定"这条要不要包进背景整块"，:style 只挂这一条的数值
-    （圆角留哪几个角、上下要不要往缝里撑 —— 见 discardZoneStyle）。
-    不在弃置段时两者都不生效，主链样式一个像素不动。
-  -->
-  <v-timeline-item :class="{ 'discard-zone': inDiscardSegment !== undefined }" class="mb-12"
-    :dot-color="dotColor" :size="size" :style="discardZoneStyle">
+  <v-timeline-item :class="{ 'discard-zone': inDiscardSegment !== undefined, 'waiting-approval': waitingApproval }" class="mb-12"
+    :dot-color="dotColor" size="35" :style="[discardZoneStyle, waitingGlowStyle]">
     <template #icon>
       <!-- 飞书提醒环节没有人可显示首字，圆点里放一个铃铛 -->
       <v-icon v-if="isNotifyStep" :color="iconColor" size="14">mdi-bell-ring-outline</v-icon>
-      <span v-else :style="{ fontSize: iconFontSize, color: iconColor }">{{ initials }}</span>
+      <span v-else :style="{ fontSize: '13px', color: iconColor }">{{ initials }}</span>
     </template>
 
     <!-- 弃置段的**段首**：在整块背景的左上角标一句「进入弃置流程」（整段只有这一条有） -->
@@ -60,252 +55,38 @@
           <v-chip class="ms-0" color="success" label size="x-small">通过</v-chip>
         </template>
 
-        <span v-for="(t, ti) in ledgerChips" :key="`ledger-${ti}`"
-          class="text-[11px] text-medium-emphasis">{{ t }}</span>
+        <span v-for="(t, ti) in ledgerChips" :key="`ledger-${ti}`" class="text-[11px] text-medium-emphasis">{{ t
+          }}</span>
 
         <span v-if="activeStep && !canHandle" class="text-[11px] text-medium-emphasis">未到该环节</span>
-        <template v-if="activeStep && canHandle && !status">
+        <template v-if="activeStep && canHandle && !status && !hideHandle">
           <v-dialog v-model="dialog" max-width="500">
             <template #activator="{ props: activatorProps }">
               <v-btn color="success" size="x-small" variant="tonal" v-bind="activatorProps"
                 @click="dialogs = true">办理</v-btn>
             </template>
-
             <v-card>
               <v-card-title class="d-flex align-center ga-2 text-[15px] py-3">
                 <v-icon color="primary" size="18">mdi-check-all</v-icon>
                 <span>审批</span>
-
                 <!-- 同一审批人连续多环：标出"这是第几个动作"，避免以为只办一次就完了 -->
                 <v-chip v-if="actionTotal > 1" color="primary" label size="x-small" variant="tonal">
                   第 {{ actionNo }} / {{ actionTotal }} 个动作
                 </v-chip>
-              </v-card-title>
 
-              <v-divider />
-
-              <v-card-text class="d-flex flex-column ga-4 pb-2">
-
-                <v-alert v-if="waitingNext" density="compact" type="info" variant="tonal">
-                  已提交，正在进入下一环节（还是你办理）…
-                </v-alert>
-
-                <div v-for="(d, di) in doneActions" :key="di" class="pa-3 rounded bg-[#F6F7F9]">
-                  <div class="d-flex align-center flex-wrap gap-2">
-                    <v-chip color="success" label size="x-small" variant="flat">已办</v-chip>
-                    <v-chip color="primary" label size="x-small" variant="tonal">{{ d.label }}</v-chip>
-
-                    <span v-if="d.path" class="text-[11px] text-medium-emphasis">{{ d.path }}</span>
-                  </div>
-
-                  <div v-if="d.opinion" class="mt-1 text-[11px] text-medium-emphasis">意见：{{ d.opinion }}</div>
-
-                  <div v-if="d.extras.length > 0" class="mt-1 d-flex flex-wrap align-center ga-2">
-                    <span v-for="it in d.extras" :key="it.key" class="text-[11px] text-medium-emphasis">
-                      {{ it.label }}：{{ it.value }}
-                    </span>
-                  </div>
-
-                  <div v-if="d.files.length > 0" class="mt-1 d-flex align-center flex-wrap text-[11px]">
-                    <span v-for="f in d.files" :key="f.id" class="d-inline-flex align-center cursor-pointer text-[#89898A] underline"
-                      @click="showPic(f.url)">
-                      <v-icon size="11">mdi-paperclip</v-icon>
-                      <span class="mt-1">{{ f.name }}</span>
-                    </span>
-                  </div>
-                </div>
-
-                <!-- 当前要办的那个动作（连续多环时标一下，免得以为下面这块是"又一个"） -->
-                <div v-if="actionTotal > 1 && activeStep" class="text-[11px] text-medium-emphasis -mb-2">
-                  当前要办的动作（第 {{ actionNo }} 个）
-                </div>
-
-                <v-form v-if="radios == 'deal'" ref="handleForm" @submit.prevent="handleConfirm">
-         
-                  <template v-if="!hasNodeLevelTree">
-                    <div class="field-label mb-2">选择处理方式</div>
-                    <v-radio-group v-if="useOptionRadios" v-model="selectedOptionKey" hide-details inline>
-                      <v-radio v-for="opt in selectItems" :key="opt.key" :color="radioColorOf(opt.result)"
-                        :value="opt.key">
-                        <template #label>
-                          <span class="text-[13px]">{{ opt.text }}</span>
-                        </template>
-                      </v-radio>
-                    </v-radio-group>
-
-                    <v-select v-else v-model="selectedOptionKey" class="filter-select" density="compact"
-                      hide-details item-title="text" item-value="key" :items="selectItems"
-                      :menu-props="{ contentClass: 'filter-menu' }" single-line style="max-width: 480px"
-                      variant="outlined">
-                      <template #label>
-                        <span class="text-[11px]">选择处理方式</span>
-                      </template>
-                    </v-select>
-                  </template>
-                  <div v-if="pickedGroups.length > 0" class="mt-2">
-                    <div class="field-label mb-2">办理选项</div>
-                    <v-select v-model="pickedLeaf" class="filter-select" density="compact" hide-details
-                      item-title="text" :items="optionMenuItems"
-                      :menu-props="{ contentClass: 'filter-menu' }" placeholder="请选择" return-object single-line
-                      variant="outlined">
-                      <template #label>
-                        <span class="text-[11px]">选项</span>
-                      </template>
-                    </v-select>
-
-                    <v-select v-if="leafChildren.length > 0" v-model="pickedChild" class="filter-select mt-2"
-                      density="compact" hide-details :items="leafChildren"
-                      :menu-props="{ contentClass: 'filter-menu' }" placeholder="请选择" single-line
-                      variant="outlined">
-                      <template #label>
-                        <span class="text-[11px]">二级选项</span>
-                      </template>
-                    </v-select>
-                  </div>
-
-           
-                  <div v-if="needReceiveQty" class="d-flex align-center ga-2 mt-2">
-           
-                    <v-text-field v-model="qty" class="qty-input" density="compact" label="接收数量"
-                      :readonly="receiveAll && hasReceiveCap" :rules="receiveQtyRules" single-line suffix="件"
-                      variant="underlined" width="160px" />
-                    <span v-if="receiveAll && hasReceiveCap" class="text-[11px] text-medium-emphasis">
-                      =<template v-if="receivedQtyText">
-                        （总 {{ stockQtyText }}，已接收 {{ receivedQtyText }}）</template>
-                    </span>
-
-                    <!-- 部分接收：把"还剩多少"摆在旁边，省得去翻上一环记录 -->
-                    <span v-else-if="usingRemaining" class="text-[11px] text-medium-emphasis">
-                      剩余 {{ receiveCapText }} 件（总 {{ stockQtyText }}，已接收 {{ receivedQtyText }}）
-                    </span>
-
-                    <span
-                      v-if="receiveValueText"
-                      class="text-[11px] text-medium-emphasis"
-                      :title="`价值 = 总库存金额 ÷ 总库存数量 × 剩余数量 = ${stockAmountText} ÷ ${stockQtyText} × ${receiveCapText}`"
-                    >
-                      价值 ￥{{ receiveValueText }}
-                    </span>
-                  </div>
-
-                  <div v-else-if="needRecycle" class="d-flex align-center flex-wrap ga-4 mt-2">
-                    <!--
-                      回收的上限就是这批货本身，所以把**总件数 / 总金额**摆在最左边：
-                      办理人要照它决定回收几件、值多少钱。这两项**可以填到等于总库存**
-                      （整批回收是正常结果，口径见 atMost），跟接收那栏"必须小于上限"不一样。
-                    -->
-                    <span class="text-[11px] text-medium-emphasis">
-                      总件数 {{ stockQtyText || '—' }} 件<template v-if="stockAmountText">，总金额 ￥{{ stockAmountText }}</template>
-                    </span>
-
-                    <v-text-field v-model="recycleQty" class="qty-input" density="compact" label="回收数量"
-                      :rules="recycleQtyRules" single-line suffix="件" variant="underlined" width="160px" />
-
-                    <v-text-field v-model="recycleAmount" class="qty-input" density="compact" label="回收金额"
-                      :rules="recycleAmountRules" single-line suffix="￥" variant="underlined" width="160px" />
-                  </div>
-
-                  <div v-else-if="needReason && pickedGroups.length === 0" class="mt-2">
-              
-                    <v-select v-model="reason" class="filter-select" density="compact" hide-details item-title="text"
-                      :items="groupedReasons" max-width="200" :menu-props="{ contentClass: 'filter-menu' }"
-                      return-object single-line variant="outlined" @update:model-value="handleResonChange">
-                      <template #label>
-                        <span class="text-[11px]">原因</span>
-                      </template>
-                    </v-select>
-                    <v-select v-if="reason.belong === '开发类'" v-model="secondReason" class="filter-select"
-                      density="compact" hide-details item-title="text" :items="secondApprovalModal" max-width="180"
-                      :menu-props="{ contentClass: 'filter-menu' }" return-object single-line variant="outlined"
-                      @update:model-value="handleSecondResonChange">
-                      <template #label>
-                        <span class="text-[11px]">二级原因</span>
-                      </template>
-                    </v-select>
-
-                    <template v-if="reason.belong === '外部环境'">
-                      <div class="mt-2">
-                        <v-textarea v-model="reasonRemark" class="remark-input" density="compact" hide-details label=""
-                          max-width="300" placeholder="补充说明" rows="2" variant="outlined" />
-                      </div>
-                    </template>
-                  </div>
-                  <!--
-                    「选择接收组别 / 选择接收团队」：当场指定接收方 → 该结论**终结流程**，
-                    后面接的环节不再有人办（见 CLOSE_FLOW_RESULTS）
-                  -->
-                  <div v-if="needPick" class="mt-2">
-                    <div class="d-flex align-center ga-2 flex-wrap">
-                      <v-btn color="primary" :prepend-icon="picking ? 'mdi-chevron-up' : 'mdi-account-plus-outline'"
-                        size="small" variant="tonal" @click="picking = !picking">
-                        {{ needPickTeam ? '选择接收团队' : '选择接收组别' }}
-                      </v-btn>
-                    </div>
-
-                    <div v-if="JSON.stringify(pickedMembers) !== '{}'" class="d-flex align-center ga-1 mt-2">
-                      <v-chip closable size="small" @click:close="unpickMember" >
-                        {{ pickedMembers.name }}
-                        <!-- 选中信息 = 名字 + 负责人（团队级叫负责人、组级叫组长，都是落地联系的人） -->
-                        <span v-if="pickedMembers.manager" class="ml-1 text-[11px] opacity-70 mt-0.5">
-                          {{ pickedMembers.manager }}
-                        </span>
-                      </v-chip>
-                    </div>
-
-                    <v-expand-transition>
-                      <div v-show="picking">
-                        <v-divider class="my-2" />
-                        <!--
-                          候选来自团队表（utils/organazation），不是整棵飞书通讯录，见 TeamPicker 的说明；
-                          group 模式：`team` = 本单所属团队 → 只在团队内选组别（不涉及其他团队）；
-                          team 模式：在所有团队里挑，负责人取表里维护的 parentManager。
-                        -->
-                        <TeamPicker :mode="needPickTeam ? 'team' : 'group'" :team="needPickTeam ? '' : receiverTeam"
-                          @select="pickMember" />
-                      </div>
-                    </v-expand-transition>
-                  </div>
-                </v-form>
-                <!-- 备注 / 审批意见 -->
-                <div>
-                  <div class="field-label mb-2">备注 / 审批意见</div>
-
-                  <v-textarea v-model="opinion" class="remark-input" :counter="300" density="compact" persistent-counter
-                    rows="3" variant="outlined" />
-                </div>
-              </v-card-text>
-              <!-- 附件：只保留回形针图标，点击文字同样能唤起选择框 -->
-              <div class="d-flex align-center ga-1 px-4 pb-3">
-                <v-file-input ref="fileInputRef" v-model="attachment" class="attachment-input" density="compact"
-                  hide-input>
-                  <template #prepend>
-                    <v-icon color="#1055C9" size="15">mdi-paperclip</v-icon>
-                  </template>
-                </v-file-input>
-
-                <span v-if="attachment" class="text-[12px] text-medium-emphasis text-decoration-underline text-truncate"
-                  :title="attachment.name">
-                  {{ attachment.name }}
-                </span>
-
-                <span v-else class="text-[12px] text-medium-emphasis cursor-pointer"
-                  @click="fileInputRef?.click()">上传附件</span>
-
-                <v-btn v-if="attachment" density="compact" icon="mdi-close" variant="plain" @click="attachment = null">
-                  <v-icon icon="mdi-close" size="15" />
-                </v-btn>
-              </div>
-
-              <v-divider />
-
-              <v-card-actions class="px-4 py-3">
                 <v-spacer />
-                <v-btn size="small" text="取消" variant="plain" @click="dialog = false" />
-
-                <v-btn color="primary" :disabled="waitingNext" :loading="submitting || waitingNext" size="small"
-                  :text="waitingNext ? '正在进入下一环节…' : (hasNextAction ? '提交并继续下一个' : '提交')"
-                  variant="tonal" @click="handleConfirm" />
-              </v-card-actions>
+                <!-- 抄送 / 转办：与审批页底部面板同一个组件、同一份落库逻辑（页面监听 select） -->
+                <SelectNode @select="payload => emit('select', payload)" />
+              </v-card-title>
+              <v-divider />
+              <div class="px-4 py-3">
+                <ApprovalHandleForm ref="handleFormRef" :allowed-options="props.allowedOptions"
+                  :allowed-results="props.allowedResults" :data="props.data" :index="props.index"
+                  :length="props.length" :next-steps="props.nextSteps" :option-context="props.optionContext"
+                  :receiver-team="props.receiverTeam" :remaining-qty="props.remainingQty" :show-cancel="true"
+                  :stock-amount="props.stockAmount" :stock-qty="props.stockQty" @cancel="dialog = false"
+                  @submit="payload => emit('submit', payload)" />
+              </div>
             </v-card>
           </v-dialog>
         </template>
@@ -345,7 +126,7 @@
 
       <div v-if="pickedReceiver" class="mt-2 d-flex align-center gap-2">
         <v-chip class="mr-1" color="primary" label size="x-small" variant="flat">
-          <span class="text-[9px]">{{ pickedReceiver.pick === 'team' ? '接收团队' : '接收组别' }}</span>
+          <span class="text-[9px]">{{ pickedReceiver.pick === 'team' ? '接收部门' : '接收团队' }}</span>
         </v-chip>
 
         <v-avatar class="mr-1" size="22">
@@ -354,9 +135,9 @@
         </v-avatar>
 
         <span class="text-[10px] text-medium-emphasis">{{ pickedReceiver.name }}</span>
-        <!-- 接收方 = 名字 + 负责人（团队表选的；团队级叫负责人、组级叫组长）；历史单（那时选的是人）退回显示邮箱 -->
+        <!-- 接收方 = 团队名/部门名 + 负责人；历史单（那时选的是人）退回显示邮箱 -->
         <span v-if="pickedReceiver.manager" class="text-[10px] text-high-emphasis">
-          {{ pickedReceiver.pick === 'team' ? '负责人' : '组长' }} {{ pickedReceiver.manager }}
+          {{ pickedReceiver.pick === 'team' ? '部门负责人' : '团队负责人' }} {{ pickedReceiver.manager }}
         </span>
         <span v-else-if="pickedReceiver.email" class="text-[10px] text-high-emphasis">{{ pickedReceiver.email }}</span>
       </div>
@@ -368,9 +149,8 @@
       </div>
 
       <div v-if="manager.files?.length" class="mt-1 d-flex align-center flex-wrap text-[11px]">
-        <div v-for="f in manager.files" :key="f.id"
-          class="d-inline-flex align-center  cursor-pointer text-[#89898A]" :href="f.url" rel="noopener"
-          @click="showPic(f.url)">
+        <div v-for="f in manager.files" :key="f.id" class="d-inline-flex align-center  cursor-pointer text-[#89898A]"
+          :href="f.url" rel="noopener" @click="showPic(f.url)">
           <v-icon size="11">mdi-paperclip</v-icon>
           <span class="underline">{{ f.name }}</span>
         </div>
@@ -393,8 +173,8 @@
       </div>
 
       <div v-if="r.files.length > 0" class="mt-0.5 d-flex align-center flex-wrap text-[11px]">
-        <div v-for="f in r.files" :key="f.id"
-          class="d-inline-flex align-center cursor-pointer text-[#89898A] underline" @click="showPic(f.url)">
+        <div v-for="f in r.files" :key="f.id" class="d-inline-flex align-center cursor-pointer text-[#89898A] underline"
+          @click="showPic(f.url)">
           <v-icon size="11">mdi-paperclip</v-icon>
           <span class="mt-1">{{ f.name }}</span>
         </div>
@@ -419,13 +199,6 @@
     </template>
   </v-timeline-item>
 
-  <!--
-    附件图片预览：**只给上限、不写死宽高**，图片按自身比例自适应 ——
-    大图缩到视口内放得下（四周留 5% 余量），小图保持原尺寸不被拉大。
-    原来是 v-img 写死了 max-height="6vh"（≈60px）又套在一个 60vh 的盒子里，
-    图被压成很小一条；v-img 在没有 aspect-ratio / 宽高时盒子高度本来就撑不起来，
-    所以这里直接用原生 img（自带尺寸，最省事也最稳）。
-  -->
   <v-overlay v-model="overlay" class="d-flex align-center justify-center" @click:outside="overlay = false">
     <img v-if="imgUrl" alt="附件预览" class="attachment-preview" :src="imgUrl" @click="overlay = false">
   </v-overlay>
@@ -436,8 +209,15 @@ import type { ApprovalChainItem, ApprovalNodeOption, ApprovalOptionGroup, Approv
 import dayjs from 'dayjs'
 // proxyAvatar：飞书头像要经服务端代理才能在浏览器里正常显示（历史单里选过的"接收人"带着头像）
 import { proxyAvatar } from '@/api/api'
-import { APPROVAL_RESULTS, filterOfferedOptions, PICK_MEMBERS_RESULT, PICK_TEAM_RESULT, receiptLedgerAfter } from '@/types/approval'
-import { buildColorScale, discardColorStep, pickColorStep } from '@/utils/color'
+import {
+  APPROVAL_RESULTS,
+  filterOfferedOptions,
+  PICK_MEMBERS_RESULT,
+  PICK_TEAM_RESULT,
+  RECEIVE_QTY_RESULT,
+  receiptLedgerAfter,
+} from '@/types/approval'
+import { buildColorScale, discardColorStep, hexToRgb, pickColorStep } from '@/utils/color'
 
 import { ensurePinyin, pinyinInitials } from '@/utils/pinyin'
 // shareValueText：按「总金额 ÷ 总数量 × 数量」折算货值（见 utils/number）
@@ -448,6 +228,12 @@ import { mainOf, type ApprovalNextStep } from '@/utils/approvalRuntime'
 import { useAvatarDirectory } from '@/stores/avatarDirectory'
 // 「选择接收组别」的候选：团队表（utils/organazation）——不是整棵飞书通讯录，见组件说明
 import TeamPicker from './TeamPicker.vue'
+// 表单主体：本项目没有「组件自动导入」，模板里用到的组件必须显式 import，
+// 否则编译成 resolveComponent 后运行时解析不到（控制台警告 + 表单整块不渲染）
+import ApprovalHandleForm from './approval/ApprovalHandleForm.vue'
+// 办理弹窗里的抄送 / 转办（首页、我的抽屉从节点进入办理时用它）
+import SelectNode from './streamNodes/SelectNode.vue'
+import type { UserBrief } from '@/api/api'
 
 const overlay = ref(false)
 
@@ -468,6 +254,13 @@ interface ApprovalNodeProps {
   allowedOptions?: ApprovalNodeOption[]
 
   canHandle?: boolean
+
+  /**
+   * 不在节点内渲染「办理」按钮：审批页把它换成了底部固定条上的统一入口
+   * （见 pages/approvalPage.vue 的 `hide-handle` + 底部办理弹窗）。
+   * 首页 / 我的抽屉里没有那条固定条，保持默认 false、仍从节点进入。
+   */
+  hideHandle?: boolean
 
   nextSteps?: ApprovalNextStep[]
 
@@ -532,6 +325,7 @@ const props = withDefaults(defineProps<ApprovalNodeProps>(), {
   allowedResults: () => [],
   allowedOptions: () => [],
   canHandle: true,
+  hideHandle: false,
   nextSteps: () => [],
   stockQty: '',
   remainingQty: '',
@@ -653,11 +447,11 @@ const avatarDir = useAvatarDirectory()
  * 飞书头像 URL 带签名的那些会过期，留着不管就是一排空圈。
  */
 const failedAvatars = ref<Record<string, true>>({})
-function memberAvatar (m?: ApprovalChainItem) {
+function memberAvatar(m?: ApprovalChainItem) {
   const url = m?.avatar || avatarDir.avatarOf(m)
   return url && !failedAvatars.value[url] ? url : ''
 }
-function onAvatarError (m?: ApprovalChainItem) {
+function onAvatarError(m?: ApprovalChainItem) {
   const url = m?.avatar || avatarDir.avatarOf(m)
   if (url) {
     failedAvatars.value[url] = true
@@ -679,7 +473,7 @@ watch(
  * 所以时间线上不该给它「办理」按钮 —— 更不该退而显示"未到该环节"（那看着像卡住了）——
  * 该显示的是**提醒名称**（chain 里 type='notify' 那条的 name）与**提醒对象**（notify.to）。
  */
-function isNotifyStepData (data?: ApprovalChainItem[]) {
+function isNotifyStepData(data?: ApprovalChainItem[]) {
   return !!data?.some(i => i.type === 'notify')
 }
 /** 本节点就是「飞书提醒」环节 */
@@ -733,6 +527,27 @@ const hasNextAction = computed(() => {
   return i >= 0 && i < actionSteps.value.length - 1
 })
 
+/**
+ * 这一环**正在等审批**（本节点就是当前待办那一环）：时间线上给圆点加边缘荧光闪烁
+ * （样式见 `.waiting-approval`，效果就是"在等人办"）。
+ *
+ * 口径：
+ *   · 认的是 activeStep（= 第一环还没 handled_at 的环节），所以已办完 / 已办结（activeStep 为空）自动为 false；
+ *   · **不要求 canHandle** —— 单子流转到别人的环节时，那一环同样"在等人办"，同样该闪；
+ *   · 飞书提醒环不会命中（activeStep 本来就跳过它们，见上面的说明）。
+ */
+const waitingApproval = computed(() => activeStep.value?.index === props.index)
+
+/**
+ * 荧光色 = **本环节圆点自己的颜色**（HEX → "r, g, b" 三元组，交给 CSS 用 rgba() 配透明度）。
+ *
+ * 不写死主题 primary：色阶是随环节位置变化的，光环跟着圆点走，整条时间线才是一体的。
+ * 也正因为要拼 rgba()，这里传的是三元组而不是色值本身。
+ */
+const waitingGlowStyle = computed(() => (
+  waitingApproval.value ? { '--waiting-glow-rgb': hexToRgb(dotColor.value).join(', ') } : undefined
+))
+
 /** 本环节的办理时间；未办理时为 undefined */
 const handledAt = computed(() => manager.value?.handled_at)
 
@@ -775,7 +590,7 @@ const EXTRA_LABELS: Record<string, string> = {
 const EXTRA_HIDDEN_KEYS = /_target$|^option_/
 
 
-function optionPathOf (extra?: Record<string, unknown>) {
+function optionPathOf(extra?: Record<string, unknown>) {
   const group = String(extra?.option_group ?? '').trim()
   if (!group) return ''
   return [group, extra?.option_text, extra?.option_child]
@@ -803,7 +618,7 @@ const pickedReceiver = computed<ReceiverTeam | undefined>(() => {
  * 措辞按**粒度**走（见 ReceiverTeam.pick）：团队级叫「负责人」，组级叫「组长」——
  * 同一件东西在办理弹窗、时间线、明细三处不该长得不一样。
  */
-function memberLabel (x: unknown): string {
+function memberLabel(x: unknown): string {
   if (!x || typeof x !== 'object') {
     return String(x ?? '')
   }
@@ -812,15 +627,14 @@ function memberLabel (x: unknown): string {
   if (!leader) {
     return name
   }
-  const role = (x as { pick?: unknown }).pick === 'team' ? '负责人' : '组长'
-  return `${name}（${role} ${String(leader)}）`
+  return `${name}（负责人 ${String(leader)}）`
 }
 
 /**
  * 一条办理流水里的选项明细（extra）→ { label, value } 列表。
  * 抽成函数是因为**合并节点**里的第 2、3 个动作也要按同一口径渲染（见 nextStepResults）。
  */
-function extraItemsOf (extra?: Record<string, unknown>) {
+function extraItemsOf(extra?: Record<string, unknown>) {
   if (!extra) return []
   return Object.entries(extra)
     // members（接收组别）已在上方单独成块渲染，这里不重复
@@ -889,7 +703,7 @@ const ledgerChips = computed(() =>
 )
 
 
-function actionResultOf (step: { data: ApprovalChainItem[] }) {
+function actionResultOf(step: { data: ApprovalChainItem[] }) {
   const m = mainOf(step.data)
   if (!m?.result) return null
   return {
@@ -912,6 +726,8 @@ const doneActions = computed(() =>
 )
 
 const dialog = ref(false)
+/** 表单实例：关窗时调它的 reset()，把子组件自己的"等待下一环 / 校验红字"清掉 */
+const handleFormRef = ref<{ reset: () => void } | null>(null)
 const attachment = ref<File | null>(null)
 const fileInputRef = ref<{ click: () => void } | null>(null)
 const dialogs = ref(false)
@@ -931,7 +747,7 @@ const pickedMembers = ref<ReceiverTeam & { department?: string }>({})
 const picking = ref(false)
 
 
-function resetFormState () {
+function resetFormState() {
   selectedOptionKey.value = ''
   pickedLeaf.value = null
   pickedChild.value = ''
@@ -960,7 +776,7 @@ function resetFormState () {
  * 另外记一个 `pick` 标明是哪一层 —— 时间线/明细据此把「组长」显示成「负责人」。
  * 不再存人（那是"谁办下一环"的语义，与这个结论不是一回事）。
  */
-function pickMember (t: { name: string, manager?: string }) {
+function pickMember(t: { name: string, manager?: string }) {
   pickedMembers.value = {
     name: t.name,
     ...(t.manager ? { manager: t.manager } : {}),
@@ -1009,7 +825,7 @@ const RADIO_MAX = 3
 const useOptionRadios = computed(() => selectItems.value.length <= RADIO_MAX)
 
 
-function radioColorOf (result: string): string {
+function radioColorOf(result: string): string {
   if (result === 'reject' || result === 'discard' || result === 'scrap') {
     return 'error'
   }
@@ -1075,16 +891,23 @@ watch(
   },
 )
 
-/** 关掉弹窗时清掉"等待下一环"：下次打开不该是禁用状态（见 waitingNext） */
+/**
+ * 关掉弹窗时把状态清干净：本组件的 `waitingNext`、以及**子组件自己那一份**
+ * （提交成功等下一环时按钮禁用 + 上一轮的红字校验），否则下次打开会带着旧状态。
+ * `reset()` 是 ApprovalHandleForm 对外暴露的唯一入口（见 defineExpose）。
+ */
 watch(dialog, open => {
   if (!open) {
     waitingNext.value = false
+    handleFormRef.value?.reset()
   }
 })
 
 /** 选中结论后需要补充的信息表单（数量 / 金额 / 原因等） */
 const needReceiveQty = computed(
-  () => selectedResult.value === 'receive' || selectedResult.value === 'part_receive',
+  () => selectedResult.value === 'receive'
+    || selectedResult.value === 'part_receive'
+    || selectedResult.value === RECEIVE_QTY_RESULT,
 )
 
 const rules = {
@@ -1179,7 +1002,7 @@ const receiveValueText = computed(() =>
  * （那条口径下数量由系统填 = 剩余 / 总库存数量），所以等于上限本身不成立。
  * @param hint 追加在文案后面的引导语（如"要接全部请选「全部接收」"）
  */
-function lessThan (limit: string, name: string, unit: string, hint = '') {
+function lessThan(limit: string, name: string, unit: string, hint = '') {
   return (value: unknown) => {
     const raw = String(value ?? '').trim()
     const cap = Number(limit)
@@ -1203,7 +1026,7 @@ function lessThan (limit: string, name: string, unit: string, hint = '') {
  *   · 回收用"不超过"—— 回收是"这批货要处置掉"，**整批回收**（件数与金额都等于总库存）
  *     是完全正常的结果，卡在"必须小于"会让办理人填不进去（需求：件数和金额可以等于总库存）。
  */
-function atMost (limit: string, name: string, unit: string) {
+function atMost(limit: string, name: string, unit: string) {
   return (value: unknown) => {
     const raw = String(value ?? '').trim()
     const cap = Number(limit)
@@ -1219,9 +1042,17 @@ function atMost (limit: string, name: string, unit: string) {
   }
 }
 
-const receiveQtyRules = computed(() => (receiveAll.value && hasReceiveCap.value
-  ? [rules.required]
-  : [rules.required, rules.isInteger, lessThan(receiveCapText.value, receiveCapName.value, '件', '；要接全部请选「全部接收」')]))
+const receiveQtyRules = computed(() => {
+  // 全部接收：数量由系统锁成剩余，只校验非空
+  if (receiveAll.value && hasReceiveCap.value) {
+    return [rules.required]
+  }
+  // 「接收」：数量可填、不大于剩余（等于剩余即接完）；「部分接收」仍严格小于
+  if (selectedResult.value === RECEIVE_QTY_RESULT) {
+    return [rules.required, rules.isInteger, atMost(receiveCapText.value, receiveCapName.value, '件')]
+  }
+  return [rules.required, rules.isInteger, lessThan(receiveCapText.value, receiveCapName.value, '件', '；要接全部请选「全部接收」')]
+})
 
 /** 回收数量：正整数，**不超过**总库存数量（可以等于 —— 整批回收是正常结果） */
 const recycleQtyRules = computed(() => [
@@ -1247,7 +1078,7 @@ const receiveAllQty = computed(() => receiveCapText.value || qty.value)
  * 写进来是为了记录**可追溯、可统计**：时间线上直接看得出"本环收了多少、还剩多少给后面的组"。
  * 算不出来（老单 / 没关联产品）就什么都不写 —— 宁可空着，也别在记录里留半截假数字。
  */
-function withReceiveLedger (extra: Record<string, unknown>, thisQty: unknown): Record<string, unknown> {
+function withReceiveLedger(extra: Record<string, unknown>, thisQty: unknown): Record<string, unknown> {
   const ledger = receiptLedgerAfter(stockQtyText.value, receiveCapText.value, thisQty)
   if (ledger) {
     extra.received_qty = String(ledger.received)
@@ -1267,7 +1098,7 @@ function withReceiveLedger (extra: Record<string, unknown>, thisQty: unknown): R
  * （分支条件里写的 `qty` / `amount` 仍然是"本次填的回收数量 / 金额"）。
  * 取不到就什么都不写 —— 宁可空着，也别在记录里留半截假数字（与接收台账同一条规矩）。
  */
-function withRecycleLedger (extra: Record<string, unknown>): Record<string, unknown> {
+function withRecycleLedger(extra: Record<string, unknown>): Record<string, unknown> {
   if (stockQtyText.value !== '') {
     extra.stock_qty = stockQtyText.value
   }
@@ -1283,7 +1114,7 @@ function withRecycleLedger (extra: Record<string, unknown>): Record<string, unkn
  *
  * 只拼填到的部分（理论上两项都必填，但老路径 / 异常值不该拼出「回收 / ￥」这种半截文案）。
  */
-function recycleLabel (base: string): string {
+function recycleLabel(base: string): string {
   const parts = [
     String(recycleQty.value ?? '').trim() ? `${String(recycleQty.value).trim()} 件` : '',
     String(recycleAmount.value ?? '').trim() ? `￥${String(recycleAmount.value).trim()}` : '',
@@ -1458,6 +1289,8 @@ watch(pickedLeaf, leaf => {
 
 const emit = defineEmits<{
   (e: 'submit', payload: NodeSubmitPayload): void
+  /** 抄送 / 转办选人：落库由页面接管（三处入口共用 composables/useApprovalSelect） */
+  (e: 'select', payload: { action: 'cc' | 'transfer', user: UserBrief }): void
 }>()
 
 function collectResult(): { result: string, result_label: string, extra: Record<string, unknown> } {
@@ -1492,6 +1325,10 @@ function collectResult(): { result: string, result_label: string, extra: Record<
     case 'part_receive': { // 部分接收
       extra.qty = qty.value
       return { result, result_label: `部分接收 ${qty.value || 0} 件`, extra: withReceiveLedger(extra, qty.value) }
+    }
+    case RECEIVE_QTY_RESULT: { // 接收：填多少接多少（不大于剩余），同样记这笔接收台账
+      extra.qty = qty.value
+      return { result, result_label: `接收 ${qty.value || 0} 件`, extra: withReceiveLedger(extra, qty.value) }
     }
     case 'recycle': { // 回收：数量 + 金额（另记一笔"这批货总共多少"，见 withRecycleLedger）
       extra.qty = recycleQty.value
@@ -1536,7 +1373,7 @@ function collectResult(): { result: string, result_label: string, extra: Record<
       const names = pickedMembers.value.name
       const leader = pickedMembers.value.manager
       const isTeam = pickedMembers.value.pick === 'team'
-      const title = isTeam ? '选择接收团队' : '选择接收组别'
+      const title = isTeam ? '选择接收部门' : '选择接收团队'
       // 结论文案带上「名字 + 负责人」：时间线上一眼能看出这一环把货交给了谁、找谁
       return {
         result,
@@ -1618,6 +1455,7 @@ async function handleConfirm() {
  * 以 CSS 变量挂在根元素上 —— 根元素是 `display: contents`，没有盒子，样式只能靠变量传给 `__body`。
  */
 .discard-zone :deep(.v-timeline-item__body) {
+  margin-left: 15px;
   background: var(--discard-body-bg);
   // 只有整段首/尾那两条有圆角（见 discardZoneStyle）；中间的直角首尾相接才拼成一整块
   border-radius: var(--discard-body-radius);
@@ -1650,6 +1488,92 @@ async function handleConfirm() {
   line-height: 18px;
   color: rgba(var(--v-theme-on-surface), 0.9);
   background: rgba(var(--v-theme-warning), 0.35);
+}
+
+/*
+ * ===== 「正在审批」的圆点：边缘荧光闪烁（= 这一环在等人办）=====
+ *
+ * 两件事叠加，都只动 box-shadow / transform / opacity，**不碰布局**（时间线的行高、连线一个像素都不动）：
+ *   ① 圆点本体（inner-dot）的荧光呼吸：光晕由小到大再收回去，像在"喘气"；
+ *   ② 外层圆（dot）的 ::after 画一圈荧光边，向外扩散并淡出：雷达波，扫一眼就知道有东西在等。
+ *      波放在**外层**而不是内层：内层被 Vuetify 让出一圈 8px 的"留白环"，从内层往外扩会往里缩一截。
+ *
+ * 判定在脚本里（waitingApproval）：本节点就是当前待办那一环时，根元素才带 `waiting-approval` 类，
+ * 所以下面这些规则对已办完 / 未到达的环节**完全匹配不到**，不需要额外兜底。
+ *
+ * 颜色取圆点自己的颜色（`--waiting-glow-rgb`，见 waitingGlowStyle）：色阶越往后越深，光环跟着走。
+ *
+ * ⚠️ 类名跟着 Vuetify 4 的 timeline 内部结构（divider__dot / divider__inner-dot）；
+ *    老版本是 item__dot / item__inner-dot，两个都写上 —— 样式不生效是静默的，宁可多一条选择器。
+ */
+.waiting-approval :deep(.v-timeline-divider__dot),
+.waiting-approval :deep(.v-timeline-item__dot) {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%; // 跟着圆点走，不写死尺寸：弃置段的圆点是逐环缩小的
+    // 用 box-shadow 而不是 border 画边：不占盒模型，边线正好压在圆点外沿上
+    box-shadow: 0 0 0 2px rgba(var(--waiting-glow-rgb), 0.8), 0 0 10px 3px rgba(var(--waiting-glow-rgb), 0.5);
+    animation: approval-waiting-ping 1.9s cubic-bezier(0.2, 0.7, 0.3, 1) infinite;
+    // 只是视觉：别让它挡住圆点上的点击（圆点里是首字 / 铃铛图标，本身不可点，但别留隐患）
+    pointer-events: none;
+  }
+}
+
+/* 荧光本体（内层圆盘） */
+.waiting-approval :deep(.v-timeline-divider__inner-dot),
+.waiting-approval :deep(.v-timeline-item__inner-dot) {
+  animation: approval-waiting-glow 1.9s ease-in-out infinite;
+}
+
+/* 荧光本体：暗 → 亮 → 暗（周期与扩散波一致，两个动作看着是同一口气） */
+@keyframes approval-waiting-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px 0 rgba(var(--waiting-glow-rgb), 0.35);
+  }
+
+  50% {
+    box-shadow: 0 0 12px 3px rgba(var(--waiting-glow-rgb), 0.8);
+  }
+}
+
+/* 扩散波：从圆点边缘放大到 1.7 倍并淡出（放大到 70% 就看不见了，剩下 30% 留白给节奏） */
+@keyframes approval-waiting-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+
+  70% {
+    transform: scale(1.1);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1.1);
+    opacity: 0;
+  }
+}
+
+/*
+ * 系统开了「减少动态效果」（无障碍设置 / 低电量模式）：保留静态荧光、不再闪。
+ * 持续闪烁对前庭敏感的人不友好，这条不能省。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .waiting-approval :deep(.v-timeline-divider__dot)::after,
+  .waiting-approval :deep(.v-timeline-item__dot)::after {
+    display: none;
+  }
+
+  .waiting-approval :deep(.v-timeline-divider__inner-dot),
+  .waiting-approval :deep(.v-timeline-item__inner-dot) {
+    animation: none;
+    box-shadow: 0 0 10px 2px rgba(var(--waiting-glow-rgb), 0.55);
+  }
 }
 
 // 拖拽悬停时的目标高亮

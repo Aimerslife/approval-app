@@ -63,7 +63,7 @@
           接**两条以上**则按这一段最后办出来的结论分别走（点每条线在面板里选结论）。
         </div> -->
 
-        <!-- 按结论分流的出线（≥2 条时才有）：点名"每条线绑了什么、往哪去" -->
+        <!-- 按结论分流的出线（≥2 条，或单条但绑了结论）：点名"每条线绑了什么、往哪去" -->
         <div v-if="branches.length > 0" class="ref-exits">
           <span class="role-tag role-ref">分流</span>
 
@@ -78,6 +78,13 @@
             {{ b.label || '（未命名线）' }}
             <span class="ref-exit-to">{{ b.toEnd ? '→ 结束' : '→ 下一环' }}</span>
           </button>
+
+          <!--
+            只有一条线却显示成"分流"= 这条线绑了结论：命中它才继续，**其它结论整单结束**
+            （编译器自动补的兜底出口，见 utils/approvalFlow 的 singleLineRefBranches）。
+            不写这一行的话，卡片上会显得"其它结论凭空消失了"。
+          -->
+          <span v-if="branches.length === 1" class="ref-exit-other">其它结论 → 结束</span>
         </div>
       </template>
     </div>
@@ -114,7 +121,8 @@
     readonly?: boolean
     /**
      * 出线列表（`{ id, label, toEnd }`）。**可选**：
-     * · 编辑器传（`createStream` 的 `outBranches`）——**只有 ≥2 条出线**（按结论分流）时才有内容；
+     * · 编辑器传（`createStream` 的 `outBranches`）——**形成结论分流**时才有内容：
+     *   ≥2 条出线，或只有一条但这条线绑了结论（命中继续、其它结束，见 singleLineRefBranches）；
      * · 只读预览也传（`FlowPreview` 的 `getBranches`），这样预览里也看得到分流去向。
      */
     branches?: { id: string, label: string, toEnd: boolean }[]
@@ -427,6 +435,13 @@
 /* 去向：结束 / 下一环 —— 让人一眼看出这条线接的是"整单结束"还是"继续往下" */
 .ref-exit-to {
   flex: none;
+  color: var(--flow-text-muted);
+}
+
+/* 单出线但绑了结论时补的那句"其它结论 → 结束"（编译器自动补的兜底出口） */
+.ref-exit-other {
+  padding-left: 6px;
+  font-size: 10px;
   color: var(--flow-text-muted);
 }
 </style>

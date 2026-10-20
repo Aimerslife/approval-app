@@ -85,7 +85,9 @@
           @click:close="removePicked(field.key, i)"
         >{{ pickedTextOf(m) }}</v-chip>
 
-        <span v-if="pickedList(field.key).length === 0" class="field-side">还没有选{{ field.pick === 'team' ? '团队' : '组别' }}</span>
+        <span v-if="pickedList(field.key).length === 0" class="field-side">
+          还没有选{{ field.pick === 'team' ? '部门' : '团队' }}
+        </span>
       </div>
 
       <div v-if="field.hint" class="field-hint">{{ field.hint }}</div>
@@ -297,14 +299,19 @@
       }
       if (field.limit) {
         /*
-         * 与办理页的 lessThan 同口径：**严格小于**上限（等于上限要选"全部接收"那类结论）。
+         * 与办理页同口径：默认**严格小于**上限（等于上限要选"全部接收"那类结论）；
+         * 配了 `limitInclusive` 的字段（如「接收」）允许**等于**上限。
          * 上限认不出来时不拦 —— 宁可放过，也不要因为取不到数就把人卡死。
          */
+        const inclusive = field.limitInclusive === true
         rules.push(v => {
           const cap = limitValueOf(field)
           if (v === '' || cap === undefined) return true
           const n = Number(v)
           if (!Number.isFinite(n)) return true
+          if (inclusive) {
+            return n <= cap || `不能大于${limitNameOf(field)}（${cap} ${limitUnitOf(field)}）`
+          }
           return n < cap || `必须小于${limitNameOf(field)}（${cap} ${limitUnitOf(field)}）`
         })
       }
@@ -322,8 +329,7 @@
   function pickedTextOf (m: Record<string, unknown>): string {
     const name = String(m.name ?? '')
     const leader = String(m.manager ?? '')
-    const role = m.pick === 'team' ? '负责人' : '组长'
-    return leader ? `${name}（${role} ${leader}）` : name
+    return leader ? `${name}（负责人 ${leader}）` : name
   }
 
   function removePicked (key: string, index: number) {
@@ -370,9 +376,8 @@
  * 控件里的字号统一 12px（= 这一页其它小字）：
  * Vuetify 默认 1rem（16px）在这套 12-13px 的界面里明显偏大，也会把旁注挤成"两块不同大小的字"。
  * 输入框里的文字是 .v-field__input（下拉显示已选项用的也是它），标签是 .v-label，后缀是 .v-field__suffix。
- * ⚠️ 下拉的**弹层选项**被 teleport 到 body，不在本组件作用域里，上面这几条 :deep() 管不到 ——
- * 那部分走 v-select 上的 `:menu-props="{ contentClass: 'filter-menu' }"` 配全局的 .filter-menu
- * （见 styles/main.scss），字号同样是 12px。要调就改那份全局样式，别在这里再抄一份。
+ * ⚠️ 下拉的**弹层选项**被 teleport 到 body，不在本组件作用域里，这里管不到（要一起变小得配
+ * menu-props 的 contentClass + 一段全局样式）。
  */
 .option-form-renderer :deep(.v-field__input),
 .option-form-renderer :deep(.v-field__suffix),

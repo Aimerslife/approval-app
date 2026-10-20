@@ -166,13 +166,20 @@
         </select>
 
         <template v-if="edgeExitMode === 'jump'">
-          <select v-model="edgeExitTo" class="edge-input" style="width: 148px">
-            <option value="">用卡片上的「提前跳出」出线</option>
-            <option v-for="t in outerList" :key="t.id" :value="t.id">{{ t.label }}</option>
+          <select v-model="edgeExitTo" class="edge-input" style="width: 196px">
+            <option value="">{{ emptyTargetText }}</option>
+            <optgroup v-if="earlyList.length" label="卡片上的「提前跳出」线">
+              <option v-for="e in earlyList" :key="e.id" :value="e.targetId">
+                {{ e.label }}{{ outerLabelOf(e.targetId) }}
+              </option>
+            </optgroup>
+            <optgroup label="卡片外的环节">
+              <option v-for="t in outerList" :key="t.id" :value="t.id">{{ t.label }}</option>
+            </optgroup>
           </select>
         </template>
 
-        <span v-if="edgeExitMode === 'jump'" class="edge-note">这一组办完就不再往后轮；目标留空 = 用卡片上那条「提前跳出」出线</span>
+        <span v-if="edgeExitMode === 'jump'" class="edge-note">{{ jumpNote }}</span>
         <span v-else-if="outerList.length === 0" class="edge-note">外面还没有可跳的环节</span>
       </div>
 
@@ -345,10 +352,43 @@
      * 没传 = 外面没有可选环节 → 控件禁用并提示，而不是给一个选了也没用的空下拉。
      */
     outerApprovals?: { id: string, label: string }[]
+    /**
+     * 卡片上已经接出去的**「提前跳出」出线**（可以多条）。
+     *
+     * 只作**快捷候选**：选它就等于选了它连到的那个环节（数据仍写 `edge.data.exitTo` =
+     * 目标环节 id，见 createStream 的 loopCardEarlyExitsFor）。多条线时这一份尤其有用 ——
+     * 卡片上叫「提前跳出2」的那条，在这里一眼能看出它到底通向哪。
+     */
+    earlyExits?: { id: string, label: string, targetId: string }[]
   }>()
 
   /** 可选的外部目标（缺省空数组，模板里不用到处判 undefined） */
   const outerList = computed(() => props.outerApprovals ?? [])
+
+  /** 卡片上的提前跳出线（同上，缺省空数组） */
+  const earlyList = computed(() => props.earlyExits ?? [])
+
+  /** 提前跳出线的名字后面补上它通向的环节名，避免"提前跳出2 到底去哪" */
+  function outerLabelOf (id: string): string {
+    const t = outerList.value.find(x => x.id === id)
+    return t ? ` → ${t.label}` : ''
+  }
+
+  /**
+   * 目标留空时的占位文案。
+   *
+   * 只有**恰好一条**提前跳出线时留空才合法（用那条的目标）；多条时留空必然报错
+   * （见 utils/loopCardGraph），所以占位直接改成"请选择"，别给人留一个会失败的默认值。
+   */
+  const emptyTargetText = computed(() =>
+    earlyList.value.length > 1 ? '请选择目标环节（卡片有多条提前跳出线）' : '用卡片上的「提前跳出」出线',
+  )
+
+  const jumpNote = computed(() =>
+    earlyList.value.length > 1
+      ? `这一组办完就不再往后轮；卡片接了 ${earlyList.value.length} 条「提前跳出」线，必须指明跳到哪一条`
+      : '这一组办完就不再往后轮；目标留空 = 用卡片上那条「提前跳出」出线',
+  )
 
   /**
    * 画布实例 id：**必须**用它自己的 store。

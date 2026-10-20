@@ -7,9 +7,19 @@ import type {
   ApprovalRole,
 } from '@/types/approval'
 import { roleLabel } from '@/types/approval'
+import { deptOfTeam, parentManagerOf, teamManagerOf } from '@/utils/organazation'
+// 老模板的 deptFrom 可能写的是改名前的列名（「组别」→「团队」），按别名表兜一次
+import { resolveFieldKey } from '@/utils/productFields'
 
 /**
- * 动态审批人（角色）的解析：把模板里的「部门负责人」这类角色，按组织架构换成真人。
+ * 动态审批人（角色）的解析：把模板里的「部门负责人」这类角色换成真人。
+ *
+ * 取谁（按优先级）：
+ *  1. **`utils/organazation.ts` 的表**（业务维护口径，准的就是它）：
+ *     值命中**团队**（`group`）→ 该团队的 `manager`（如 多站点组 → 魏燕玲）；
+ *     值命中**部门**（`parent`）→ 该部门的 `parentManager`（如 B2C销售部 → 张卓艳）。
+ *  2. 表里查不到（数据里写了个还没补进表的名字）→ 回退**组织架构树**：
+ *     先按名字找部门，再退到团队所属部门，最后沿用"本部门没负责人就往上级找"。
  *
  * 三个口径（都踩过）：
  *  1. **建单时解析、结果快照进单**：解析结果写进单据的 flow，之后重算只读快照 ——
@@ -59,6 +69,42 @@ function allUsers (tree: OrgTreeNode[]): UserBrief[] {
   return out
 }
 
+/**
+ * 在组织架构里按**姓名**找人（表里维护的是姓名，不是 open_id）。
+ *
+ * 顺带带出他所在的部门节点：member 上的 `department` / `department_path` 要用它，
+ * 时间线上才看得出"这个人是哪个部门的"。名字比较去掉空白（表里的写法常有出入）。
+ */
+function findUserByName (
+  tree: OrgTreeNode[],
+  name: string,
+): { user: UserBrief, hit: DeptHit } | undefined {
+  const want = name.replace(/\s+/g, '')
+  if (!want) {
+    return undefined
+  }
+  const walk = (
+    nodes: OrgTreeNode[],
+    parent: DeptHit | undefined,
+    path: string[],
+  ): { user: UserBrief, hit: DeptHit } | undefined => {
+    for (const node of nodes ?? []) {
+      const selfPath = [...path, node.name]
+      const hit: DeptHit = { node, path: selfPath.join(' / '), parent }
+      const user = (node.users ?? []).find(u => String(u.name ?? '').replace(/\s+/g, '') === want)
+      if (user) {
+        return { user, hit }
+      }
+      const inner = walk(node.children ?? [], hit, selfPath)
+      if (inner) {
+        return inner
+      }
+    }
+    return undefined
+  }
+  return walk(tree, undefined, [])
+}
+
 function toMember (u: UserBrief, role: ApprovalRole, hit?: DeptHit): ApprovalChainItem {
   return {
     /*
@@ -83,7 +129,13 @@ function deptNameOf (role: ApprovalRole, ctx: Record<string, unknown>): string {
   if (!role.deptFrom) {
     return ''
   }
-  return String(ctx[role.deptFrom] ?? '').trim()
+  /*
+   * ⚠️ 老模板里这一项配的可能是**改名前**的中文列名（如「组别」），
+   *    而 ctx 的 key 是数据行现在的列名（「团队」）—— 用别名表兜一次。
+   *    不兜的话历史模板会直接报「数据行字段「组别」是空的，认不出是哪个部门」。
+   */
+  const from = String(role.deptFrom).trim()
+  return String(ctx[from] ?? ctx[resolveFieldKey(from)] ?? '').trim()
 }
 
 /** 解析一个角色 → 真人（可能多人：一个部门有多个负责人时会签同等） */
@@ -92,12 +144,13 @@ function resolveOne (
   org: OrgTreeData | null,
   ctx: Record<string, unknown>,
 ): { members: ApprovalChainItem[], reason?: string } {
-  if (!org?.tree?.length) {
-    return { members: [], reason: '组织架构缓存为空（去「组织架构」页点一次刷新）' }
-  }
+  const tree = org?.tree ?? []
 
   if (role.kind === 'tenant_admin') {
-    const admins = allUsers(org.tree).filter(u => u.is_tenant_manager)
+    if (!tree.length) {
+      return { members: [], reason: '组织架构缓存为空（去「组织架构」页点一次刷新）' }
+    }
+    const admins = allUsers(tree).filter(u => u.is_tenant_manager)
     if (admins.length === 0) {
       return { members: [], reason: '组织里没有设置管理员' }
     }
@@ -109,18 +162,59 @@ function resolveOne (
     return {
       members: [],
       reason: role.deptFrom
-        ? `数据行字段「${role.deptFrom}」是空的，认不出是哪个部门`
-        : '没有指定部门',
+        ? `数据行字段「${role.deptFrom}」是空的，认不出是哪个团队/部门`
+        : '没有指定团队/部门',
     }
   }
 
-  const byName = indexDepts(org.tree)
+  /*
+   * 先按**业务维护的表**取人（utils/organazation，这是默认审批人的唯一口径）：
+   *   团队名 → 该团队的 `manager`（多站点组 → 魏燕玲）；
+   *   部门名 → 该部门的 `parentManager`（B2C销售部 → 张卓艳）。
+   *
+   * 刻意**不用**组织架构里的 is_leader：通讯录上的部门负责人和表里维护的审批人可以不是同一个人
+   * （比如美2组在通讯录里也有负责人，但业务上以表里的 manager 为准）。
+   * 表里查不到这个名字（新团队还没补进表）才回退组织架构树。
+   */
+  const leader = teamManagerOf(want) ?? parentManagerOf(want)
+  if (leader) {
+    const found = tree.length ? findUserByName(tree, leader) : undefined
+    return {
+      members: [found
+        ? toMember(found.user, role, found.hit)
+        // 表里的人不在通讯录缓存里：姓名照给（提醒靠 email，缺了会在发送侧报出来）
+        : { name: leader, type: 'manager', role }],
+    }
+  }
+
+  if (!tree.length) {
+    return { members: [], reason: '组织架构缓存为空（去「组织架构」页点一次刷新）' }
+  }
+
+  const byName = indexDepts(tree)
   // 名字对不上时再试一次"去掉空白后比对"：白板/组织架构里常有多余空格
   const squash = (s: string) => s.replace(/\s+/g, '')
-  const hit = byName.get(want)
-    ?? [...byName.entries()].find(([k]) => squash(k) === squash(want))?.[1]
+  const findDept = (name: string): DeptHit | undefined =>
+    byName.get(name) ?? [...byName.entries()].find(([k]) => squash(k) === squash(name))?.[1]
+
+  /*
+   * 两级查找，顺序不能反（口径见 utils/organazation：团队 = group，部门 = parent）：
+   *
+   *   1. 先按**团队名**找：飞书部门树里"组"本身也是一个部门（美2组 / 欧洲组 / 拓业部…），
+   *      这一级命中就直接用 —— 负责人就是该团队负责人，最准；
+   *   2. 找不到再用它所属的**部门**（`parent`）：像「多站点组」这种只在
+   *      utils/organazation.ts 里维护、通讯录里没单独建部门的团队，落到部门负责人。
+   */
+  const own = findDept(want)
+  const dept = own ? undefined : deptOfTeam(want)
+  const hit = own ?? (dept ? findDept(dept) : undefined)
   if (!hit) {
-    return { members: [], reason: `组织架构里找不到部门「${want}」` }
+    return {
+      members: [],
+      reason: dept
+        ? `组织架构里找不到「${want}」，也找不到它所属的部门「${dept}」`
+        : `组织架构里找不到「${want}」`,
+    }
   }
 
   // 本部门没设负责人就往上找（小组常常没单独设）

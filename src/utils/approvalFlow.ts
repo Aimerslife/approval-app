@@ -22,12 +22,59 @@ import { deriveFlowFields } from './biRowFields'
 import { cardGraphToSteps } from './loopCardGraph'
 // 「跳出循环 / 轮完走向」的候选类型（审批 / 提醒 / 引用模板 / 轮询）：与编辑器下拉**共用同一份**口径
 import { isExitTargetNode } from './exitTargets'
-// 团队表反查：「选择接收组别」的候选限定在本单所属团队内（纯数据模块，不参与成环）
-import { teamOfGroup } from './organazation'
+// 团队表反查：「接收团队」的候选限定在本单所属部门内（纯数据模块，不参与成环）
+import { deptOfTeam } from './organazation'
 
 /** 已知的结论码 / 文案 → 码：用来拦住"结论条件写成文案"这种永远不命中的写法（见 graphToFlowFrom） */
 const RESULT_CODES = new Set(APPROVAL_RESULTS.map(r => r.value))
 const RESULT_LABEL_TO_CODE = new Map(APPROVAL_RESULTS.map(r => [r.label, r.value]))
+
+/**
+ * 递归校验条件是否填全（条件组可任意嵌套，所以必须递归）。
+ *
+ * 放在模块级而不是 collectBranches 内部：单出线引用卡片的兜底分支
+ * （见 graphToFlowFrom 的 singleLineRefBranches）也要用同一份校验，
+ * 两套校验文案迟早会在某个角落不一致。
+ */
+function findBad (items: ConditionExpr[], where: string): string | null {
+  for (const [k, it] of items.entries()) {
+    if (isConditionGroup(it)) {
+      const err = findBad(it.items ?? [], `${where}第 ${k + 1} 个条件组里的`)
+      if (err) {
+        return err
+      }
+      continue
+    }
+    if (!String(it.field ?? '').trim()) {
+      return `${where}第 ${k + 1} 个条件未填写字段名`
+    }
+    /*
+     * 值是数组时（只有「包含」会这样）按"有效值拼接"来看：
+     * String(['a','b']) = "a,b" 没问题，但 String(['','']) = "," 会被当成填过，
+     * 而它其实一个值都没填 —— 那种情况应该照常报"未填写比较值"。
+     */
+    const rawValue = (Array.isArray(it.value)
+      ? it.value.filter(v => String(v ?? '').trim() !== '').join(',')
+      : String(it.value ?? '')).trim()
+    if (rawValue === '') {
+      return `${where}第 ${k + 1} 个条件未填写比较值`
+    }
+    /*
+     * 「@字段名」= 引用另一个字段的值（见 types/approval 的 FIELD_REF_PREFIX）。
+     * 下面两种写法都会**静默失效**（条件永远不命中），所以在这里明确拦下：
+     *   ① 只写了一个 @，没写字段名；
+     *   ② 审批结论条件写成了引用 —— 它的值会被 firstResultValueOf 当结论码读走
+     *      （用来判定终态和可选结论），引用语法对它一律不生效。
+     */
+    if (rawValue === FIELD_REF_PREFIX) {
+      return `${where}第 ${k + 1} 个条件写了「${FIELD_REF_PREFIX}」但没写引用的字段名`
+    }
+    if (it.field === 'result' && rawValue.startsWith(FIELD_REF_PREFIX)) {
+      return `${where}第 ${k + 1} 个条件是审批结论条件，比较值必须是结论码，不能写成「${FIELD_REF_PREFIX}字段名」`
+    }
+  }
+  return null
+}
 
 /**
  * 把画布图转换为 ApprovalFlow 结构（保存时调用）。
@@ -68,11 +115,14 @@ export function graphToFlowFrom (
      */
     externalApprovalIds?: Set<string>
     /**
-     * 环内那条线**没选目标**时的兜底目标（节点 id）—— 就是卡片上那条「提前跳出」出线的目标
+     * 环内那条线**没选目标**时的兜底目标（节点 id）—— 就是卡片上**唯一那条**「提前跳出」出线的目标
      * （见 utils/loopCardGraph 的 `defaultJumpTarget`）。
      *
      * 有它的意义：同一张卡片上"某组接了 → 提前结束轮询"的去向，在卡片上配**一次**就够，
      * 不必进卡片内部逐条线重复选。环内那条线自己选了目标时仍以它为准（每个组可以跳到不同地方）。
+     *
+     * ⚠️ 卡片上接了**多条**「提前跳出」时调用方**不传**它（见 readLoopOuts 的 earlyCount）：
+     * 那时没有"缺省的那一条"，环内必须逐条显式选目标，否则报错。
      */
     defaultJumpTarget?: string
   } = {},
@@ -172,51 +222,51 @@ export function graphToFlowFrom (
 
   /**
    * 把一张「组间轮询」卡片的出线按**走向**拆开（见 `FlowGraphEdge.data.loopExit`）：
-   *   · 「轮完」（没标 / 标 `'done'`）= 所有组都轮完、一直没人跳出轮询 → 卡片的**后继**
-   *     （老语义：卡片唯一那条出线就是它）；
-   *   · 「提前跳出」（标 `'early'`）= 某一组接了、提前结束轮询 → 环内「提前结束轮询」的**缺省目标**。
+   *   · 「轮完」（没标 / 标 `'done'`）= 所有组都轮完、一直没人跳出轮询 → 卡片的**后继**，
+   *     **有且只有一条**（它决定"这一段走完之后去哪"，两条就没法继续了）；
+   *   · 「提前跳出」（标 `'early'`）= 某一组接了、提前结束轮询 → 可以**多条**，各自连到不同环节；
+   *     环内「提前结束轮询」那条线选了目标就用它自己选的，没选时只有"恰好一条"才能拿它当缺省。
    *
-   * 为什么允许两条、又必须能区分：卡片要"每环复制一份"，多条出线在不看走向时说不清
-   * "第几环走哪条"（以前干脆一律拒绝）。标出走向之后两条各有明确含义，就不再歧义了 ——
+   * 为什么「提前跳出」可以多条、又必须靠走向区分：卡片要"每环复制一份"，多条出线在不看走向时
+   * 说不清"第几环走哪条"（以前干脆一律拒绝）。标出走向之后各条含义明确，就不再歧义 ——
    * 老数据（一条线、什么都不标）完全不受影响：它就是「轮完」那条。
    */
-  const splitLoopOuts = (outs: any[], title: string): { done?: any, early?: any, error?: string } => {
+  const splitLoopOuts = (outs: any[], title: string): { done?: any, early: any[], error?: string } => {
     const early = outs.filter(e => e?.data?.loopExit === 'early')
     const done = outs.filter(e => e?.data?.loopExit !== 'early')
-    if (early.length > 1) {
-      return { error: `卡片「${title}」只能有一条「提前跳出」出线（现在有 ${early.length} 条）` }
-    }
     if (done.length > 1) {
       return {
-        error: `卡片「${title}」有 ${done.length} 条出线、但都没标走向：请选中其中一条，`
-          + '在上面板把「本线走向」选成「提前跳出」（剩下那条就自动是「轮完」）',
+        early,
+        error: `卡片「${title}」有 ${done.length} 条「轮完」出线，只能有一条`
+          + '（它决定"所有组都轮完之后去哪"）：请选中多余的线，把「本线走向」改成「提前跳出」',
       }
     }
-    return { done: done[0], early: early[0] }
+    return { done: done[0], early }
   }
 
   /**
-   * 读轮询卡片的出线走向，产出转换/展开要的两样东西：
-   *   · `next`  —— 卡片的**后继**（「轮完」那条线的目标）；
-   *   · `early` —— 「提前跳出」那条线的目标（环内没选目标的分支落到它上面）。
+   * 读轮询卡片的出线走向，产出转换/展开要的东西：
+   *   · `next`     —— 卡片的**后继**（「轮完」那条线的目标）；
+   *   · `early`    —— **恰好一条**「提前跳出」时，它的目标（环内没选目标的分支落到它上面）；
+   *   · `earlyCount` —— 「提前跳出」有几条（多条时环内必须显式选目标，见 cardGraphToSteps）。
    *
    * 顶层卡片与"分支里的卡片步骤"两处**共用这一份**，口径只写一次。
    *
-   * @param afterLoopSet 卡片下拉里的「轮完走向」是否配了值：两条出线时两处都配就说不清走哪条，
-   *                     当场报错（不做静默取舍 —— 用户会以为是"配了没生效"）。
+   * @param afterLoopSet 卡片下拉里的「轮完走向」是否配了值：画布上已有「提前跳出」出线时两处都配
+   *                     就说不清走哪条，当场报错（不做静默取舍 —— 用户会以为是"配了没生效"）。
    */
   const readLoopOuts = (
     outs: any[],
     title: string,
     afterLoopSet: boolean,
-  ): { next?: string, early?: { stepId: string }, error?: string } => {
+  ): { next?: string, early?: { stepId: string }, earlyCount: number, error?: string } => {
     const roles = splitLoopOuts(outs, title)
     if (roles.error) {
-      return { error: roles.error }
+      return { error: roles.error, earlyCount: roles.early.length }
     }
-    let early: { stepId: string } | undefined
-    if (roles.early) {
-      const t = readExitTarget(roles.early.target, title, '提前跳出')
+    const earlyTargets: { stepId: string }[] = []
+    for (const e of roles.early) {
+      const t = readExitTarget(e.target, title, '提前跳出')
       if (t.error) {
         /*
          * 这条线的目标就是"跳过去接着办"的环节（画布上直接连的），所以它必须是
@@ -224,20 +274,47 @@ export function graphToFlowFrom (
          * （口径见 utils/exitTargets）。用户很容易把线拖到「结束」，这里说清楚。
          */
         return {
+          earlyCount: roles.early.length,
           error: `卡片「${title}」的「提前跳出」出线接到了不能跳的目标：`
             + '请把这条线改接到本图里的审批 / 飞书提醒 / 引用模板 / 组间轮询环节'
             + '（开始 / 结束 / 条件分支 / 数据查询没有"到达"这一步）',
         }
       }
-      early = t.value
-    }
-    if (early && afterLoopSet) {
-      return {
-        error: `卡片「${title}」的「轮完」走向配了两处：卡片上的下拉与画布上的两条出线只能留一处`
-          + '（两条出线时，「轮完」就是那条没标「提前跳出」的线，请把下拉清空）',
+      if (t.value) {
+        earlyTargets.push(t.value)
       }
     }
-    return { next: (roles.done ?? roles.early)?.target, ...(early ? { early } : {}) }
+    if (earlyTargets.length > 0 && afterLoopSet) {
+      return {
+        earlyCount: roles.early.length,
+        error: `卡片「${title}」的「轮完」走向配了两处：卡片上的下拉与画布上的出线只能留一处`
+          + '（接出线时「轮完」就是那条没标「提前跳出」的线，请把下拉清空）',
+      }
+    }
+    /*
+     * 卡片的后继：
+     *   · 有「轮完」线 → 就是它（正常形态）；
+     *   · 没有「轮完」线、只有**一条**「提前跳出」→ 老写法（那条线同时兼任两条走向），照旧用它；
+     *   · 没有「轮完」线、却有多条「提前跳出」→ 说不清"轮完之后去哪"，当场报错。
+     */
+    let next = roles.done?.target as string | undefined
+    if (!next) {
+      if (earlyTargets.length === 1) {
+        next = earlyTargets[0].stepId
+      } else if (earlyTargets.length > 1) {
+        return {
+          earlyCount: roles.early.length,
+          error: `卡片「${title}」接了 ${earlyTargets.length} 条「提前跳出」出线、却没有「轮完」出线：`
+            + '请把其中一条的「本线走向」改成「轮完」（所有组都轮完之后走它）',
+        }
+      }
+    }
+    return {
+      ...(next ? { next } : {}),
+      // 多条时不给缺省：环内那条线必须自己选（见 cardGraphToSteps 的报错文案）
+      ...(earlyTargets.length === 1 ? { early: earlyTargets[0] } : {}),
+      earlyCount: roles.early.length,
+    }
   }
 
   /**
@@ -360,6 +437,85 @@ export function graphToFlowFrom (
   }
 
   /**
+   * 「引用模板」**只接一条出线、这条线却绑了结论**时的编译结果：
+   * "命中这个结论才继续往下，**其它结论整单结束**"。
+   *
+   * 为什么要有这条兜底：画布是树，画不出"其它结论 → 结束"那第二根线，而业务上极常见 ——
+   * 弃置模板这一段的结论是 `pick_team` 才继续，其它结论（建议返工 / 建议弃置…）到这儿就收尾。
+   * 以前这种情况直接报错、逼用户补一条信息量为零的线到「结束」；现在程序把这个"否则"补出来，
+   * 与用户"其它结论都连到结束"的画法**完全等价**，只是少画一条线。
+   *
+   * 口径与多出线一致（结论码校验 / 文案纠错 / 条件填全都用同一套），补的只有一句"否则"：
+   *   · 命中这条线的条件 → `steps: []` = 接着走卡片后面那个环节（由调用方的 cur / target 推进）；
+   *   · 其它结论        → 无条件兜底分支，`isEnd: true`。
+   *
+   * 返回 `branches: undefined` 表示这条线**没绑结论** —— 调用方按老语义"穿过去"处理。
+   */
+  function singleLineRefBranches (
+    nodeId: string,
+    be: any,
+    refName: string,
+  ): { branches?: ApprovalBranch[], error?: string, errorEdgeId?: string } {
+    const list: ConditionExpr[] = Array.isArray(be.data?.conditions)
+      ? be.data.conditions
+      : (be.data?.condition ? [be.data.condition] : [])
+    // 没绑结论 = 纯"穿过去"，不补兜底（老语义，一字不改）
+    if (!list.some(c => !isConditionGroup(c) && c.field === 'result')) {
+      return {}
+    }
+    const logic = be.data?.logic === 'or' ? 'or' : 'and'
+    const name = String(be.label ?? '').trim() || refName
+
+    const labelTypo = list.find((c): c is BranchCondition => {
+      if (isConditionGroup(c) || c.field !== 'result') {
+        return false
+      }
+      const v = String(c.value ?? '').trim()
+      return v !== '' && !RESULT_CODES.has(v) && RESULT_LABEL_TO_CODE.has(v)
+    })
+    if (labelTypo) {
+      const label = String(labelTypo.value).trim()
+      return {
+        error: `「${name}」的结论条件写的是文案「${label}」，而引擎按结论码选路（这么写永远不命中）——`
+          + ` 请点这条线，在上方面板里选「${label}」（码是 ${RESULT_LABEL_TO_CODE.get(label)}）`,
+        errorEdgeId: be.id,
+      }
+    }
+    const noResult = list.find(c => !isConditionGroup(c) && c.field === 'result' && String(c.value ?? '').trim() === '')
+    if (noResult) {
+      return {
+        error: `「${name}」这条线还没选结论：请点这条线，在上方面板里选一个审批结论`,
+        errorEdgeId: be.id,
+      }
+    }
+    const bad = findBad(list.filter(x => !isResultCondition(x)), `「${name}」的`)
+    if (bad) {
+      return { error: bad, errorEdgeId: be.id }
+    }
+
+    const code = resultConditionsOf(be)[0] ?? list.find((c): c is BranchCondition => !isConditionGroup(c) && c.field === 'result')?.value
+    const hitName = String(be.label ?? '').trim()
+      || APPROVAL_RESULTS.find(r => r.value === code)?.label
+      || String(code ?? '')
+    return {
+      branches: [
+        {
+          id: be.id,
+          name: hitName,
+          // 兼容旧结构：单条件取首条；多条件走 conditions + logic（与 collectBranches 同款）
+          condition: asSingleCondition(list[0]),
+          logic,
+          conditions: list.length > 0 ? list : undefined,
+          steps: [],
+          isEnd: false,
+        },
+        // 兜底出口：其它结论 → 整单结束
+        { id: `${nodeId}:other`, name: '其他结论', steps: [], isEnd: true },
+      ],
+    }
+  }
+
+  /**
      * 收集某节点的全部出边为「分支组」：
      * - kind 'approval'：审批结果分支，每条绑定一个审批结论（field=result）；
      *   无条件主线**可选**、至多一条；
@@ -447,47 +603,6 @@ export function graphToFlowFrom (
        * 与选项文本一样，没配就**不写这个字段**，flow 形状与老模板保持一致。
        */
       const optionGroups = normalizeOptionGroups(be.data?.optionGroups)
-
-      /** 递归校验：条件组里的条件也要填全（组可任意嵌套，所以必须递归） */
-      const findBad = (items: ConditionExpr[], where: string): string | null => {
-        for (const [k, it] of items.entries()) {
-          if (isConditionGroup(it)) {
-            const err = findBad(it.items ?? [], `${where}第 ${k + 1} 个条件组里的`)
-            if (err) {
-              return err
-            }
-            continue
-          }
-          if (!String(it.field ?? '').trim()) {
-            return `${where}第 ${k + 1} 个条件未填写字段名`
-          }
-          /*
-           * 值是数组时（只有「包含」会这样）按"有效值拼接"来看：
-           * String(['a','b']) = "a,b" 没问题，但 String(['','']) = "," 会被当成填过，
-           * 而它其实一个值都没填 —— 那种情况应该照常报"未填写比较值"。
-           */
-          const rawValue = (Array.isArray(it.value)
-            ? it.value.filter(v => String(v ?? '').trim() !== '').join(',')
-            : String(it.value ?? '')).trim()
-          if (rawValue === '') {
-            return `${where}第 ${k + 1} 个条件未填写比较值`
-          }
-          /*
-           * 「@字段名」= 引用另一个字段的值（见 types/approval 的 FIELD_REF_PREFIX）。
-           * 下面两种写法都会**静默失效**（条件永远不命中），所以在这里明确拦下：
-           *   ① 只写了一个 @，没写字段名；
-           *   ② 审批结论条件写成了引用 —— 它的值会被 firstResultValueOf 当结论码读走
-           *      （用来判定终态和可选结论），引用语法对它一律不生效。
-           */
-          if (rawValue === FIELD_REF_PREFIX) {
-            return `${where}第 ${k + 1} 个条件写了「${FIELD_REF_PREFIX}」但没写引用的字段名`
-          }
-          if (it.field === 'result' && rawValue.startsWith(FIELD_REF_PREFIX)) {
-            return `${where}第 ${k + 1} 个条件是审批结论条件，比较值必须是结论码，不能写成「${FIELD_REF_PREFIX}字段名」`
-          }
-        }
-        return null
-      }
 
       /*
        * 这条线配的**办理选项条件**（`offerWhen`，见 types/approval 的 ApprovalBranch.offerWhen）：
@@ -965,8 +1080,9 @@ export function graphToFlowFrom (
           return { steps, territory, error: afterLoop.error, errorNodeId: p }
         }
         /*
-         * 出线按走向拆：一条「轮完」（卡片的后继）、一条「提前跳出」
-         * （环内「提前结束轮询」没选目标时落到它上面）。见 readLoopOuts / splitLoopOuts。
+         * 出线按走向拆：一条「轮完」（卡片的后继）、任意多条「提前跳出」
+         * （环内「提前结束轮询」没选目标时，只有恰好一条提前跳出线才能落到它上面）。
+         * 见 readLoopOuts / splitLoopOuts。
          */
         const loopOuts = readLoopOuts(outs, title, !!afterLoop.value)
         if (loopOuts.error) {
@@ -978,6 +1094,7 @@ export function graphToFlowFrom (
         // 卡片内部图允许「提前结束轮询」跳到**卡片外**的环节 → 把本图的审批环节当白名单传进去
         const inner = cardGraphToSteps(d?.graph, {
           externalApprovalIds: outerExitIds,
+          earlyLineCount: loopOuts.earlyCount,
           ...(loopOuts.early ? { defaultJumpTarget: loopOuts.early.stepId } : {}),
         })
         if (inner.error) {
@@ -1019,19 +1136,26 @@ export function graphToFlowFrom (
           return { steps, territory, error: '流程中检测到环（节点被重复经过），请检查连线' }
         }
         // 单出线：这一段走完继续往下（老语义）。这条线上绑了结论就报错，理由见顶层同款校验。
+        /*
+         * 单出线：
+         *   · 这条线**没绑结论** → 老语义"这一段走完继续往下"；
+         *   · 这条线**绑了结论** → 命中才继续，其它结论**默认结束**（见 singleLineRefBranches）。
+         */
         if (outs.length === 1) {
-          const bound = resultConditionsOf(outs[0])
-          if (bound.length > 0) {
+          const only = singleLineRefBranches(p, outs[0], ref.name)
+          if (only.error) {
             return {
-              steps,
-              territory,
-              error: `「${ref.name}」只接了一条出线，这条线却又绑了结论（${bound.join('、')}）——`
-                + '单出线的意思是"这一段走完就继续往下"，其它结论没有去处。要按结论分流请**再拖一条出线**（≥2 条）',
-              errorNodeId: p,
-              errorEdgeId: outs[0].id,
+              steps, territory, error: only.error,
+              errorNodeId: p, errorEdgeId: only.errorEdgeId,
             }
           }
-          steps.push({ id: pn.id, type: 'ref', name: ref.name, refTemplateId: ref.refTemplateId })
+          steps.push({
+            id: pn.id,
+            type: 'ref',
+            name: ref.name,
+            refTemplateId: ref.refTemplateId,
+            ...(only.branches ? { branches: only.branches } : {}),
+          })
           p = outs[0].target
           continue
         }
@@ -1079,11 +1203,6 @@ export function graphToFlowFrom (
     // 分支/主线汇聚之后，业务节点只允许被主路径经过一次；重复经过即存在环或反向回连
     if ((node.type === 'approval' || node.type === 'condition' || node.type === 'notify' || node.type === 'probe' || node.type === 'ref') && visited.has(cur)) {
       const t = String((node.data as ApprovalNodeData)?.title || '未命名环节')
-      /*
-       * 走「跳出循环 / 提前跳出」的支路时撞上走过的环节 = 这条支路**又绕回了主流程**。
-       * 这种写法在这套"线性链路"里表达不出来：跳过去之后只能一路走下去到「结束」，
-       * 绕回主干会让主干被重复经过（谁先谁后说不清）。所以给一句能照着改的提示。
-       */
       if (extraFrom) {
         return {
           flow: [],
@@ -1252,8 +1371,9 @@ export function graphToFlowFrom (
         return { flow: [], error: afterLoop.error, errorNodeId: cur }
       }
       /*
-       * 出线按走向拆：一条「轮完」（卡片的后继）、一条「提前跳出」
-       * （环内「提前结束轮询」没选目标时落到它上面）。见 readLoopOuts / splitLoopOuts。
+       * 出线按走向拆：一条「轮完」（卡片的后继）、任意多条「提前跳出」
+       * （环内「提前结束轮询」没选目标时，只有恰好一条提前跳出线才能落到它上面）。
+       * 见 readLoopOuts / splitLoopOuts。
        */
       const loopOuts = readLoopOuts(nexts, name, !!afterLoop.value)
       if (loopOuts.error) {
@@ -1262,6 +1382,7 @@ export function graphToFlowFrom (
       // 同上：卡片内部图可以用「提前结束轮询」跳到卡片外的环节
       const inner = cardGraphToSteps(d?.graph, {
         externalApprovalIds: outerExitIds,
+        earlyLineCount: loopOuts.earlyCount,
         ...(loopOuts.early ? { defaultJumpTarget: loopOuts.early.stepId } : {}),
       })
       if (inner.error) {
@@ -1290,9 +1411,12 @@ export function graphToFlowFrom (
      *
      * 两种接法，由画布上接了几条出线决定：
      *
-     *  ① **一条出线** = "这一段走完，继续卡片后面那个环节"（穿过去）。老语义、也是默认。
-     *     这时**不接受**在这条线上配结论条件：那种写法本意是"只在这个结论才往下走"，
-     *     可这条线之外没有"否则"可走（其它结论会一条线都命中不了 → 单据停住）。
+     *  ① **一条出线，线上不绑结论** = "这一段走完，继续卡片后面那个环节"（穿过去）。老语义、也是默认。
+     *
+     *  ①' **一条出线，线上绑了结论** = "只有这个结论才继续往下，其它结论**走结束**"。
+     *     画布是树，画不出"其它结论 → 结束"这第二根线，但业务上极常见（弃置段最后是
+     *     `pick_team` 才往下，建议返工 / 建议弃置到这儿就该收尾）。程序把这个"否则"
+     *     补成一条兜底出口分支，见 `singleLineRefBranches`。
      *
      *  ② **两条以上出线** = 按结论分流：**这一段最后办出来的那个结论**决定接哪条线。
      *     引用段落里最后一个被办理的结论会以 `result` 继续传给下游
@@ -1323,20 +1447,17 @@ export function graphToFlowFrom (
         }
       }
       if (nexts.length === 1) {
-        const bound = resultConditionsOf(nexts[0])
-        if (bound.length > 0) {
-          return {
-            flow: [],
-            error: `「${ref.name}」只接了一条出线，这条线却又绑了结论（${bound.join('、')}）——`
-              + '单出线的意思是"这一段走完就继续往下"，其它结论没有去处。'
-              + '要按结论分流请**再拖一条出线**（≥2 条）；只是想在结论上做判断，'
-              + '请在卡片**后面**接一个「条件分支」、用「上一环节的审批结论」判断。另外：'
-              + '要按段落**中间**的结论分流，得把下游环节画进**被引用的那个模板**里',
-            errorNodeId: cur,
-            errorEdgeId: nexts[0].id,
-          }
+        const only = singleLineRefBranches(cur, nexts[0], ref.name)
+        if (only.error) {
+          return { flow: [], error: only.error, errorNodeId: cur, errorEdgeId: only.errorEdgeId }
         }
-        flow.push({ id: node.id, type: 'ref', name: ref.name, refTemplateId: ref.refTemplateId })
+        flow.push({
+          id: node.id,
+          type: 'ref',
+          name: ref.name,
+          refTemplateId: ref.refTemplateId,
+          ...(only.branches ? { branches: only.branches } : {}),
+        })
         cur = nexts[0].target
         continue
       }
@@ -1547,17 +1668,23 @@ export function optionContextOf (
 }
 
 /**
- * 本单所属的**团队**（团队表里按「组别」反查，见 utils/organazation 的 teamOfGroup）——
- * 「选择接收组别」的候选要**限定在它之内**（业务口径：不涉及其他团队）。
+ * 本单所属的**部门**（团队表里按「团队」反查 `parent`，见 utils/organazation 的 deptOfTeam）——
+ * 「选择接收团队」的候选要**限定在它之内**（业务口径：不涉及其他部门）。
  *
- * 取不到（快照里没有组别 / 表里没登记）返回空串：那时选择器退回"全部团队按团队分组"，
+ * 口径：团队 = `groupManage.group`，部门 = `groupManage.parent`。
+ * 取不到（快照里没有团队 / 表里没登记）返回空串：那时选择器退回"全部按部门分组"，
  * 宁可多列一些，也别让办理人没得选。
  */
 export function receiverTeamOf (
   order?: { chain?: { context?: FlowContext }, expand?: { relation?: Record<string, unknown> | null } } | null,
 ): string {
-  const group = String(flowContextOfOrder(order)['组别'] ?? '').trim()
-  return group ? (teamOfGroup(group) ?? '') : ''
+  const context = flowContextOfOrder(order)
+  /*
+   * 这一列改过名：新单据的快照里叫「团队」，改名之前建的老单据里叫「组别」。
+   * 两个都认 —— 否则历史单的「选择接收组别」会突然退化成"全部团队"，办理人得自己翻。
+   */
+  const team = String(context['团队'] ?? context['组别'] ?? '').trim()
+  return team ? (deptOfTeam(team) ?? '') : ''
 }
 
 /** 本环节之前**最后一条已办结论**（没有就 undefined）；口径同 mainOf：取该环节的办理人那条 */
@@ -1687,6 +1814,23 @@ export function ensureRejectLoopBack (flow: ApprovalFlow): ApprovalFlow {
     }
 
     /*
+     * 「数据查询」节点：它是**容器**（建单期只保留命中那条分支，见 utils/approvalProbe），
+     * 所以 ① 不占 prevId、② 分支里的步骤必须递归进去补回退。
+     *
+     * ⚠️ 以前这里落到下面的"默认分支"，查询分支里的环节一个回退分支都补不到 ——
+     *    展开后它们的「上一级」= 查询节点本身，而它不是一个可退回的环节，
+     *    于是这些环节在办理端**永远没有「回退」这个选项**。最典型的就是
+     *    "进入轮询的第一个环节"（轮询卡片常挂在查询的「存在 / 不存在」分支里，实测反馈）。
+     */
+    if (node.type === 'probe') {
+      out.push({
+        ...node,
+        branches: (node.branches ?? []).map(b => ({ ...b, steps: ensureRejectLoopBackInSteps(b.steps, prevId) })),
+      })
+      continue
+    }
+
+    /*
      * 「引用模板」：与「组间轮询」**同一口径** —— 卡片作为整体只占一个 prevId
      * （它本身没有内部步骤可递归，内容在源模板里、建单期才搬进来）。
      *
@@ -1744,7 +1888,14 @@ export function ensureRejectLoopBackInSteps (
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i]
 
-    if (s.type === 'branch' && s.branches?.length) {
+    /*
+     * 分支组 / 数据查询：都是**容器**，本身不占 prevId；分支里的首个步骤拿到的"上一级"
+     * 仍是最外层的 prevId（查询在建单期会展开成单分支，见 utils/approvalProbe）。
+     *
+     * ⚠️ 漏掉 probe 的后果：查询「存在 / 不存在」分支里的环节（如挂在里面的轮询卡片）
+     *    一个回退分支都补不到 → 办理端没有「回退」选项，且不报错。
+     */
+    if ((s.type === 'branch' || s.type === 'probe') && s.branches?.length) {
       out.push(s)
       for (const b of s.branches) {
         b.steps = ensureRejectLoopBackInSteps(b.steps, prevId)

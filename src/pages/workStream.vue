@@ -26,7 +26,7 @@
         <span v-if="selectedIds.length" class="text-[12px] text-medium-emphasis">已选 {{ selectedIds.length }} 条</span>
         <v-btn color="#0052D9" variant="flat" size="small" prepend-icon="mdi-flash" :loading="starting"
           @click="startTasks"><span class="mb-1">{{ starting ? batchText : '开启任务' }}</span></v-btn>
-        <v-icon-btn icon="mdi-bug" size="30" @click=""></v-icon-btn>
+        <v-icon-btn icon="mdi-bug" size="30" title="任务执行记录" @click="openRuns"></v-icon-btn>
       </div>
     </v-sheet>
     <div class="d-flex align-center justify-space-between">
@@ -102,6 +102,55 @@
           <v-spacer />
           <v-btn color="#0052D9" variant="flat" size="small" @click="settingsOpen = false">完成</v-btn>
         </v-card-actions>
+      </v-card>
+    </v-dialog>
+    <v-dialog v-model="runsOpen" max-width="760" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center ga-3 text-[15px]">
+          <span>任务执行记录</span>
+          <v-chip size="x-small" variant="tonal" label>本机最近 {{ runs.length }} 次</v-chip>
+          <v-spacer />
+          <v-btn variant="text" size="small" :disabled="!runs.length" @click="clearRuns">清空</v-btn>
+          <v-btn color="#0052D9" variant="flat" size="small" @click="runsOpen = false">关闭</v-btn>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pa-0">
+          <div v-if="!runs.length" class="text-[13px] text-medium-emphasis text-center py-8">
+            还没有执行记录。勾选数据后点「开启任务」，每一行的结果都会记在这里<br>
+            （只存本机，最多保留最近 {{ MAX_RUNS }} 次）
+          </div>
+          <!-- 直接平铺：记录是给人"扫一眼失败原因"的，藏在折叠里反而要多点一次 -->
+          <template v-else>
+            <div v-for="run in runs" :key="run.id" class="run-block">
+              <div class="d-flex align-center ga-2 flex-wrap px-4 py-2">
+                <span class="text-[13px] font-weight-medium">{{ runTimeText(run.at) }}</span>
+                <v-chip size="x-small" color="success" variant="tonal" label>成功 {{ run.created }}</v-chip>
+                <v-chip v-if="run.skipped" size="x-small" color="warning" variant="tonal" label>跳过
+                  {{ run.skipped }}</v-chip>
+                <v-chip v-if="run.failed" size="x-small" color="error" variant="tonal" label>失败
+                  {{ run.failed }}</v-chip>
+                <v-chip v-if="run.locked" size="x-small" color="info" variant="tonal" label>已有单
+                  {{ run.locked }}</v-chip>
+                <span class="text-[12px] text-medium-emphasis">处理 {{ run.total }} 条</span>
+              </div>
+              <div class="px-4 pb-2">
+                <div v-for="(r, i) in run.results" :key="i" class="d-flex align-start ga-2 py-1 text-[12px]">
+                  <v-chip :color="runKindColor(r.kind)" size="x-small" variant="flat" label class="flex-shrink-0">
+                    {{ RUN_KIND_LABEL[r.kind] }}
+                  </v-chip>
+                  <span class="font-weight-medium flex-shrink-0">{{ r.label }}</span>
+                  <span class="text-medium-emphasis">{{ r.detail || '—' }}</span>
+                </div>
+                <div v-if="!run.results.length" class="text-[12px] text-medium-emphasis py-1">
+                  没有进入处理的行（选中的都已有单）
+                </div>
+                <div v-if="run.dropped" class="text-[12px] text-medium-emphasis pt-1">
+                  另有 {{ run.dropped }} 行明细未记录（单次最多保存 {{ MAX_RUN_RESULTS }} 行）
+                </div>
+              </div>
+            </div>
+          </template>
+        </v-card-text>
       </v-card>
     </v-dialog>
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="6000" variant="tonal">
@@ -197,7 +246,7 @@ const colVisible = ref<Record<string, boolean>>({})
 
 const userStore = useUserStore()
 
-const HIDDEN_COLUMN_KEYS = new Set(['是否属于呆滞库存'])
+const HIDDEN_COLUMN_KEYS = new Set(['是否属于待评估库存'])
 
 /** 字段清单里该列的默认显隐 */
 function defaultVisible(key: string): boolean {
@@ -690,8 +739,17 @@ type FilterKey =
   // 「任务状态」不在 SELECT_CONFIGS 里 —— 它不是 bi_rows 的列，是关联单据算出来的（见 taskStatusQuery）
   | 'taskStatus'
 
-const DEAD_COLUMN = biColumnOf('是否属于呆滞库存') ?? 'is_dead'
-const FIXED_EQUALS: Record<string, string> = { [DEAD_COLUMN]: '0' }
+/**
+ * 本页固定只看「待评估」的行（页头就是这么写的）。
+ *
+ * ⚠️ 值必须是**归一化后的中文词**：待评估列入库时已由 BI_VALUE_MAP 统一成
+ *    「待评估 / 无需评估」（待评估 = 原来的呆滞 0）。这里若还写 '0'，
+ *    就是拿一个库里已不存在的值做等值过滤 —— PB 不报错，只返回 0 行，
+ *    页面表现为「一条数据都看不到」，而接口日志看起来完全正常。
+ */
+const DEAD_COLUMN = biColumnOf('是否属于待评估库存') ?? 'is_dead'
+const DEAD_VALUE = '待评估'
+const FIXED_EQUALS: Record<string, string> = { [DEAD_COLUMN]: DEAD_VALUE }
 
 const SELECT_CONFIGS: { key: FilterKey; field: string; mode: 'eq' | 'includes' }[] = [
   { key: 'sale', field: '供应商', mode: 'eq' },
@@ -699,7 +757,7 @@ const SELECT_CONFIGS: { key: FilterKey; field: string; mode: 'eq' | 'includes' }
   { key: 'manager', field: '组长', mode: 'eq' },
   { key: 'department', field: '部门', mode: 'eq' },
   // { key: 'lamp', field: '是否属于灯具', mode: 'eq' },
-  { key: 'group', field: '组别', mode: 'eq' },
+  { key: 'group', field: '团队', mode: 'eq' },
   { key: 'platform', field: '平台', mode: 'eq' },
   { key: 'warehouse', field: '仓位', mode: 'eq' },
 ]
@@ -1019,7 +1077,7 @@ const TASK_TEMPLATE_WORD = '模板'
  * 拿不到组别 → 返回 `''`，由调用方按"这一行用不了模板"报出来（不猜、也不静默换个模板）。
  */
 function taskTemplateNameOf(row: Record<string, unknown>): string {
-    const group = String(row['组别'] ?? '').trim()
+    const group = String(row['团队'] ?? '').trim()
     return group ? `${group}${TASK_TEMPLATE_WORD}` : ''
 }
 
@@ -1122,6 +1180,119 @@ interface TaskResult {
     detail?: string
 }
 
+/* ==================== 本机执行记录（右上角虫子图标） ==================== */
+
+/**
+ * 一次「开启任务」的执行记录。
+ *
+ * 为什么记在**本机**而不入库：它回答的是「刚才那批成了几条、哪几条失败、为什么」，
+ * 属于调试旁路信息。失败原因（流程展开失败、动态审批人没解析出来、PB 拒单）只在
+ * 建单**当场**存在于错误对象里，事后翻 approval_chain 是查不到的 —— 所以要当场留下。
+ * 而为此单开一张表要配迁移 / 清库 / 权限，收益不对等。
+ */
+interface TaskRun {
+    /** 记录 id（时间戳 + 随机），仅用作列表 key */
+    id: string
+    /** 执行时间（ISO，显示时转本地时间） */
+    at: string
+    /** 真正进入处理的行数（= 存储下来的 results.length + dropped） */
+    total: number
+    created: number
+    skipped: number
+    failed: number
+    /** 因为"已有单（在流程中 / 已结束）"被剔除、没进入这一批的条数 */
+    locked: number
+    /** 逐行结果（最多 MAX_RUN_RESULTS 条） */
+    results: TaskResult[]
+    /** 超出上限没存明细的行数 */
+    dropped: number
+}
+
+const RUNS_KEY = 'approval.workStream.taskRuns'
+/** 保留最近几次：够回溯"昨天下午那批"就够了 */
+const MAX_RUNS = 10
+/** 单次最多存多少行明细：上百行的批次会把 localStorage 撑大，而人只会去看失败的那几条 */
+const MAX_RUN_RESULTS = 300
+
+/** 按用户隔离：同一台电脑换人登录，不该看到别人的执行结果 */
+function runsStorageKey(): string {
+    return `${RUNS_KEY}.${userStore.user?.id || 'anon'}`
+}
+
+const runs = ref<TaskRun[]>([])
+const runsOpen = ref(false)
+
+function readRuns(): TaskRun[] {
+    try {
+        const raw = localStorage.getItem(runsStorageKey())
+        const list = raw ? JSON.parse(raw) : []
+        return Array.isArray(list) ? (list as TaskRun[]) : []
+    } catch {
+        // 无痕模式 / 存储被禁用 / 内容被改坏：按"没有记录"处理，不能连带影响开单
+        return []
+    }
+}
+
+function writeRuns() {
+    try {
+        localStorage.setItem(runsStorageKey(), JSON.stringify(runs.value))
+    } catch (e) {
+        // 存不下（配额满 / 存储被禁用）只影响回溯，记在内存里，刷新即丢
+        console.warn('[workStream] 执行记录写入失败:', e)
+    }
+}
+
+function recordRun(results: TaskResult[], locked: number) {
+    if (!results.length && !locked) return
+    const countOf = (kind: TaskResult['kind']) => results.filter(r => r.kind === kind).length
+    const run: TaskRun = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        at: new Date().toISOString(),
+        total: results.length,
+        created: countOf('created'),
+        skipped: countOf('skipped'),
+        failed: countOf('failed'),
+        locked,
+        results: results.slice(0, MAX_RUN_RESULTS),
+        dropped: Math.max(0, results.length - MAX_RUN_RESULTS),
+    }
+    // 新的排在最前面
+    runs.value = [run, ...readRuns()].slice(0, MAX_RUNS)
+    writeRuns()
+}
+
+function openRuns() {
+    runs.value = readRuns()
+    runsOpen.value = true
+}
+
+function clearRuns() {
+    runs.value = []
+    try {
+        localStorage.removeItem(runsStorageKey())
+    } catch {
+        // 存储不可用：清掉内存里的即可
+    }
+}
+
+const RUN_KIND_LABEL: Record<TaskResult['kind'], string> = {
+    created: '成功',
+    skipped: '跳过',
+    failed: '失败',
+}
+
+function runKindColor(kind: TaskResult['kind']): string {
+    if (kind === 'created') return 'success'
+    if (kind === 'skipped') return 'warning'
+    return 'error'
+}
+
+/** 存的 ISO → 本地时间；值坏了原样显示，别让人看到 Invalid Date */
+function runTimeText(iso: string): string {
+    const d = new Date(iso)
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN')
+}
+
 async function startTasks() {
     if (starting.value) return
     const picked = rows.value.filter(r => selectedIds.value.includes(String(r.id ?? '')))
@@ -1178,6 +1349,11 @@ async function startTasks() {
         console.error('[workStream] 批量开启任务失败:', e)
         showMsg(`开启任务失败：${e instanceof Error ? e.message : String(e)}`, 'error')
     } finally {
+        /*
+         * 放 finally 而不是 try 末尾：中途抛错时 results 里是**已经处理完的那部分**，
+         * 那恰恰是最需要留下来的一段（否则只能看到一条汇总 snackbar，刷新就没了）。
+         */
+        recordRun(results, lockedCount)
         starting.value = false
         batchText.value = ''
     }
@@ -1311,6 +1487,11 @@ onBeforeUnmount(() => {
 })
 </script>
 <style scoped lang="scss">
+/* —— 任务执行记录（平铺，靠分隔线分组）—— */
+.run-block + .run-block {
+  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
 /* —— 列设置面板 —— */
 .col-item {
   display: flex;

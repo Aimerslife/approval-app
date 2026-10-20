@@ -29,6 +29,16 @@
  */
 
 export const PB_REQUEST_KEY = {
+  // ===== users（成员清单，见 utils/collection）=====
+  /**
+   * 「角色设置」页要的**全量成员** —— `getUserInfo`。
+   *
+   * 它是 `getFullList`（内部会循环翻页、连发多次同键请求）。目前本集合的清单读
+   * **只此一处**，但登记在这里：以后想加"按部门筛成员""通讯录候选"之类的入口时，
+   * 先来这里确认键不重复，否则两边会互相取消、各自变成空列表。
+   */
+  usersList: 'users:list',
+
   // ===== app_chain（审批流**模板**，见 utils/collection）=====
   /** 模板管理页的表格 —— `getApproval` */
   chainList: 'app_chain:list',

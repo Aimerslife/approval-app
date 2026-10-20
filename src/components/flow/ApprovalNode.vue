@@ -49,11 +49,11 @@
                 </v-avatar>
 
                 <template v-if="m.role">
-                    <span class="member-name">部门负责人</span>
+                    <span class="member-name">团队负责人</span>
                     <span class="role-tag role-approve">动态</span>
 
-                    <input v-model="roleOf(m).deptFrom" class="member-dept nodrag" placeholder="部门字段 如 组别"
-                        title="取数据行的哪个字段当部门名（如「组别」「团队」）；留空则建单时会报错">
+                    <input v-model="roleOf(m).deptFrom" class="member-dept nodrag" placeholder="字段 如 团队"
+                        title="取数据行的哪个字段当团队/部门名（如「团队」）；留空则建单时会报错">
                 </template>
 
                 <template v-else>
@@ -76,8 +76,8 @@
 
             <div v-if="props.data.members.length === 0" class="empty-hint" :title="isNotify
                 ? '飞书提醒至少要有一个提醒对象，否则这一环不会发出任何通知（保存时会拦住）'
-                : '这一环可以留空：由上一环节的办理人用「选择接收组别」当场指定接收方（候选来自团队表、限定在本单所属团队内）；该结论会终结流程，后面接的环节不会生效'">
-                {{ isNotify ? '还没有提醒对象（保存时会拦住）' : '待指定（由上一环节「选择接收组别」指定，流程即终结）' }}
+                : '这一环可以留空：由上一环节的办理人用「选择接收团队」当场指定接收方（候选来自团队表、限定在本单所属部门内）；该结论会终结流程，后面接的环节不会生效'">
+                {{ isNotify ? '还没有提醒对象（保存时会拦住）' : '待指定（由上一环节「选择接收团队」指定，流程即终结）' }}
             </div>
 
             <div class="d-flex ga-1">

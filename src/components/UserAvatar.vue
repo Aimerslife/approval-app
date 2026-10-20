@@ -1,14 +1,11 @@
 <template>
-  <v-avatar :class="['user-avatar', { 'user-avatar--interactive': interactive }]" 
-    :color="showImage ? undefined : 'primary'" :size="size" :title="name" :variant="showImage ? undefined : 'tonal'">
-
-    <v-img v-if="showImage" :alt="name" :src="avatarUrl" @error="failed = true" />
-    <span v-else-if="hasUser" class="user-avatar__initial" :style="{ fontSize: `${initialSize}px` }">{{ initial
-      }}</span>
-
-    <v-icon v-else icon="mdi-account" :size="iconSize" />
-  </v-avatar>
-      
+    <v-avatar :class="['user-avatar', { 'user-avatar--interactive': interactive }]"
+      :color="showImage ? undefined : 'primary'" :size="size" :title="name" :variant="showImage ? undefined : 'tonal'">
+      <v-img v-if="showImage" :alt="name" :src="avatarUrl" @error="failed = true" />
+      <span v-else-if="hasUser" class="user-avatar__initial" :style="{ fontSize: `${initialSize}px` }">{{ initial
+        }}</span>
+      <v-icon v-else icon="mdi-account" :size="iconSize" />
+    </v-avatar>
 </template>
 
 <script lang="ts" setup>

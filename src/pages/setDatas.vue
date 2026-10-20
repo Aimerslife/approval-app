@@ -1,19 +1,36 @@
 <template>
   <v-container :class="fullSceen ? 'screen-full' : 'pa-3'" fluid @dblclick="onDblClick" @pointerdown="onPointerDown">
-    <v-sheet border class="filter-bar p-3 d-flex flex-wrap align-center ga-3" rounded="5px">
-      <v-text-field v-model="draft.search" density="compact" flat class="filter-input" hide-details label="搜索"
-        prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" @keyup.enter="applyFilters" />
-
-      <v-select v-for="ctl in selectControls" :key="ctl.key" v-model="draft[ctl.key]" clearable class="filter-select"
-        density="compact" flat hide-details :items="ctl.items" :label="ctl.label"
-        :menu-props="{ contentClass: 'filter-menu' }" single-line variant="outlined" />
-
-      <div class="d-flex align-center ga-2">
-        <v-btn color="surface-variant" size="small" variant="flat" @click="resetFilters">
-          <span>重置</span>
+    <v-sheet border class="filter-bar p-3 d-flex flex-wrap align-center ga-3 justify-space-between" rounded="5px">
+      <div class="d-flex flex-wrap align-center ga-2">
+        <v-text-field v-model="draft.search" density="compact" flat class="filter-input" hide-details label="搜索"
+          prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" @keyup.enter="applyFilters" />
+        <v-select v-for="ctl in selectControls" :key="ctl.key" v-model="draft[ctl.key]" clearable class="filter-select"
+          density="compact" flat hide-details :items="ctl.items" :label="ctl.label"
+          :menu-props="{ contentClass: 'filter-menu' }" single-line variant="outlined" />
+        <div class="d-flex align-center ga-2">
+          <v-btn color="surface-variant" size="small" variant="flat" @click="resetFilters">
+            <span>重置</span>
+          </v-btn>
+          <v-btn color="#0052D9" size="small" variant="flat" @click="applyFilters">确认</v-btn>
+        </div>
+      </div>
+      <div class="d-flex align-center gap-1 mr-2">
+        <v-file-input ref="fileInputRef" v-model="attachment" accept=".xlsx,.xls,.csv" class="attachment-input"
+          density="compact" :disabled="!canUpload" hide-input @update:model-value="onFileChange">
+          <template #prepend>
+            <v-icon color="#1055C9" size="14">mdi-paperclip</v-icon>
+          </template>
+        </v-file-input>
+        <span v-if="attachment" class="text-[12px] text-medium-emphasis text-decoration-underline text-truncate"
+          :title="attachment.name">
+          {{ attachment.name }}
+        </span>
+        <span v-else class="text-[12px] text-medium-emphasis"
+          :class="canUpload ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
+          :title="canUpload ? undefined : NO_UPLOAD_TIP" @click="openFilePicker">上传附件</span>
+        <v-btn v-if="attachment" density="compact" icon="mdi-close" variant="plain" @click="attachment = null">
+          <v-icon icon="mdi-close" size="15" />
         </v-btn>
-
-        <v-btn color="#0052D9" size="small" variant="flat" @click="applyFilters">确认</v-btn>
       </div>
     </v-sheet>
 
@@ -29,7 +46,6 @@
           <!-- 待上传文件：先告诉用户入库后是多少行，避免上传完以为丢了数据 -->
           <span v-if="pendingRows.length > 0" class="text-[12px] text-medium-emphasis">
             · 待上传 {{ pendingRows.length }} 行</span>
-
           <span v-if="pendingRows.length > 0 && (dedupePreview.duplicated || dedupePreview.missingKey)"
             class="text-[12px] text-warning">（唯一键去重后 {{ dedupePreview.unique }} 行<template
               v-if="dedupePreview.duplicated">，{{ dedupePreview.duplicated }} 行重复</template>
@@ -41,31 +57,6 @@
           <v-btn class="ml-3" color="#0052D9" :disabled="loading" size="x-small" variant="flat"
             @click="exportToExcel">导出</v-btn>
         </div>
-
-        <div class="d-flex align-center ml-2">
-          <!-- 上传是管理员及以上的操作（见 utils/permissions 的 ACTION_ROLES）。
-               输入框也要禁用：只拦那个文字入口的话，键盘/程序化触发仍能选到文件 -->
-          <v-file-input ref="fileInputRef" v-model="attachment" accept=".xlsx,.xls,.csv" class="attachment-input"
-            density="compact" :disabled="!canUpload" hide-input @update:model-value="onFileChange">
-            <template #prepend>
-              <v-icon color="#1055C9" size="14">mdi-paperclip</v-icon>
-            </template>
-          </v-file-input>
-
-          <span v-if="attachment" class="text-[12px] text-medium-emphasis text-decoration-underline text-truncate"
-            :title="attachment.name">
-            {{ attachment.name }}
-          </span>
-
-          <span v-else class="text-[12px] text-medium-emphasis"
-            :class="canUpload ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
-            :title="canUpload ? undefined : NO_UPLOAD_TIP" @click="openFilePicker">上传附件</span>
-
-          <v-btn v-if="attachment" density="compact" icon="mdi-close" variant="plain" @click="attachment = null">
-            <v-icon icon="mdi-close" size="15" />
-          </v-btn>
-        </div>
-
         <v-btn color="#0052D9" :disabled="!canUpload || pendingRows.length === 0 || uploading" :loading="uploading"
           size="x-small" :title="canUpload ? '把选中的文件写入数据库，并删除库里多出来的旧行' : NO_UPLOAD_TIP" variant="flat"
           @click="uploadDatas">上传到数据库</v-btn>
@@ -80,14 +71,12 @@
       <v-dialog v-model="purgeDialog" max-width="620" persistent>
         <v-card>
           <v-card-title class="text-error">清空 BI 数据（bi_rows）</v-card-title>
-
           <v-card-text>
             <p class="text-[13px] mb-2">
               将<strong>永久删除</strong> BI 数据表（<code>bi_rows</code>）的全部记录。
               它是 BI 同步进来的镜像，之后可以用「BI 同步」再拉回来；但同步之前的这段时间
               <strong>页面上的数据是空的</strong>，建议先用「导出」留一份备份。
             </p>
-
             <v-table v-if="purgeSummary" class="purge-table" density="compact">
               <thead>
                 <tr>
@@ -102,14 +91,11 @@
                 </tr>
               </tbody>
             </v-table>
-
             <div v-else class="text-[12px] text-medium-emphasis">正在统计…</div>
-
             <div v-if="purgeSummary" class="text-[12px] mt-2">
               共 <strong>{{ purgeSummary.totalCount }}</strong> 条将被删除；
               <strong>不会动</strong>：{{ purgeSummary.kept.join('、') }}（账号留着才登得进来）
             </div>
-
             <v-text-field v-model="purgeConfirmText" class="mt-3" density="compact" :disabled="purging" hide-details
               label="输入「清空」以确认" variant="outlined" />
           </v-card-text>
@@ -132,19 +118,15 @@
               把 <code>bi_rows</code> 的<strong>真实列</strong>写进表格读的 <code>data</code> 快照 ——
               <strong>只更新快照</strong>：列、审批单都不动；唯一键（<code>sync_key</code>）只有勾上最后那项才会写。
             </p>
-
             <p class="text-[12px] mb-2 text-medium-emphasis">
               什么时候用它：你直接在库里改了列（筛选跟着变了、单元格值不变），用它把界面刷成列的值。
             </p>
-
             <div v-if="snapshotSummary" class="text-[12px]">
               扫描 <strong>{{ snapshotSummary.scanned }}</strong> 行：
               将更新快照 <strong>{{ snapshotSummary.changed }}</strong> 行，未变 {{ snapshotSummary.unchanged }} 行。
-
               <template v-if="snapshotSummary.rekey">
                 <div class="mt-1">
                   <span>将重算唯一键 <strong>{{ snapshotSummary.keyChanged }}</strong> 行</span>
-
                   <span v-if="snapshotSummary.keyConflicts > 0" class="text-warning">
                     ，{{ snapshotSummary.keyConflicts }} 行因键冲突跳过（只同步快照）
                   </span>
@@ -223,7 +205,7 @@
     </div>
 
     <v-data-table-server v-model:items-per-page="itemsPerPage" v-model:page="page" :headers="headers" :items="rows"
-       :items-length="totalItems" hover :items-per-page-options="[20, 50, 100, 200]" density="compact"
+      :items-length="totalItems" hover :items-per-page-options="[20, 50, 100, 200]" density="compact"
       items-per-page-text="每页条数" fixed-header :loading="loading" fixed-footer :height="tableHeight" class="text-[12px]"
       :no-data-text="noDataText" striped="odd" @update:options="onTableOptions">
       <template #item.图片链接="{ value }">
@@ -231,11 +213,12 @@
 
         <span v-else>—</span>
       </template>
-      <!-- 呆滞列的值已统一成 0 = 呆滞 / 1 = 未呆滞（见 utils/productFields.ts 的 BI_VALUE_MAP）。
-           ⚠️ 必须用字符串比较而不是真值判断：0 是有效值，用 `value ?` 会把呆滞全判成未呆滞。 -->
-      <template #item.是否属于呆滞库存="{ value }">
-        <v-chip :color="String(value) === '0' ? 'error' : '#00BCD4'" label size="x-small">
-          <span>{{ String(value) === '0' ? '呆滞' : '未呆滞' }}</span></v-chip>
+      <!-- 待评估列的值本身就是可读中文「待评估 / 无需评估」（归一化见 utils/productFields.ts 的 BI_VALUE_MAP），
+           直接显示即可；「待评估」= 原来的「呆滞」，用红色标出来。 -->
+      <template #item.是否属于待评估库存="{ value }">
+        <v-chip v-if="value" :color="String(value) === '待评估' ? 'error' : '#00BCD4'" label size="x-small">
+          <span>{{ value }}</span></v-chip>
+        <span v-else>—</span>
       </template>
 
       <template #item.是否属于灯具="{ value }">
@@ -249,17 +232,13 @@
       <v-card>
         <v-card-title class="d-flex align-center ga-3 text-[15px]">
           <span>列设置</span>
-
           <v-chip color="success" label size="x-small" variant="tonal">
             显示 {{ visibleFields.length }} / {{ orderedFields.length }}
           </v-chip>
-
           <v-spacer />
           <v-btn size="small" variant="text" @click="resetColumnSettings">恢复默认</v-btn>
         </v-card-title>
-
         <v-divider />
-
         <v-card-text class="pa-2">
           <div v-for="(item, index) in orderedFields" :key="item.key" class="col-item"
             :class="{ 'col-item--drag': dragIndex === index, 'col-item--over': overIndex === index }" draggable="true"
@@ -267,14 +246,11 @@
             @drop.prevent="onDrop(index)">
             <v-icon class="col-item__handle" icon="mdi-drag-vertical" size="16" />
             <span class="col-item__title" :title="item.title">{{ item.title }}</span>
-
             <v-switch class="col-item__switch" color="primary" density="compact" false-icon="mdi-close" hide-details
               :model-value="isVisible(item.key)" true-icon="mdi-check" @update:model-value="toggleVisible(item.key)" />
           </div>
         </v-card-text>
-
         <v-divider />
-
         <v-card-actions class="px-4">
           <span class="text-caption text-medium-emphasis text-[13px]">拖动左侧手柄调整顺序，改动自动保存</span>
           <v-spacer />
@@ -437,9 +413,9 @@ const snapshotSummary = ref<SnapshotSyncSummary | null>(null)
 const snapshotIncludeBlanks = ref(false)
 
 /**
- * 是否顺带**重算 `sync_key`**（唯一键 = `SKU|店铺|仓位|组别|呆滞`）。
+ * 是否顺带**重算 `sync_key`**（唯一键 = `SKU|团队|仓位|是否属于待评估库存|店铺`）。
  *
- * 什么时候需要：直接在库里改了**参与键的那几列**（仓位 / 组别 / SKU / 呆滞）——
+ * 什么时候需要：直接在库里改了**参与键的那几列**（SKU / 团队 / 仓位 / 待评估 / 店铺）——
  * 行的键还停在旧值上，下次全量同步就认不出它（会"新建一条同键行 + 把这条当 orphan"）。
  *
  * 默认**不勾**：改键会改变下次同步的匹配结果；冲突（两行同一个新键）的行会被跳过并报出来。
@@ -798,11 +774,6 @@ function onDragEnd() {
   overIndex.value = -1
 }
 
-/**
- * 拖动排序。
- * 面板列的是**全部字段**（含隐藏的），且顺序与 ensureFullOrder() 完全一致，
- * 所以这里的下标可以直接用 —— 不能拿 visibleFields 的下标去查，那会把隐藏列算错。
- */
 function onDrop(index: number) {
   const from = dragIndex.value
   onDragEnd()
@@ -945,11 +916,11 @@ const SELECT_CONFIGS: { key: FilterKey, field: string, mode: 'eq' | 'includes' }
   // { key: 'model', field: '主MODEL', mode: 'eq' },
   { key: 'manager', field: '组长', mode: 'eq' },
   { key: 'department', field: '部门', mode: 'eq' },
-  { key: 'remain', field: '是否属于呆滞库存', mode: 'eq' },
+  { key: 'remain', field: '是否属于待评估库存', mode: 'eq' },
   { key: 'category1', field: '一级品类', mode: 'eq' },
   { key: 'category2', field: '二级品类', mode: 'eq' },
   // { key: 'lamp', field: '是否属于灯具', mode: 'eq' },
-  { key: 'group', field: '组别', mode: 'eq' },
+  { key: 'group', field: '团队', mode: 'eq' },
   { key: 'platform', field: '平台', mode: 'eq' },
   { key: 'warehouse', field: '仓位', mode: 'eq' },
 ]
@@ -1144,20 +1115,17 @@ const TITLE_BY_KEY: Record<string, string> = Object.fromEntries(
   PRODUCT_FIELDS.map(f => [f.key, f.title]),
 )
 
-const OPTION_LABELS: Record<string, Record<string, string>> = {
-  是否属于呆滞库存: { 0: '呆滞', 1: '未呆滞' },
-}
-
+/*
+ * 这里原本有一张「0 → 呆滞 / 1 → 未呆滞」的显示映射表（OPTION_LABELS）。
+ * 现在待评估列的取值本身就是可读中文（见 utils/productFields.ts 的 BI_VALUE_MAP），
+ * 筛选下拉直接显示去重后的原始值即可，映射表已随之删掉。
+ */
 const selectControls = computed(() =>
-  SELECT_CONFIGS.map(cfg => {
-    const labels = OPTION_LABELS[cfg.field]
-    const values = filterOptions.value[cfg.key]
-    return {
-      key: cfg.key,
-      label: TITLE_BY_KEY[cfg.field] ?? cfg.field,
-      items: labels ? values.map(v => ({ title: labels[v] ?? v, value: v })) : values,
-    }
-  }),
+  SELECT_CONFIGS.map(cfg => ({
+    key: cfg.key,
+    label: TITLE_BY_KEY[cfg.field] ?? cfg.field,
+    items: filterOptions.value[cfg.key],
+  })),
 )
 
 /** 「确认」：草稿转生效条件，回到第 1 页并重新查（否则筛选后会停在越界的空白页） */

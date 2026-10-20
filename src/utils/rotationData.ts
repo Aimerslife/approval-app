@@ -139,7 +139,7 @@ export async function resolveRotationGroups (
   spec: RotationSpec,
   ctx: Record<string, unknown>,
 ): Promise<RotationGroup[]> {
-  const groupKey = (spec.groupFrom ?? '').trim() || '组别'
+  const groupKey = (spec.groupFrom ?? '').trim() || '团队'
   const scopeKey = (spec.scopeFrom ?? '').trim() || ROTATION_DEFAULTS.scopeFrom
   const orderKey = (spec.orderFrom ?? '').trim() || ROTATION_DEFAULTS.orderFrom
   const aggregate = spec.aggregate ?? ROTATION_DEFAULTS.aggregate

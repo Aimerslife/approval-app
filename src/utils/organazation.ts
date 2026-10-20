@@ -24,73 +24,80 @@ export const groupManage=[
         manager:"林思诺",
     },
     {   
-        parent:"B2C",
+        parent:"B2C销售部",
         parentManager:'',
         group:"美2组",
         manager:"周开胜",
     },
     {   
-        parent:"B2C",
+        parent:"B2C销售部",
         parentManager:'张卓艳',
         group:"美1组",
         manager:"范少玲",
     },
     {   
-        parent:"B2C",
+        parent:"B2C销售部",
         parentManager:'张卓艳',
         group:"美3组",
         manager:"李凯杰",
     },
     {   
-        parent:"B2C",
+        parent:"B2C销售部",
         parentManager:'张卓艳',
         group:"夜灯-其他",
         manager:"陈颖",
     },
     {   
-        parent:"B2C",
+        parent:"B2C销售部",
         parentManager:'张卓艳',
         group:"亚马逊-未维护",
         manager:"陈颖",
     },
      {   
-        parent:"B2C",
+        parent:"B2C销售部",
         parentManager:'张卓艳',
         group:"多站点组",
         manager:"魏燕玲",
     },
      {   
-        parent:"B2C",
+        parent:"B2C销售部",
         parentManager:'张卓艳',
         group:"欧洲组",
         manager:"黄伟强",
     }
 ]
 
-/** 团队表的一行：团队（parent）→ 组（group），manager 是该组负责人 */
+/**
+ * 团队表的一行：**部门（parent）→ 团队（group）**，`manager` 是该团队负责人。
+ *
+ * 口径（整个项目统一）：团队 = `group`（多站点组 / 美1组…），部门 = `parent`（B2C / 市场部…）。
+ * 组织架构里建的是"部门"，所以按部门找负责人时要先做 团队 → 部门 的映射（见 utils/approvalRoles）。
+ */
 export interface TeamGroupRow {
+  /** 所属部门（如 B2C / 市场部） */
   parent: string
+  /** 团队名（如 多站点组 / 美1组） */
   group: string
-  /** 该组负责人（组长） */
+  /** 该团队负责人 */
   manager: string
   /**
-   * 该组所属**团队**的负责人（团队级，来源于表里的 `parentManager` 列）。
+   * 该团队所属**部门**的负责人（部门级，来源于表里的 `parentManager` 列）。
    *
-   * ⚠️ 这一列在每一行上都写了一遍（同一团队的多行应当一致），实际维护时可能不一致或留空 ——
-   * 取用时以 `parentManagerOf()` 为准：**该团队第一条非空值**（按表的书写顺序），
-   * 避免"同一团队在不同行上得到不同负责人"。
+   * ⚠️ 这一列在每一行上都写了一遍（同一部门的多行应当一致），实际维护时可能不一致或留空 ——
+   * 取用时以 `parentManagerOf()` 为准：**该部门第一条非空值**（按表的书写顺序），
+   * 避免"同一部门在不同行上得到不同负责人"。
    */
   parentManager?: string
 }
 
 /**
- * 「接收团队」选择器的候选：把上面的团队表**按团队分组**，可选按关键字过滤。
+ * 团队表**按部门分组**：`name` = 部门（`parent`），`groups` = 该部门下的团队。
  *
  * 为什么由这个模块出（而不是写在组件里）：候选口径就是这张表 ——
- * 组件里再抄一份，改了表却漏改组件，表现是"表里新加的组在办理时选不到"。
+ * 组件里再抄一份，改了表却漏改组件，表现是"表里新加的团队在办理时选不到"。
  * 纯函数，能被 tsx 直接断言（见 utils/approvalRotation 等同类做法）。
  *
- * @param keyword 搜索词：匹配**组名**或**负责人**（大小写不敏感，去空格比较）
+ * @param keyword 搜索词：匹配**团队名**或**负责人**（大小写不敏感，去空格比较）
  */
 export function teamGroups (keyword = ''): Array<{ name: string, groups: TeamGroupRow[] }> {
   const kw = keyword.trim().toLowerCase()
@@ -109,18 +116,21 @@ export function teamGroups (keyword = ''): Array<{ name: string, groups: TeamGro
   return [...byParent].map(([name, groups]) => ({ name, groups }))
 }
 
-/** 团队表里一共有多少个组（提示文案用，如「共 10 个组」） */
+/** 团队表里一共有多少个团队（提示文案用，如「共 10 个团队」） */
 export const TEAM_GROUP_COUNT = groupManage.length
 
 /**
- * 某个**组别**属于哪个团队（团队表里反查 `parent`）。
+ * 某个**团队**属于哪个**部门**（团队表里反查 `parent`）。
  *
- * 用途：「接收组别」的候选要**限定在本团队内**（不涉及其他团队）——
- * 单据快照里有「组别」（如 美2组），据此反查出团队（B2C），再列出该团队的组别。
- * 组名比较去掉空白：数据与表里常有多余空格（口径同 utils/approvalRotation 的 squash）。
+ * 用途一：「接收团队」的候选要**限定在本部门内**（不涉及其他部门）——
+ * 单据快照里有「团队」（如 美2组），据此反查出部门（B2C），再列出该部门下的团队。
+ * 用途二：模板的动态审批人（部门负责人）要把数据行里的团队名映射成部门名
+ * （见 utils/approvalRoles 的 dept）。
+ *
+ * 名字比较去掉空白：数据与表里常有多余空格（口径同 utils/approvalRotation 的 squash）。
  */
-export function teamOfGroup (group: string): string | undefined {
-  const key = String(group ?? '').replace(/\s+/g, '')
+export function deptOfTeam (team: string): string | undefined {
+  const key = String(team ?? '').replace(/\s+/g, '')
   if (!key) {
     return undefined
   }
@@ -129,10 +139,10 @@ export function teamOfGroup (group: string): string | undefined {
 }
 
 /**
- * 某个团队下的**组别**（团队表里按 `parent` 取）。
+ * 某个**部门**下的全部团队（团队表里按 `parent` 取）。
  *
- * 与 teamGroups 的分工：那个给"全部团队、按团队分组"的列表（没识别出团队时的兜底）；
- * 这个给"只要某个团队的组别"（识别出来了就只列这些，不夹带别的团队）。
+ * 与 teamGroups 的分工：那个给"全部部门、按部门分组"的列表（没识别出部门时的兜底）；
+ * 这个给"只要某个部门的团队"（识别出来了就只列这些，不夹带别的部门）。
  */
 export function groupsOfTeam (team: string): TeamGroupRow[] {
   const key = String(team ?? '').replace(/\s+/g, '')
@@ -142,20 +152,43 @@ export function groupsOfTeam (team: string): TeamGroupRow[] {
   return (groupManage as TeamGroupRow[]).filter(r => r.parent.replace(/\s+/g, '') === key)
 }
 
-/* ==================== 团队负责人（parentManager） ==================== */
+/* ==================== 团队负责人 / 部门负责人（动态审批人的取值口径） ==================== */
 
 /**
- * 某个**团队**的负责人（表里的 `parentManager` 列）。
+ * 某个**团队**的负责人（表里的 `manager` 列）。
  *
- * 口径：取该团队**第一条非空**的 `parentManager`。为什么不是"逐行各取各的"——
- * 同团队的多行理论上写的是同一个人，但人工维护时会出现不一致（有的行写了、有的空着、
- * 甚至写了别人）。取首条非空既是确定的（跟表的书写顺序走），也避免了"同一团队在
+ * 口径：模板里的动态审批人（`dept_leader`）**以这张表为准**——
+ * 数据行里的「团队」列先在这里找团队，命中就用该行维护的人（如 多站点组 → 魏燕玲），
+ * 不去组织架构里找部门的 is_leader（那张表的负责人可能和这里维护的不一样）。
+ * 见 utils/approvalRoles 的 resolveOne。
+ *
+ * 名字比较去掉空白：数据与表里常有多余空格。表里没有 / 没维护 → undefined。
+ */
+export function teamManagerOf (team: string): string | undefined {
+  const key = String(team ?? '').replace(/\s+/g, '')
+  if (!key) {
+    return undefined
+  }
+  const hit = (groupManage as TeamGroupRow[]).find(r => r.group.replace(/\s+/g, '') === key)
+  const manager = String(hit?.manager ?? '').trim()
+  return manager || undefined
+}
+
+/**
+ * 某个**部门**的负责人（表里的 `parentManager` 列）。
+ *
+ * 口径：动态审批人拿到的值不是团队名、而是部门名时（如 `B2C销售部`），走这里取部门负责人
+ * （如 张卓艳）。与 teamManagerOf 是同一套取值链的两个层级。
+ *
+ * 口径细节：取该部门**第一条非空**的 `parentManager`。为什么不是"逐行各取各的"——
+ * 同部门的多行理论上写的是同一个人，但人工维护时会出现不一致（有的行写了、有的空着、
+ * 甚至写了别人）。取首条非空既是确定的（跟表的书写顺序走），也避免了"同一部门在
  * 不同行上得到不同负责人"这种说不清的状态。
  *
- * 表里没填 → 返回 undefined（调用方应当据此提示"该团队还没维护负责人"，不要静默留空）。
+ * 表里没填 → 返回 undefined（调用方应当据此提示"该部门还没维护负责人"，不要静默留空）。
  */
-export function parentManagerOf (team: string): string | undefined {
-  const key = String(team ?? '').replace(/\s+/g, '')
+export function parentManagerOf (dept: string): string | undefined {
+  const key = String(dept ?? '').replace(/\s+/g, '')
   if (!key) {
     return undefined
   }
@@ -166,22 +199,21 @@ export function parentManagerOf (team: string): string | undefined {
 }
 
 export interface ParentTeamRow {
-  /** 团队名（表里的 `parent`） */
+  /** 部门名（表里的 `parent`） */
   name: string
-  /** 团队负责人（表里的 `parentManager`，没维护就是空串） */
+  /** 部门负责人（表里的 `parentManager`，没维护就是空串） */
   manager: string
-  /** 该团队下的组（沿用表里的书写顺序） */
+  /** 该部门下的团队（沿用表里的书写顺序） */
   groups: TeamGroupRow[]
 }
 
 /**
- * 「选择接收团队」的候选：**按团队**列出去重后的团队 + 各自的负责人，可选按关键字过滤。
+ * **部门层**聚合：按 `parent` 去重列出部门 + 部门负责人，可选按关键字过滤。
  *
- * 与 `teamGroups()` 的分工：那个是"按团队分组列**组别**"（选接收组别用）；
- * 这个是"列**团队**本身"（选接收团队用）—— 选的是哪一层，候选就该是哪一层。
+ * ⚠️ 这里是**部门**层（供「选择接收部门」用）：选团队请用 `teamGroups()`（团队 = `group`）。
  *
- * @param keyword 搜索词：匹配**团队名**、**团队负责人**，或该团队下任一**组名**
- *                （按组名也能找到所属团队，办理人常常只记得组名）
+ * @param keyword 搜索词：匹配**部门名**、**部门负责人**，或该部门下任一**团队名**
+ *                （按团队名也能找到所属部门，办理人常常只记得团队名）
  */
 export function parentTeams (keyword = ''): ParentTeamRow[] {
   const kw = keyword.trim().toLowerCase()

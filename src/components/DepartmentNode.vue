@@ -12,12 +12,16 @@
       :hide-actions="true"
       activatable
       indent-lines
+      indent-lines-opacity="0.2"
       color="#E8F0FE"
       item-value="id"
       active-class="tree-active-item"
       :items="treeItems"
       v-model:activated="activated"
       open-on-click
+      :search="keyword"
+      :open-all="searching"
+      :filter-keys="['title', 'subtitle']"
       @update:activated="onActivated"
     >
       <template #title="{ item }">
@@ -57,6 +61,13 @@
           <v-icon v-else size="12">mdi-account</v-icon>
         </v-avatar>
       </template>
+
+      <!-- 搜索无命中时给一句明确反馈：默认的 "No data available" 会让人以为树没加载出来 -->
+      <template #no-data>
+        <div class="text-[12px] text-grey pa-4 text-center">
+          {{ searching ? `没有匹配「${keyword.trim()}」的成员` : '暂无组织架构数据' }}
+        </div>
+      </template>
     </v-treeview>
 
     <v-alert v-else class="ma-2" type="info" variant="tonal">暂无组织架构数据</v-alert>
@@ -64,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-  import { onMounted, ref } from 'vue'
+  import { computed, onMounted, ref } from 'vue'
   import { fetchOrgTreeCache, type OrgTreeNode, type UserBrief } from '@/api/api'
 
   interface TreeItem {
@@ -79,6 +90,17 @@
     is_leader?: boolean
     children?: TreeItem[]
   }
+
+  const props = withDefaults(defineProps<{
+    /**
+     * 搜索关键字（由选人弹窗的搜索框传入）。
+     * 树内部用 v-treeview 自带的 `search` 过滤：命中项的祖先会自动保留，
+     * 同时 `open-all` 把剩下的部门全部展开 —— 否则结果都藏在收起的部门里，看起来像"搜不到"。
+     */
+    keyword?: string
+  }>(), { keyword: '' })
+
+  const searching = computed(() => props.keyword.trim() !== '')
 
   const emit = defineEmits<{ select: [user: UserBrief] }>()
 

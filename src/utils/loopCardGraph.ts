@@ -60,13 +60,20 @@ export function cardGraphToSteps (
      */
     externalApprovalIds?: Set<string>
     /**
-     * 环内那条线**没选目标**时的兜底目标（节点 id）—— 卡片上那条「提前跳出」出线的目标
+     * 环内那条线**没选目标**时的兜底目标（节点 id）—— 卡片上**唯一那条**「提前跳出」出线的目标
      * （见 utils/approvalFlow 的 readLoopOuts）。
      *
      * 有兜底时"只标了提前结束轮询、没选目标"是**合法**的：去向在卡片上配一次就够；
      * 没有兜底才报错（老口径）。
      */
     defaultJumpTarget?: string
+    /**
+     * 卡片上「提前跳出」出线有几条（见 readLoopOuts 的 earlyCount）。
+     *
+     * 只用于**报错文案**：多条时没有兜底目标，环内那条线必须自己选 —— 这时要让用户知道
+     * "不是漏配了、而是卡片上有多条线得指明走哪一条"，否则他会以为是程序没读到他画的线。
+     */
+    earlyLineCount?: number
   } = {},
 ): CardGraphResult {
   const nodes = graph?.nodes ?? []
@@ -105,6 +112,7 @@ export function cardGraphToSteps (
    * 目标在名单里 = 合法，交给 graphToFlowFrom 原样写进 branch.exitTo。
    */
   const fallback = String(opts.defaultJumpTarget ?? '').trim()
+  const earlyCount = Math.max(0, Number(opts.earlyLineCount ?? 0))
   const jumpEdges = edges.filter(e => e?.data?.exitMode === 'jump')
   for (const e of jumpEdges) {
     const to = e.data?.exitTo ? String(e.data.exitTo) : ''
@@ -114,8 +122,12 @@ export function cardGraphToSteps (
       }
       return {
         steps: [],
-        error: '有分支选了「提前结束轮询」但没选目标环节：请在连线下面板里选一个，'
-          + '或者在卡片上拉一条标着「提前跳出」的出线（那条线的目标就是它的去向）',
+        error: earlyCount > 1
+          // 多条「提前跳出」时没有"缺省那一条"，必须逐条指明 —— 否则跳去哪说不清
+          ? `有分支选了「提前结束轮询」但没选目标环节：这张卡片接了 ${earlyCount} 条「提前跳出」出线，`
+            + '程序不知道走哪一条，请在连线下面板里选具体的目标环节'
+          : '有分支选了「提前结束轮询」但没选目标环节：请在连线下面板里选一个，'
+            + '或者在卡片上拉一条标着「提前跳出」的出线（那条线的目标就是它的去向）',
         errorEdgeId: e.id,
       }
     }

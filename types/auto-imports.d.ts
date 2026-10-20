@@ -132,6 +132,8 @@ declare global {
   const useActiveElement: typeof import('@vueuse/core').useActiveElement
   const useAnimate: typeof import('@vueuse/core').useAnimate
   const useAppStore: typeof import('../src/stores/app').useAppStore
+  const useApprovalDockSetting: typeof import('../src/composables/useApprovalDockSetting').useApprovalDockSetting
+  const useApprovalSelect: typeof import('../src/composables/useApprovalSelect').useApprovalSelect
   const useApprovalTable: typeof import('../src/composables/useApprovalTable').useApprovalTable
   const useArrayDifference: typeof import('@vueuse/core').useArrayDifference
   const useArrayEvery: typeof import('@vueuse/core').useArrayEvery
@@ -336,4 +338,7 @@ declare global {
   // @ts-ignore
   export type { UserInfo, UserPreferences } from '../src/stores/user'
   import('../src/stores/user')
+  // @ts-ignore
+  export type { UseApprovalSelectOptions } from '../src/composables/useApprovalSelect'
+  import('../src/composables/useApprovalSelect')
 }

@@ -89,6 +89,14 @@ export function findHeaderRow (grid: unknown[][]): { index: number, hits: number
 }
 
 /**
+ * 离午夜多近就算「某一天」而不是一个时刻（秒）。
+ *
+ * 43 s 是实测的读数漂移（见下），取 60 s 留点余量；顺带把 23:59:59.x 那种
+ * 亚秒漂移一起覆盖掉，所以原来单独写的 86399 那道判断合并进来了。
+ */
+const MIDNIGHT_TOLERANCE_SECONDS = 60
+
+/**
  * 日期单元格 → 字符串。
  *
  * 只带日期的用 YYYY-MM-DD —— `最早开售日期-SKU` 的区间筛选就是按这个格式做
@@ -96,26 +104,33 @@ export function findHeaderRow (grid: unknown[][]): { index: number, hits: number
  * 真的带时分秒的才保留时间，避免把信息悄悄丢掉。
  *
  * ⚠️ 这里必须处理 SheetJS 的日期漂移，否则**每个日期列都会静默错一天**：
- * Excel 用序列号存日期，往返之后本地 0 点的日期会读成前一天 23:59:59.999
- * （实测：写入 new Date(2026, 8, 16) 读回来是 2026-09-15 23:59:59）。
+ * Excel 用序列号存日期，SheetJS 反解回 Date 时会**早几十秒**，于是「某天的 0 点」
+ * 变成前一天 23:59:xx。两个实测样本：
+ *   - 写入 new Date(2026, 8, 16) 读回来是 2026-09-15 23:59:59（亚秒级）；
+ *   - 上传的 test.xlsx：5858 个日期格全是**整数序列号**（Excel 显示 2021-04-23），
+ *     cellDates 读回来一律是前一天 23:59:17，**每次都早 43 秒** —— 5858 行全错一天。
+ * 所以判据不能是「等不等于整点」，只能是「离午夜够不够近」（MIDNIGHT_TOLERANCE_SECONDS），
+ * 然后把这种格子归到**最近的那一天 0 点**。
+ *
+ * 代价：真写了一个 23:59:30 的时刻会被算成次日。本应用的日期列都是「某一天」，
+ * 这个取舍比整体错一天划算；真需要精确时刻的话得回到序列号层面取数。
  */
 export function formatDateCell (input: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
+  const dateOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   // 先四舍五入到整秒：亚秒级的 .999 会被进位到次日 0 点，绝大部分漂移到这里就修好了
   const d = new Date(Math.round(input.getTime() / 1000) * 1000)
   const seconds = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()
-  // 再兜一道：进位之后仍停在 23:59:59（原始毫秒恰好为 0 的那种）时按**次日 0 点**处理。
-  // 这类单元格的语义就是「某一天」，不能因为 1 秒的漂移把它算到前一天。
-  if (seconds >= 86_399) {
-    const next = new Date(d.getTime() + (86_400 - seconds) * 1000)
-    return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`
+  // 刚过午夜 → 就是这一天，且只有日期（秒数为 0 的整点也走这里）
+  if (seconds < MIDNIGHT_TOLERANCE_SECONDS) {
+    return dateOf(d)
   }
-  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  // 正好 0 点 → 只有日期
-  if (seconds === 0) {
-    return date
+  // 快到午夜 → 本意是**次日** 0 点，把漂移补回去（按日历日 +1，避开时区/DST 的坑）
+  if (seconds > 86_400 - MIDNIGHT_TOLERANCE_SECONDS) {
+    return dateOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1))
   }
-  return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  // 其余：真带时分秒，照实保留
+  return `${dateOf(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 /**

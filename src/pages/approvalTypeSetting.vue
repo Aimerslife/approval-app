@@ -3,7 +3,7 @@
     <!-- 页头：作用域（默认 / 某张审批模板）+ 是否已自定义 -->
     <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-4 px-1">
       <div>
-        <BackNode title="审批类型" />
+         <BackNode title="审批类型" />
         <div class="text-[12px] text-medium-emphasis mt-1">
           每种审批结论"**选中之后要填什么**"在这里配：控件（下拉 / 单选 / 数量 / 文本…）、字段、必填与校验。
         </div>
@@ -203,6 +203,14 @@
                           placeholder="不限制" variant="outlined" @update:model-value="markDirty" />
                       </v-col>
 
+                      <!-- 上限是否允许等于：接收类里「接收」可以等于剩余，「部分接收」不能 -->
+                      <v-col v-if="field.limit" cols="12" md="6">
+                        <div class="field-title mb-1">允许等于上限</div>
+
+                        <v-switch v-model="field.limitInclusive" color="primary" density="compact" hide-details
+                          @update:model-value="markDirty" />
+                      </v-col>
+
                       <v-col cols="12" md="6">
                         <div class="field-title mb-1">按上限预填（空值时）</div>
 
@@ -340,7 +348,7 @@
     </v-row>
 
     <!-- 底部动作条 -->
-    <v-sheet class="d-flex align-center flex-wrap ga-3 mt-4 card-border p-4" rounded="15">
+    <v-sheet class="d-flex align-center flex-wrap ga-3 mt-6 card-border p-4" rounded="15">
       <div class="text-[11px] text-medium-emphasis">
         {{ dirtyCount > 0 ? `有 ${dirtyCount} 个结论改动还没保存` : '没有未保存的改动' }}
       </div>
@@ -393,7 +401,6 @@ import {
   TYPE_EFFECTS,
   TYPE_LIMIT_OPTIONS,
   typeCategoryOf,
-  typeFieldsSummaryOf,
 } from '@/utils/approvalTypes'
 import {
   approvalTypeWriteHint,
@@ -413,18 +420,7 @@ import { canAccess } from '@/utils/permissions'
  * ⚠️ 本期只做**配置与预览**：办理页仍走原实现（components/ApprovalNode.vue 的 v-if 那一套），
  * 等切换那一步做完这份配置才真正生效（切换时必须逐条比对渲染结果与写入的 extra 字段）。
  */
-const route = useRoute()
 const userStore = useUserStore()
-
-/**
- * 从「审批模型」页的「审批类型」列表点「编辑」进来时，地址上带着定位：
- *   · `scope` = `global` 或某张模板的 id（要改哪一层的覆盖）；
- *   · `code`  = 要编辑的结论码。
- * 直接打开 / 刷新这一页时两者都可能没有，那就按原来的默认走
- * （全局层 + 下面 buildDraft 里"第一条真的要让办的人填东西"的结论）。
- */
-const initialScopeKey = (typeof route.query.scope === 'string' && route.query.scope) || 'global'
-const initialCode = typeof route.query.code === 'string' ? route.query.code : ''
 
 /** 页面权限与路由守卫用同一份口径（'/'approvalTypeSetting' 在 utils/permissions 里登记为管理员及以上） */
 const canEdit = computed(() => canAccess(userStore.appRole, '/approvalTypeSetting'))
@@ -448,7 +444,7 @@ function showHint(text: string, color: 'success' | 'error' | 'warning' = 'warnin
 
 /** 审批模板列表（全量；`getApprovalOptions` 就是"取全部模板精简列表"那个函数） */
 const templates = ref<{ id: string, name: string }[]>([])
-const scopeKey = ref(initialScopeKey)
+const scopeKey = ref('global')
 
 const scopeItems = computed(() => [
   { value: 'global', title: '默认（所有审批模板）' },
@@ -472,17 +468,19 @@ const custom = ref(false)
 const draft = ref<ApprovalTypeOverrideMap>({})
 const dirty = ref<Record<string, boolean>>({})
 
-const selectedCode = ref(initialCode || DEFAULT_TYPE_TEMPLATES[0]?.code || '')
+const selectedCode = ref(DEFAULT_TYPE_TEMPLATES[0]?.code ?? '')
 
 const typeRows = computed(() => DEFAULT_TYPE_TEMPLATES.map(t => {
   const d = draft.value[t.code]
+  const fields = d?.fields ?? []
   return {
     code: t.code,
     name: t.name,
     disabled: d?.enabled === false,
     overridden: overrides.value[t.code] !== undefined,
-    // 摘要口径与列表页共用同一处（见 utils/approvalTypes 的 typeFieldsSummaryOf）
-    summary: typeFieldsSummaryOf(d?.fields),
+    summary: fields.length === 0
+      ? '不需要额外填写'
+      : fields.map(f => f.label || f.key).join('、'),
     category: typeCategoryOf(t.code),
   }
 }))
@@ -558,10 +556,7 @@ function buildDraft() {
   dirty.value = {}
   // 首次进来落在"第一个真的要让办的人填东西"的结论上，比停在「通过」更有信息量
   // （`fields` 在覆盖类型里是可选的，用 `?.length ?? 0` 取，别直接 `.length`）
-  //
-  // ⚠️ 从列表点「编辑」进来的（地址上带了 `code`）**不能**被这一步顶掉：
-  // 那一条就是用户要改的，哪怕它眼下"不需要额外填写"，也得停在它上面。
-  if (!initialCode && (next[selectedCode.value]?.fields?.length ?? 0) === 0) {
+  if ((next[selectedCode.value]?.fields?.length ?? 0) === 0) {
     const withFields = DEFAULT_TYPE_TEMPLATES.find(t => (next[t.code]?.fields?.length ?? 0) > 0)
     if (withFields) {
       selectedCode.value = withFields.code
@@ -574,17 +569,6 @@ async function reload() {
   loading.value = true
   try {
     templates.value = await getApprovalOptions()
-    /*
-     * 地址上带来的那张模板可能已经被删了（在列表页点「编辑」时它还在）：
-     * 落回全局层，别停在一个下拉里选不出来的 scope 上。
-     *
-     * 这里直接改 scopeKey 会触发 watch(scopeKey) 再跑一轮 —— 而那一轮里 scopeKey 已经是
-     * 'global'、不会再改，所以最多多跑一轮就收敛，不会来回打转。
-     * （改完 scope 这个 computed 已经同步更新，下面读的就是全局层的覆盖，口径不会串。）
-     */
-    if (scopeKey.value !== 'global' && !templates.value.some(t => t.id === scopeKey.value)) {
-      scopeKey.value = 'global'
-    }
     globalOverrides.value = (await loadApprovalTypeOverrides({ kind: 'global' })).overrides
     const row = await loadApprovalTypeOverrides(scope.value)
     overrides.value = row.overrides

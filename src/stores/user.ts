@@ -59,16 +59,45 @@ export interface UserPreferences {
      */
   columnWidths?: Record<string, number>
   /**
-     * 审批抽屉里「产品详情」（components/GoodsInfo.vue）的字段显隐。
-     *
-     * 为什么不复用 columnVisibility：两者**默认口径不同**，混用会出问题 ——
-     *   数据表格默认只显示 15 列（SKU / 产品名称 / 图片链接这些默认是关的，见 visualable），
-     *   而详情视图默认「有值就显示」，SKU 正是它最关键的字段。
-     * 共用的话，详情里会莫名其妙少了 SKU。
-     *
-     * 同样只存**与默认值（显示）不同**的项，所以内容是 `{ 字段: false }` 这种「被关掉的」。
-     */
+   * 产品字段的显隐。**两处共用同一份**：
+   *   · 审批抽屉里的「产品详情」（components/GoodsInfo.vue，表格形态，另有高亮 / 排序）；
+   *   · 审批页右侧的产品卡（components/ProductInfoCard.vue，按分组的字段卡）。
+   * 两者展示的是同一条产品的同一批字段、默认口径也一致（都默认全显示），所以共用一份；
+   * 各存一份会出现"详情里关掉的字段，卡片里还显示着"，用户只会当成 bug。
+   *
+   * 为什么不复用 columnVisibility：那个是**数据表格**的列显隐，默认口径不同，混用会出问题 ——
+   *   数据表格默认只显示 15 列（SKU / 产品名称 / 图片链接这些默认是关的，见 visualable），
+   *   而详情视图默认「有值就显示」，SKU 正是它最关键的字段。
+   * 共用的话，详情里会莫名其妙少了 SKU。
+   *
+   * 同样只存**与默认值（显示）不同**的项，所以内容是 `{ 字段: false }` 这种「被关掉的」。
+   * ⚠️ 两个写入方都必须**遍历同一份 PRODUCT_FIELDS** 算 diff：写的是整个对象，
+   *    而 savePreferences 只做浅合并 —— 清单不一致会互相抹掉对方关掉的字段。
+   */
   goodsFieldVisibility?: Record<string, boolean>
+  /**
+   * 同一面板里的**高亮**开关（被勾上的字段在详情表格里加粗强调）。
+   *
+   * 与显隐的存法**相反**：显隐的默认是"显示"，所以只存被关掉的；
+   * 高亮的默认是"不高亮"，所以只存被勾上的。两边都守着同一条口径 ——
+   * **只存与默认值不同的项**，BI 增删字段后没存过的字段自动回落默认。
+   */
+  goodsFieldHighlight?: Record<string, boolean>
+  /**
+   * 审批抽屉「产品详情」（components/GoodsInfo.vue）字段面板里的**排列顺序**（字段 key 数组）。
+   *
+   * 与 goodsFieldVisibility / goodsFieldHighlight 同一套「只存与默认值不同」的口径：
+   * **没重排过就是空数组**，读取侧回落 `utils/productFields.ts` 的默认顺序 ——
+   * 这样 BI 新增字段会自然出现在默认位置，老用户不会被旧快照锁死在末尾。
+   */
+  goodsFieldOrder?: string[]
+  /**
+   * 审批页底部「办理」面板的**默认状态**：true = 进页面就展开，false / 没存过 = 收起。
+   *
+   * 用户在面板上手动展开 / 收起时写入（见 pages/approvalPage.vue 的 togglePanel），
+   * 下次进页面按它初始化 —— 这就是"平时是否展开"的个人设置。
+   */
+  approvalPanelOpen?: boolean
   /** 预留：以后新增偏好类型直接加字段，读取侧做好兜底即可 */
   [key: string]: unknown
 }
@@ -221,6 +250,15 @@ export const useUserStore = defineStore('user', () => {
     if (src.goodsFieldVisibility && typeof src.goodsFieldVisibility === 'object') {
       out.goodsFieldVisibility = src.goodsFieldVisibility as Record<string, boolean>
     }
+    if (src.goodsFieldHighlight && typeof src.goodsFieldHighlight === 'object') {
+      out.goodsFieldHighlight = src.goodsFieldHighlight as Record<string, boolean>
+    }
+    if (Array.isArray(src.goodsFieldOrder)) {
+      out.goodsFieldOrder = src.goodsFieldOrder.filter((key): key is string => typeof key === 'string')
+    }
+    if (typeof src.approvalPanelOpen === 'boolean') {
+      out.approvalPanelOpen = src.approvalPanelOpen
+    }
     return out
   }
 
@@ -290,8 +328,16 @@ export const useUserStore = defineStore('user', () => {
       }
     } catch (error) {
       console.error('[user] 保存偏好失败:', error)
+      /*
+       * 必须抛出去：调用方（GoodsInfo / setDatas）本来就写了 `.catch` 在等它，
+       * 吞掉错误等于那些 catch 全是死代码 —— 而这一类的失败恰恰最难发现：
+       * user_preferences 里没建 goods* 字段时，PB 会**静默忽略**未知字段，
+       * 请求返回 200、库里一个字没写，界面上"设置改了、刷新又回去"，
+       * 前后端都不报错（这次就是这么踩的）。
+       */
+      throw error
     }
-  }
+    }
 
   /**
      * 更新账号字段（目前「基本设置」里只有邮箱可编辑）。

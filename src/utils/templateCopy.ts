@@ -29,7 +29,7 @@ const COPY_TEST = /-\s*副本/
 /**
  * 这个模板名是不是「副本」（名字里带 `- 副本` 标记）。
  *
- * 用途：列表页分页签；建单是按 `<组别>模板` 精确查名的（见 pages/workStream 的
+ * 用途：列表页分页签；建单是按 `<团队>模板` 精确查名的（见 pages/workStream 的
  * taskTemplateNameOf），带后缀的副本**查不到**，所以副本不会被误用去建单 —— 这一层是天然隔离的。
  */
 export function isTemplateCopy (name?: string | null): boolean {

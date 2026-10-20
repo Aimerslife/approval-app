@@ -34,12 +34,12 @@ export const PRODUCT_GROUPS: { label: string, icon: string, keys: string[] }[] =
   {
     label: '组织与属性',
     icon: 'mdi-domain',
-    keys: ['供应商', '店铺', '组长', '仓位', '组别', '部门', '平台', '一级品类', '二级品类'],
+    keys: ['供应商', '店铺', '组长', '仓位', '团队', '部门', '平台', '一级品类', '二级品类'],
   },
   {
-    label: '呆滞判断',
+    label: '呆滞 / 待评估',
     icon: 'mdi-alert-circle-outline',
-    keys: ['亚马逊呆滞条件', '拓业部呆滞条件', '是否属于呆滞库存'],
+    keys: ['亚马逊呆滞条件', '拓业部呆滞条件', '是否属于待评估库存'],
   },
   {
     label: '库存（数量 / 金额）',
@@ -123,7 +123,7 @@ export function generateMockData (count = 1): Record<string, unknown>[] {
         }
         case '仓位': { row[key] = `${String.fromCharCode(65 + (i % 10))}-${String((i % 20) + 1).padStart(2, '0')}`; break
         }
-        case '组别': { row[key] = `组${(i % 4) + 1}`; break
+        case '团队': { row[key] = `组${(i % 4) + 1}`; break
         }
         case '部门': { row[key] = departments[i % departments.length]; break
         }
@@ -133,8 +133,8 @@ export function generateMockData (count = 1): Record<string, unknown>[] {
         }
         case '拓业部呆滞条件': { row[key] = '月均销量 < 5 且 库龄 > 180天'; break
         }
-        // 与 BI 真实取值对齐：只有「呆滞」/空，没有「是」「否」（实测 500 行中 469 空 + 32 呆滞）
-        case '是否属于呆滞库存': { row[key] = i % 3 === 0 ? '呆滞' : ''; break
+        // 与 BI 真实取值对齐：只有「待评估」/空，没有「是」「否」（实测 500 行中 469 空 + 30 待评估）
+        case '是否属于待评估库存': { row[key] = i % 3 === 0 ? '待评估' : ''; break
         }
         case '一级品类': { row[key] = c1[i % c1.length]; break
         }

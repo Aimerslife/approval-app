@@ -125,6 +125,9 @@ export interface ApprovalChainItem {
  * 这类环节的审批人不是某个固定的人，而是"某一层的负责人"。
  * 写死人名的话，人员一变动（换组长、换部门负责人）模板就得跟着改一遍。
  *
+ * 取谁：**以 utils/organazation.ts 的表为准**（团队 → `manager`、部门 → `parentManager`），
+ * 表里查不到才回退组织架构树（详见 utils/approvalRoles）。
+ *
  * 解析口径（utils/approvalRoles.ts）：**建单时**解析、结果写进单据的 flow 快照，
  * 之后重算链路只读快照 —— 与业务数据快照同一套理由：
  * 历史单不能因为后来的人事变动而被改写。
@@ -141,10 +144,10 @@ export interface ApprovalRole {
    * 角色解析会明确报"没指定部门"，而不是悄悄变成一个没人办的环节。
    */
   kind: 'dept_leader' | 'tenant_admin' | 'loop_leader'
-  /** 固定部门名（与 deptFrom 二选一；两个都填时 dept 优先） */
+  /** 固定值（与 deptFrom 二选一；两个都填时 dept 优先）：写**团队**名或**部门**名都认 */
   dept?: string
-  /** 部门名取自**数据行字段**（中文列名，如「组别」「团队」）——
-   *  「推送至相关部门负责人」就是这种：具体是哪个部门由这一行数据决定 */
+  /** 取自**数据行字段**（中文列名，如「团队」）——
+   *  「推送至相关部门负责人」就是这种：具体是哪个团队/部门由这一行数据决定 */
   deptFrom?: string
 }
 
@@ -178,9 +181,9 @@ export interface RotationSpec {
    *
    * `{:字段名}` 从**当前审批单**取值（中文列名，与条件字段同一套），例如：
    *
-   *     主MODEL = {:主MODEL} && 是否属于呆滞库存 = "否" && 销售状态 ~ "在售"
+   *     主MODEL = {:主MODEL} && 是否属于待评估库存 = "无需评估" && 销售状态 ~ "在售"
    *
-   * 读作"与当前单同主MODEL、非呆滞、且在售"。绑定由 `pb.filter` 完成并自动转义
+   * 读作"与当前单同主MODEL、无需评估、且在售"。绑定由 `pb.filter` 完成并自动转义
    * （见 utils/rotationQuery.ts），**不要把字段值手工拼进字符串**。
    */
   rowFilter?: string
@@ -214,12 +217,14 @@ export interface RotationSpec {
 const ROLE_KIND_LABEL: Record<ApprovalRole['kind'], string> = {
   tenant_admin: '组织管理员',
   loop_leader: '本环的组负责人',
-  dept_leader: '部门负责人',
+  // 取的是 organazation 表里的负责人：团队 → `manager`、部门 → `parentManager`
+  // （界面上统一叫「团队负责人」，见 utils/approvalRoles 的说明）
+  dept_leader: '团队负责人',
 }
 
 /** 角色的可读描述（模板里没解析时，卡片上显示它；建单失败时的报错也用它） */
 export function roleLabel (role: ApprovalRole): string {
-  const kind = ROLE_KIND_LABEL[role.kind] ?? '部门负责人'
+  const kind = ROLE_KIND_LABEL[role.kind] ?? '团队负责人'
   const dept = role.dept ? `（${role.dept}）` : (role.deptFrom ? `（取数据行「${role.deptFrom}」）` : '')
   return `${kind}${dept}`
 }
@@ -468,39 +473,60 @@ export function isConditionGroup (expr: ConditionExpr): expr is ConditionGroup {
 }
 
 /**
- * 「选择接收组别」结论码。
+ * 「选择接收团队」结论码。
  *
- * 语义：这一环的办理人**当场指定由哪个组/团队接下这批货**，命中即**终结流程**
+ * 语义：这一环的办理人**当场指定由哪个团队接下这批货**，命中即**终结流程**
  * （接收方是**结果**，不是下一环的审批人，见 CLOSE_FLOW_RESULTS）。
  * 所以模板里那个接收环节**可以留空**（`allowEmptyMembers`，编辑器已放开）——
  * 「谁接」由业务在办理时按实际情况决定，写死在模板里反而做不到。
- * 白板上的「指定接收组别」就是这种环节。
  *
- * 候选来自**团队表**（utils/organazation 的 groupManage：团队 → 组 + 负责人），
- * 不是整棵飞书通讯录，见 components/TeamPicker.vue 的说明。
+ * 候选来自**团队表**（utils/organazation 的 groupManage：`group` = 团队、`manager` = 团队负责人），
+ * 按部门分组展示；不是整棵飞书通讯录，见 components/TeamPicker.vue 的说明。
+ * 码值 `pick_members` 是历史叫法（原「选择接收组别」），不能改 —— 历史模板存的是它。
  */
 export const PICK_MEMBERS_RESULT = 'pick_members'
 
 /**
- * 「选择接收团队」结论码。
+ * 「选择接收部门」结论码。
  *
- * 与「选择接收组别」是**同一族**的结论（当场指定接收方、命中即终结流程），差别只在**粒度**：
- *   · pick_members —— 选到**组别**，接收方记「组别名 + 该组组长」；
- *   · pick_team    —— 选到**团队**，接收方记「团队名 + 该团队负责人」（`parentManager`）。
- * 两个粒度都要，是因为业务上有的货交给某个组、有的整包交给某个团队。
+ * 与「选择接收团队」是**同一族**的结论（当场指定接收方、命中即终结流程），差别只在**粒度**：
+ *   · pick_members —— 选到**团队**（表里的 `group`），接收方记「团队名 + 团队负责人」；
+ *   · pick_team    —— 选到**部门**（表里的 `parent`），接收方记「部门名 + 部门负责人」（`parentManager`）。
  *
- * 候选来自**团队表**（utils/organazation 的 groupManage：parent = 团队、parentManager = 团队负责人），
- * 见 components/TeamPicker.vue 的 `mode="team"`。
+ * 候选来自**团队表**，见 components/TeamPicker.vue 的 `mode="team"`（`mode` 值是历史命名）。
  */
 export const PICK_TEAM_RESULT = 'pick_team'
+
+/**
+ * 「接收（填数量）」结论码：数量**由人填**，上限是「剩余接收数量」，且**可以等于**上限。
+ *
+ * 与另外两条接收类结论的分工：
+ *   · `receive`（全部接收）—— 数量由系统锁成剩余，人不填；
+ *   · `part_receive`（部分接收）—— 必须是"部分"，数量**严格小于**剩余；
+ *   · `receive_qty`（接收）—— 能接多少填多少，**不大于**剩余，等于剩余即接完。
+ *
+ * 与它们一样计入「已接收数量」（见 RECEIVE_RESULTS），所以条件里的
+ * 「剩余接收数量 > 0」照常按它扣减。
+ */
+export const RECEIVE_QTY_RESULT = 'receive_qty'
 
 /** 审批结论选项：value 与运行时办理结论（result 码）保持一致，供「审批结果分支」配置与校验 */
 export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> = [
   { value: 'pass', label: '通过' },
   { value: 'reject', label: '驳回' },
-  { value: 'receive', label: '接收' },
   /*
-   * 「不接收」：**组间轮询卡片内部**的分结论 —— 每轮到一个组，该组负责人要么「接收」
+   * 「全部接收」：数量**不由人填** —— 系统取「剩余接收数量」（= 总库存数量 − 前面各环节已接收，
+   * 取不到才退回总库存数量）并锁成只读，见 components/ApprovalNode.vue 的 receiveAll /
+   * receiveCapText 与 utils/approvalTypes 的 BUILTIN.receive（prefillFromLimit + readonlyWhenFull）。
+   * 要少收一部分就用下面那个「部分接收」。
+   *
+   * 文案改动说明：这里原来写「接收」，与办理端真正落库的 result_label「全部接收」不一致，
+   * 结果同一件事在编辑器下拉里叫「接收」、在时间线上叫「全部接收」（踩过）。
+   * 码值 `receive` **不能**改 —— 模板条件、历史单据里存的全是它。
+   */
+  { value: 'receive', label: '全部接收' },
+  /*
+   * 「不接收」：**组间轮询卡片内部**的分结论 —— 每轮到一个组，该组负责人要么「全部接收」
    * （那条线通常绑「跳出循环」：不再往后轮）、要么「不接收」（走主线继续轮下一组）。
    * 以前用户只能在卡片里写 `confirmed = 接收/不接收` 这种条件，而 confirmed 只有
    * 「报废清仓」才写入 —— 条件永远不命中，轮询分支等于失灵（踩过）。
@@ -508,6 +534,12 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
    */
   { value: 'not_receive', label: '不接收' },
   { value: 'part_receive', label: '部分接收' },
+  /*
+   * 「接收」：数量由人填，上限是「剩余接收数量」，且**可以等于**上限
+   * （等于剩余 = 这一环正好接完，不必再选「全部接收」）。
+   * 详见 RECEIVE_QTY_RESULT 的说明。
+   */
+  { value: RECEIVE_QTY_RESULT, label: '接收' },
   { value: 'recycle', label: '回收' },
   /*
    * 「供应商回收」：与「回收」同一类处置结论（办理时同样填**回收数量 + 回收金额**，
@@ -524,15 +556,16 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: 'lack_demand', label: '市场需求不足' },
   { value: 'other_reason', label: '其他原因' },
   { value: 'pending', label: '待定' },
-  // 「选择接收组别」：办理人当场指定由哪个组/团队接下这批货（命中即终结流程，
+  // 「选择接收团队」：办理人当场指定由哪个团队接下这批货（命中即终结流程，
   // 接收方是**结果**、不是下一环的审批人 —— 见 PICK_MEMBERS_RESULT 的说明）。
   // 配套的是「允许没有审批人的环节」—— 模板里把接收环节留空，由上一环指定。
-  // 白板上的「指定接收组别」就是这个环节。
-  { value: PICK_MEMBERS_RESULT, label: '选择接收组别' },
-  // 「选择接收团队」：同上的团队粒度版本 —— 接收方是「团队 + 团队负责人」，
+  // 白板上的「指定接收团队」就是这个环节。
+  // （码值 `pick_members` 是历史叫法，原「选择接收组别」；老模板里的旧文案见 LEGACY_RESULT_TEXTS。）
+  { value: PICK_MEMBERS_RESULT, label: '选择接收团队' },
+  // 「选择接收部门」：粒度上移到部门（`parent`）—— 接收方是「部门 + 部门负责人」，
   // 命中即终结流程（见 PICK_TEAM_RESULT 与 CLOSE_FLOW_RESULTS）。
   // 编辑器里的「审批结论」下拉直接读这张表，所以这一条加进来，模板里立刻可选。
-  { value: PICK_TEAM_RESULT, label: '选择接收团队' },
+  { value: PICK_TEAM_RESULT, label: '选择接收部门' },
   // —— 原因分类：来自「库存管理流程规范」白板的「筛选一级原因/二级原因」环节——
   // 那一环的出线在图上没写标签，分类写在**目标节点标题**上，所以这些类是审批人的结论选项。
   // 纯新增，不影响已有模板（结论选项是按 flow 里绑的条件算出来的）。
@@ -544,6 +577,31 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: 'cat_dev', label: '开发类' },
   { value: 'cat_supply', label: '供应链类' },
 ]
+
+/**
+ * 老模板里的**旧默认文案** → 现在码表里的文案（键是 `结论码|旧文案`）。
+ *
+ * 线上还有 12 处分支叫「接收」（白板出线名转成模板后就固定成这个字符串了），
+ * 而码表、以及办理端落库的 result_label 都已经叫「全部接收」。不统一的话同一条结论
+ * 在办理下拉里叫「接收」、办完在时间线上叫「全部接收」—— 同一件事两个名字。
+ *
+ * 为什么只在**文案完全等于旧默认值**时替换：模板作者自己起的名字（「同意接收」「团队接收」）
+ * 必须原样保留，那是业务语义，不该被码表覆盖。
+ * 为什么不刷库：模板随时会从白板重新生成（见 scripts/gen-approval-template.ts），
+ * 刷一遍第二天又被生成回「接收」；在显示层归一一次就够，老单也不受影响。
+ */
+const LEGACY_RESULT_TEXTS: Record<string, string> = {
+  'receive|接收': '全部接收',
+  // 「组别」这个叫法已整体改为「团队」，选部门的码又接过了「选择接收团队」这个名字，
+  // 两条都按**结论码**区分（键带码，不怕文案撞车）。
+  'pick_members|选择接收组别': '选择接收团队',
+  'pick_team|选择接收团队': '选择接收部门',
+}
+
+/** 分支 / 选项的展示文案：旧默认文案跟着码表走，自定义文案原样返回 */
+function resultTextOf (result: string, text: string): string {
+  return LEGACY_RESULT_TEXTS[`${result}|${text}`] ?? text
+}
 
 /** 审批单状态（approval_chain.status） */
 export const APPROVAL_STATUS = {
@@ -571,7 +629,7 @@ export const PENDING_RESULT = 'pending'
 /**
  * 命中即**终结流程**的结论：这一步办完流程就结束，后面的环节不再展开、也就没人有权限办。
  *
- * 目前是「选择接收组别」与「选择接收团队」两条：接收方是**结果**（哪个组 / 哪个团队接下这批货），
+ * 目前是「选择接收团队」与「选择接收部门」两条：接收方是**结果**（哪个团队 / 哪个部门接下这批货），
  * 不是下一环的审批人。所以模板里配这两条结论的分支，后面接什么都不会生效（建议直接连到结束节点）。
  *
  * 与 REJECT_RESULTS 的唯一区别在终态判定：这里的终结算**通过**（流程正常走完），
@@ -585,7 +643,7 @@ export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT, P
  * 为什么单列一份：`recycle`（回收）也写 `extra.qty`，但那是回收数量、业务含义不同 ——
  * 混进「已接收数量」会让"其余组还能接多少"算错。
  */
-export const RECEIVE_RESULTS: ReadonlyArray<string> = ['receive', 'part_receive']
+export const RECEIVE_RESULTS: ReadonlyArray<string> = ['receive', 'part_receive', RECEIVE_QTY_RESULT]
 
 /** 「总库存数量」这一业务列：接收数量的上限来源，也是「剩余」的基数 */
 export const STOCK_QTY_FIELD = '总库存数量'
@@ -602,25 +660,26 @@ export const RECEIVED_QTY_FIELD = '已接收数量'
 export const REMAINING_QTY_FIELD = '剩余接收数量'
 
 /**
- * 「选择接收组别」的接收方：**组别 + 组长**（+ 历史单里可能存过的所属团队 / 邮箱）。
+ * 「选择接收团队 / 选择接收部门」的接收方：**团队（或部门）+ 负责人**（+ 历史单里可能存过的部门 / 邮箱）。
  *
- * `manager` 是该组组长（`utils/organazation` 的团队表里维护的那一列），
- * 办理时随选中一起记进 `extra.members` —— 时间线上要一眼看出"货交给哪个组、找谁"。
+ * `manager` 是表里维护的负责人（团队级取 `manager`、部门级取 `parentManager`），
+ * 办理时随选中一起记进 `extra.members` —— 时间线上要一眼看出"货交给谁、找谁"。
  */
 export interface ReceiverTeam extends ApprovalChainItem {
-  /** 该组组长 / 该团队负责人（团队表维护；表里没填时没有这个字段） */
+  /** 该团队负责人 / 该部门负责人（团队表维护；表里没填时没有这个字段） */
   manager?: string
   /**
-   * 接收方是**哪一层**：`group` = 选择接收组别（manager 是组长）；
-   * `team` = 选择接收团队（manager 是团队负责人）。
+   * 接收方是**哪一层**：`group` = 选择接收团队（manager 是团队负责人）；
+   * `team` = 选择接收部门（manager 是部门负责人）。
    *
-   * 历史单没有这个字段 —— 由 receiverOf 依据结论码补上；界面据此决定「组长 / 负责人」文案。
+   * 历史单没有这个字段 —— 由 receiverOf 依据结论码补上；界面据此决定「团队 / 部门」文案。
+   * ⚠️ 这两个字符串是模板快照里的值，不能改（`team` 现在选的是部门）。
    */
   pick?: 'group' | 'team'
 }
 
 /**
- * 取「选择接收组别 / 选择接收团队」的办理结果（接收方），用于在时间线上**单独渲染一个节点**。
+ * 取「选择接收团队 / 选择接收部门」的办理结果（接收方），用于在时间线上**单独渲染一个节点**。
  *
  * 为什么单独取：命中 CLOSE_FLOW_RESULTS 的结论会终止流程，接收方**不是**任何一个
  * chain 环节的审批人（它不在 chain 里），所以只能从办理流水里取出来单独展示。
@@ -1042,11 +1101,12 @@ export interface LoopNodeData {
    * 所有组都轮完、一直没跳出轮询时去哪个环节。
    * 空 = 继续卡片后面那个环节。转成 flow 时会被包成 `afterLoop: { stepId }`，见 ApprovalFlowLoopNode。
    *
-   * ## 与"两条出线"的关系（见 FlowGraphEdge.data.loopExit）
-   * 想让「轮完」和「提前跳出」各走各的路线时，画布上给卡片接**两条出线**：
-   *   · 标了 `loopExit: 'early'` 的那条 = 「提前跳出」→ 环内「提前结束轮询」的缺省目标；
-   *   · 没标（或标 `'done'`）的那条 = 「轮完」→ 它就是卡片的后继（= 这里 `afterLoop` 想表达的那条路）。
-   * 所以两条出线时这一项**必须留空**（两处都配会报"轮完走向配了两处"）；
+   * ## 与"出线"的关系（见 FlowGraphEdge.data.loopExit）
+   * 想让「轮完」和「提前跳出」各走各的路线时，画布上给卡片接出线：
+   *   · 没标（或标 `'done'`）的那条 = 「轮完」→ 它就是卡片的后继（= 这里 `afterLoop` 想表达的那条路），**只能一条**；
+   *   · 标了 `loopExit: 'early'` 的 = 「提前跳出」，可以**多条**、各自连到不同环节；
+   *     环内「提前结束轮询」那条线自己选跳到哪一条（只有恰好一条时才可以留空走缺省）。
+   * 接了出线时这一项**必须留空**（两处都配会报"轮完走向配了两处"）；
    * 只有一条出线时它照旧是"改这条去路"的入口（老行为，没配 = 走那条线）。
    */
   afterLoop?: string
@@ -1583,16 +1643,16 @@ export function collectStepOptionItems (
       // 这条线的「办理选项条件」：原样带到选项上，由办理端按上下文过滤（见 offerWhen 的说明）
       const offerWhen = b.offerWhen && b.offerWhen.length > 0 ? b.offerWhen : undefined
       if (groups.length > 0) {
-        list.push({ result, text: name || result, groups, ...(offerWhen ? { offerWhen } : {}) })
+        list.push({ result, text: resultTextOf(result, name || result), groups, ...(offerWhen ? { offerWhen } : {}) })
         continue
       }
       const texts = normalizeOptionTexts(b.options)
       if (texts.length > 0) {
         for (const t of texts) {
-          list.push({ result, text: t, ...(offerWhen ? { offerWhen } : {}) })
+          list.push({ result, text: resultTextOf(result, t), ...(offerWhen ? { offerWhen } : {}) })
         }
       } else {
-        list.push({ result, text: name || result, ...(offerWhen ? { offerWhen } : {}) })
+        list.push({ result, text: resultTextOf(result, name || result), ...(offerWhen ? { offerWhen } : {}) })
       }
     }
     // 去重按「文案 + 结论码」：不按结论码合并 —— 同一条线的多个选项本来就共用一个码，
@@ -1643,9 +1703,9 @@ export function collectStepOptionItems (
       const texts = normalizeOptionTexts(b.options)
       const items = (texts.length > 0 ? texts : [name])
         .filter(Boolean)
-        .map(t => ({ text: t, link: code }))
+        .map(t => ({ text: resultTextOf(code, t), link: code }))
       if (items.length > 0) {
-        out.push({ title: name || code, items })
+        out.push({ title: resultTextOf(code, name || code), items })
       }
     }
     return out
@@ -1720,12 +1780,43 @@ export function collectStepOptionItems (
       : optionsOf(usable)
   }
 
+  /**
+   * 引用卡片的**分流组**：它的 branches 是"本模板的下游走向"（这一段走完，按最后那个结论接哪条线），
+   * 不是引用段内某一环能选的结论。算到段尾那一环头上，办理端就会摆出
+   * 「按结论继续 / 其它结论」这类与本环节无关的下游分支名 —— 弃置段里最容易撞见。
+   *
+   * 两种写法都算：
+   *  · `<卡片id>:exits`  —— 现在的编译器在建单展开时生成（见 utils/templateRef 的 expandList）；
+   *  · `<卡片id>:bound`  —— **旧编译器**留下的同名角色（`bound:hit` 按结论继续 / `bound:other` 其它结论）。
+   *    线上「美1组模板」里还有 13 处，只认 `:exits` 的话这些段的尾环节选项会被它整个盖住，
+   *    办理人看到的就是「按结论继续 / 其它结论」，而段内真正的「选择接收团队 / 通过」一个都不剩。
+   *
+   * 两者都**不能**参与尾环节的选项推导，但段尾自己的结果分支（`:result`）照常生效。
+   */
+  function isRefExitGroup (id: unknown) {
+    const s = String(id ?? '')
+    return s.endsWith(':exits') || s.endsWith(':bound')
+  }
+
   /** 分支内的步骤序列：branch 步骤归属于它前面那个审批步骤 */
   function collectSteps (steps: ApprovalFlowStep[] | undefined) {
     let prev: ApprovalFlowStep | undefined
     for (const s of steps ?? []) {
       if (s.type === 'branch' && s.branches?.length) {
-        if (prev) {
+        if (isRefExitGroup(s.id)) {
+          /*
+           * 引用段的分流组：不是上一环的结论分支。
+           * 但段尾那一环自己的**选项树**仍要生效 —— 它的出线就是这张卡片的出线，
+           * 没有自己的结果分支组，不给的话办理端只能落回「通过 / 驳回」。
+           */
+          if (prev) {
+            const shared = normalizeOptionGroups(prev.optionGroups)
+            if (shared.length > 0) {
+              map[prev.id] = nodeLevelOptionsOf(shared, [])
+            }
+          }
+          prev = undefined
+        } else if (prev) {
           map[prev.id] = optionsOfApproval(prev, s.branches)
         }
         for (const b of s.branches) {
@@ -1744,7 +1835,17 @@ export function collectStepOptionItems (
       continue
     }
     if (node.type === 'branch') {
-      if (prevTop) {
+      if (isRefExitGroup(node.id)) {
+        // 同上：引用卡片的出线分流，不能当成段尾环节的「可选结论」；
+        // 但段尾环节自己的选项树要保留（见 collectSteps 里的同款说明）
+        if (prevTop) {
+          const shared = normalizeOptionGroups(prevTop.optionGroups)
+          if (shared.length > 0) {
+            map[prevTop.id] = nodeLevelOptionsOf(shared, [])
+          }
+        }
+        prevTop = undefined
+      } else if (prevTop) {
         map[prevTop.id] = optionsOfApproval(prevTop, node.branches)
       }
       for (const b of node.branches) {
@@ -1880,7 +1981,13 @@ export function collectApprovalSteps (flow: ApprovalFlow): Record<string, Approv
     if (node.type === 'notify') {
       continue
     }
-    out[node.id] = { name: node.name ?? '', members: stepMembersOf(node) }
+    /*
+     * 顶层审批节点**没有环节名**（`ApprovalFlowApprovalNode` 上没有 `name` 字段）——
+     * 名字只存在画布的 `data.title`，转 flow 时刻意没带：轮询卡片展开出来的 N 个节点
+     * 会共用一个标题，时间线上反而分不清是第几环（见 utils/approvalRotation 的说明）。
+     * 所以这里给空串；到达通知对空名字有降级文案（见 utils/arrivalNotice.buildArrivalText）。
+     */
+    out[node.id] = { name: '', members: stepMembersOf(node) }
   }
   return out
 }
@@ -2296,10 +2403,11 @@ export function rebuildChain (
   /** 分支展示名：优先分支名，其次它绑定的结论，最后兜底"兜底主线" */
   function branchNameOf (b: ApprovalBranch) {
     const name = String(b.name ?? '').trim()
-    if (name) {
-      return name
-    }
     const v = firstResultValueOf(b)
+    if (name) {
+      // 旧默认文案跟着码表走（如 receive 的「接收」→「全部接收」），自定义名原样保留
+      return resultTextOf(v ?? '', name)
+    }
     return v ? resultLabelOf(v) : '兜底主线'
   }
 
@@ -2704,12 +2812,14 @@ export interface FlowGraphEdge {
     /** 多条件组合方式，默认 and */
     logic?: 'and' | 'or'
     /**
-     * **「组间轮询」卡片**的出线走向：`'early'` = 「提前跳出」那条线（某一组接了、
-     * 提前结束轮询，剩下几组不再轮），省略 / `'done'` = 「轮完」那条线
+     * **「组间轮询」卡片**的出线走向：`'early'` = 「提前跳出」（某一组接了、
+     * 提前结束轮询，剩下几组不再轮），省略 / `'done'` = 「轮完」
      * （所有组都轮完、一直没人跳出轮询）。
      *
-     * 卡片最多两条出线，靠这一项区分：没有它时"第几环走哪条"说不清，
-     * 两条都没标走向会在保存期报错（见 utils/approvalFlow 的 splitLoopOuts）。
+     * 数量约束：**「轮完」有且只有一条**（它决定卡片的后继），**「提前跳出」可以多条**，
+     * 各自连到不同环节；环内「提前结束轮询」那条线选其中一条（数据存目标环节 id）。
+     * 没有这项时"第几环走哪条"说不清，两条「轮完」会在保存期报错
+     * （见 utils/approvalFlow 的 splitLoopOuts / readLoopOuts）。
      * ⚠️ 只用在**卡片自己的出线**上；环内连线表达"提前结束轮询"用的是另一套
      * 字段（`exitMode` + `exitTo`，见 utils/loopCardGraph），两者别混。
      */

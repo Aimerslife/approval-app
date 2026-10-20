@@ -1,80 +1,80 @@
 <template>
-  <!--
-    no-gutters：去掉栅格自带的 12px 内衬（v-col padding）与行负外边距（v-row margin），
-    左侧背景图才会**贴边**铺满（原来上下各留 12px、左边也可能被外层 overflow 裁出缝隙）。
-    右边那一栏的留白由它自己的 v-sheet padding 负责，不受影响。
-  -->
-  <v-row class="h-100" no-gutters>
-    <v-col class="relative" cols="8">
-      <v-img class="h-100" cover gradient="to top right, rgba(100,115,201,.33), rgba(25,32,72,.7)" :src="background" />
-      <div class="word-badge absolute bottom-10 left-15">
-        <v-rating active-color="#B6284E" empty-icon="mdi-heart-outline" half-icon="mdi-heart-half-full"
-          hover :length="5" full-icon="mdi-heart" :model-value="4" :size="40" />
+  <v-container class="pa-0" fluid>
+    <v-row class="h-100vh" no-gutters>
+      <v-col class="relative" cols="8" no-gutters>
+        <v-img class="h-100" cover gradient="to top right, rgba(100,115,201,.33), rgba(25,32,72,.7)"
+          :src="background" />
+        <div class="word-badge absolute bottom-10 left-15">
+          <v-rating active-color="#B6284E" empty-icon="mdi-heart-outline" half-icon="mdi-heart-half-full" hover
+            :length="5" full-icon="mdi-heart" :model-value="4" :size="40" />
 
-        <v-sheet class="word-card" color="#3546C9" rounded="10">
-          <div class="d-flex align-center gap-2">
-            <v-avatar :image="title" size="35" />
-            <div class="word-card__title">今日鸡汤</div>
-          </div> 
-          <div class="word-card__text p-2">{{ word }}</div>
-        </v-sheet>
-      </div>
-    </v-col>
-
-    <v-col cols="4">
-      <v-sheet class="d-flex  flex-col gap-2 p-20 h-100  justify-center">
-        <v-img max-height="50px" :src="logo" />
-
-        <div class="d-flex flex-col gap-3 mb-10">
-          <strong class="text-[20px]">欢迎回来</strong>
-          <span class="text-[14px] text-[#8B8B8B]">登录你的账号后开启流程</span>
+          <v-sheet class="word-card" color="#3546C9" rounded="10">
+            <div class="d-flex align-center gap-2">
+              <v-avatar :image="title" size="35" />
+              <div class="word-card__title">今日鸡汤</div>
+            </div>
+            <div class="word-card__text p-2">{{ word }}</div>
+          </v-sheet>
         </div>
+      </v-col>
 
-        <v-form fast-fail @submit.prevent="submit">
-          <v-text-field v-model="email" class="mb-4" label="邮箱" placeholder="请输入邮箱" rounded="15px" :rules="emailRules"
-            variant="outlined">
-            <template #prepend-inner>
-              <v-icon size="20">mdi-email-outline</v-icon>
-            </template>
-          </v-text-field>
+      <v-col cols="4" no-gutters>
+        <v-sheet class="d-flex  flex-col gap-2 p-20 h-100  justify-center">
+          <v-img max-height="50px" :src="logo" />
 
-          <v-text-field :append-inner-icon="visible ? 'mdi-eye-off' : 'mdi-eye'" label="密码" v-model="password"
-            placeholder="密码" rounded="15px" :rules="passwordRules" :type="visible ? 'text' : 'password'"
-            variant="outlined" @click:append-inner="visible = !visible">
-            <template #prepend-inner>
-              <v-icon size="20">mdi-lock-outline</v-icon>
-            </template>
-          </v-text-field>
-
-          <div class="d-flex justify-between mb-4">
-            <span />
-
-            <span class="text-body-small text-decoration-none text-blue cursor-pointer hover:underline"
-              @click="goResetPassword">忘记密码?</span>
+          <div class="d-flex flex-col gap-3 mb-10">
+            <strong class="text-[20px]">欢迎回来</strong>
+            <span class="text-[14px] text-[#8B8B8B]">登录你的账号后开启流程</span>
           </div>
 
-          <v-btn block class="mt-2" color="#3378FF" rounded="30px" size="large" type="submit" variant="flat">登录</v-btn>
-        </v-form>
+          <v-form fast-fail @submit.prevent="submit">
+            <v-text-field v-model="email" class="mb-4" label="邮箱" placeholder="请输入邮箱" rounded="15px" :rules="emailRules"
+              variant="outlined">
+              <template #prepend-inner>
+                <v-icon size="20">mdi-email-outline</v-icon>
+              </template>
+            </v-text-field>
 
-        <div class="mt-10">
-          <v-divider content-offset="0.5rem">
-            <span class="text-[13px] text-[#8B8B8B]">或者</span>
-          </v-divider>
-        </div>
+            <v-text-field :append-inner-icon="visible ? 'mdi-eye-off' : 'mdi-eye'" label="密码" v-model="password"
+              placeholder="密码" rounded="15px" :rules="passwordRules" :type="visible ? 'text' : 'password'"
+              variant="outlined" @click:append-inner="visible = !visible">
+              <template #prepend-inner>
+                <v-icon size="20">mdi-lock-outline</v-icon>
+              </template>
+            </v-text-field>
 
-        <div class="d-flex justify-center text-[13px] text-[#8B8B8B] mt-15 align-center">
-          <v-btn class="mr-4" icon size="32" @click="loginWithLarks">
-            <v-avatar :image="feishu" size="18" />
-          </v-btn>
+            <div class="d-flex justify-between mb-4">
+              <span />
 
-          <!-- <span>没有账号？</span>
+              <span class="text-body-small text-decoration-none text-blue cursor-pointer hover:underline"
+                @click="goResetPassword">忘记密码?</span>
+            </div>
+
+            <v-btn block class="mt-2" color="#3378FF" rounded="30px" size="large" type="submit"
+              variant="flat">登录</v-btn>
+          </v-form>
+
+          <div class="mt-10">
+            <v-divider content-offset="0.5rem">
+              <span class="text-[13px] text-[#8B8B8B]">或者</span>
+            </v-divider>
+          </div>
+
+          <div class="d-flex justify-center text-[13px] text-[#8B8B8B] mt-15 align-center">
+            <v-btn class="mr-4" icon size="32" @click="loginWithLarks">
+              <v-avatar :image="feishu" size="18" />
+            </v-btn>
+
+            <!-- <span>没有账号？</span>
 
           <span class="no-underline hover:underline text-[#3378FF] cursor-pointer hover:text-[12px]"
             @click="goRegister">去注册</span> -->
-        </div>
-      </v-sheet>
-    </v-col>
-  </v-row>
+          </div>
+        </v-sheet>
+      </v-col>
+    </v-row>
+  </v-container>
+
   <!-- 登录失败提示：企业不匹配 / 组织信息获取失败 / 账号密码错误等 -->
   <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="4000" variant="tonal">
     {{ snackbar.text }}
@@ -214,7 +214,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-
 .word-badge {
   display: flex;
   flex-direction: column;

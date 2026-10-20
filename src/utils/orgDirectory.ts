@@ -37,7 +37,7 @@ export function buildOrgDirectory (tree?: OrgTreeNode[] | null): OrgDirectory {
   const byOpenId = new Map<string, OrgDirectoryEntry>()
   const byContact = new Map<string, OrgDirectoryEntry>()
   const nameHits = new Map<string, OrgDirectoryEntry[]>()
-  const walk = (nodes?: OrgTreeNode[]) => {
+  const walk = (nodes?: OrgTreeNode[] | null) => {
     for (const n of nodes ?? []) {
       for (const u of n.users ?? []) {
         const entry: OrgDirectoryEntry = {

@@ -130,8 +130,9 @@
               </div>
               <!--
                 「组间轮询」卡片自己的出线走向（见 selectedEdgeLoopExit）：
-                卡片最多两条出线，一条「轮完」（所有组都轮完、没人跳出时走）、
-                一条「提前跳出」（某组接了、提前结束轮询时走）。单条时不写字段 = 「轮完」。
+                「轮完」有且只有一条（所有组都轮完、没人跳出时走）；
+                「提前跳出」可以**多条**（某组接了、提前结束轮询时走），各自连到不同环节。
+                单条时不写字段 = 「轮完」（老数据零影响）。
               -->
               <div v-if="isLoopEdge" class="panel-row">
                 <span class="panel-label">本线走向</span>
@@ -141,7 +142,9 @@
                   <option value="early">提前跳出（某组接了直接跳出）</option>
                 </select>
 
-                <span class="panel-hint ml-3">两条出线靠这一项区分：一条「轮完」、一条「提前跳出」</span>
+                <span class="panel-hint ml-3">
+                  「轮完」只能一条；「提前跳出」可以接多条，环内那条线自己选跳到哪一条
+                </span>
               </div>
 
               <div class="panel-row">
@@ -588,6 +591,7 @@
             点一张卡片按 Ctrl+C 复制、Ctrl+V 粘贴（副本不带连线，位置在源卡片右下方）
           </div>
           <LoopCardDialog v-if="editingCardData" :data="editingCardData" :open="cardDialog"
+            :early-exits="loopCardEarlyExitsFor(editingCardId ?? '')"
             :outer-approvals="loopCardOuterApprovalsFor(editingCardId ?? '')" @close="closeCardDialog" />
 
           <RefPreviewDialog
@@ -902,12 +906,12 @@ const isLoopEdge = computed(() => {
 
 /*
  * 「组间轮询」卡片自己的出线走向（`edge.data.loopExit`，见 types/approval 的 FlowGraphEdge.data）：
- *   · 轮完（'done'）     = 所有组都轮完、一直没人跳出轮询 → 卡片的**后继**；
- *   · 提前跳出（'early'） = 某一组接了、提前结束轮询 → 环内「提前结束轮询」的**缺省目标**
- *     （环内那条线自己选了目标就用它）。
+ *   · 轮完（'done'）     = 所有组都轮完、一直没人跳出轮询 → 卡片的**后继**，**只能一条**；
+ *   · 提前跳出（'early'） = 某一组接了、提前结束轮询 → 可以**多条**，各自连到不同环节；
+ *     环内「提前结束轮询」那条线自己选跳到哪一条（多条时没有缺省，不选就报错）。
  *
- * 卡片最多两条出线、靠这一项区分（保存期口径见 utils/approvalFlow 的 splitLoopOuts）：
- * 没有它就说不清"第几环走哪条"，两条都没标会当场报错。
+ * 保存期口径见 utils/approvalFlow 的 splitLoopOuts / readLoopOuts：
+ * 多条「轮完」会当场报错（说不清轮完之后去哪）。
  * **单出线时默认就是「轮完」**，所以老模板一个字段都不用写。
  */
 const selectedEdgeLoopExit = computed<'done' | 'early'>({
@@ -920,8 +924,17 @@ const selectedEdgeLoopExit = computed<'done' | 'early'>({
      * 连线名跟着写死成走向：画布上一眼看出哪条是「轮完」、哪条是「提前跳出」。
      * 与「数据查询」两条出线自动命名（存在 / 不存在）同一套做法 ——
      * 卡片出线本来就没有"分支名"可编辑（isBranchEdge 不含 loop），不会被覆盖。
+     *
+     * 「提前跳出」允许多条，所以名字要带序号（见 earlyExitLabel）：已经把「轮完」改成
+     * 「提前跳出」时起序号名，本来就是「提前跳出…」的保留原名，别把提前跳出2 改回提前跳出。
      */
-    edge.label = v === 'early' ? '提前跳出' : '轮完'
+    if (v === 'early') {
+      if (!edge.label || edge.label === '轮完') {
+        edge.label = earlyExitLabel(edges.value, edge.id)
+      }
+    } else {
+      edge.label = '轮完'
+    }
   },
 })
 
@@ -1512,10 +1525,33 @@ function getBranches(nodeId: string): { id: string, label: string, toEnd: boolea
     .map(e => ({ id: e.id, label: String(e.label ?? '').trim(), toEnd: isEndTarget(e.target) }))
 }
 
-/** 审批节点卡片展示用的出线列表：只有结果分支（≥2 条出线）才展示，单主线不展示 */
+/** 这条线是不是绑了「审批结论」（引用卡片单出线时靠它判断"要不要当分流"） */
+function edgeBindsResult(edgeId: string): boolean {
+  const e = edges.value.find(x => x.id === edgeId)
+  const conds = e?.data?.conditions
+  if (Array.isArray(conds) && conds.some((c: any) => c?.field === 'result')) {
+    return true
+  }
+  return e?.data?.condition?.field === 'result'
+}
+
+/**
+ * 卡片展示用的出线列表：审批 / 引用卡片形成**结论分流**时才展示，单主线（穿过去）不展示。
+ *
+ * 引用卡片有一条例外：只接了一条线、但这条线**绑了结论** —— 它同样是分流
+ * （命中该结论继续、**其它结论结束**，见 utils/approvalFlow 的 singleLineRefBranches），
+ * 不显示的话卡片上完全看不出"这条线带结论"。
+ */
 function outBranches(nodeId: string): { id: string, label: string, toEnd: boolean }[] {
   const branches = getBranches(nodeId)
-  return branches.length > 1 ? branches : []
+  if (branches.length > 1) {
+    return branches
+  }
+  const source = nodes.value.find(n => n.id === nodeId)
+  if (source?.type === 'ref' && branches.length === 1 && edgeBindsResult(branches[0].id)) {
+    return branches
+  }
+  return []
 }
 
 /** 点击条件分支卡片内的分支名：选中该连线，上方面板联动展示并高亮该连线 */
@@ -1534,13 +1570,16 @@ function isBranchEdgeOf(edge: any): boolean {
   if (!edge) return false
   const source = nodes.value.find(n => n.id === edge.source)
   /*
-   * 「审批节点」与「引用卡片」在这里同款：都能有 ≥2 条出线按结论分流
-   * （审批 = 上一环节的结论；引用 = 被引用那一段最后办出来的结论）。
-   * 只有 ≥2 条时才当分支 —— 单出线的引用卡片就是"穿过去"，没有分支可配。
+   * 「审批节点」与「引用卡片」都能按结论分流（审批 = 上一环节的结论；引用 = 被引用那一段
+   * 最后办出来的结论），但门槛不同：
+   *   · 审批节点：**≥2 条出线**才算分流（单出线 = 顺序往下，条件不生效）；
+   *   · 引用卡片：≥2 条出线算分流；**单出线但这条线绑了结论也算** ——
+   *     那是"命中该结论继续、其它结论结束"（编译器自动补兜底出口），
+   *     所以这条线必须能在面板里改结论，不能锁死成"穿过去"。
    */
-  const resultBranchable
-    = (source?.type === 'approval' || source?.type === 'ref')
-      && (edges.value.filter(e => e.source === edge.source).length > 1)
+  const outCount = edges.value.filter(e => e.source === edge.source).length
+  const resultBranchable = (source?.type === 'approval' && outCount > 1)
+    || (source?.type === 'ref' && (outCount > 1 || edgeBindsResult(edge.id)))
   return source?.type === 'condition' || resultBranchable
 }
 
@@ -1641,6 +1680,18 @@ function onMove({ flowTransform }: { flowTransform: { x: number, y: number, zoom
   currentViewport.value = flowTransform
 }
 
+/**
+ * 「提前跳出」出线的自动命名：第 1 条叫「提前跳出」，之后带序号（提前跳出2 / 3 …）。
+ *
+ * 卡片现在允许接**多条**提前跳出线（各自连到不同环节），名字不带序号时画布上
+ * 一眼看不出有两条 —— 而环内「提前结束轮询」正是按"跳哪一条"来选目标的。
+ * `existing` 传同一个 source 的出线（可以是含自己的全集，自己会被排除）。
+ */
+function earlyExitLabel(existing: any[], selfId?: string): string {
+  const n = existing.filter(e => e?.data?.loopExit === 'early' && e.id !== selfId).length
+  return n === 0 ? '提前跳出' : `提前跳出${n + 1}`
+}
+
 function onConnect(params: Connection) {
   if (params.source === params.target) return // 不允许自连
 
@@ -1678,15 +1729,13 @@ function onConnect(params: Connection) {
   }
 
   /*
-   * 「组间轮询」卡片最多**两条**出线：一条「轮完」（所有组都轮完、没人跳出时走）、
-   * 一条「提前跳出」（某组接了、提前结束轮询时走）。两条各走各的路线，靠走向区分
-   * （保存期口径见 utils/approvalFlow 的 splitLoopOuts）。
-   * 拖第三条时直接拦下并说清限制 —— 否则用户会得到一条必然报错的线，还得自己去删。
+   * 「组间轮询」卡片：**「轮完」只能一条**（所有组都轮完、没人跳出时走），
+   * **「提前跳出」可以多条**（某组接了、提前结束轮询时走，各自连到不同环节）。
+   *
+   * 所以这里**不再限制拖出几条**（以前拖第三条直接拦下）：第 2 条以后默认都按
+   * 「提前跳出」建（见下面 `outCount >= 1` 那个分支），不会和「轮完」抢。
+   * 走向口径见 utils/approvalFlow 的 splitLoopOuts / readLoopOuts。
    */
-  if (sourceNode?.type === 'loop' && edges.value.filter(e => e.source === params.source).length >= 2) {
-    showMsg('组间轮询卡片最多两条出线：一条「轮完」、一条「提前跳出」', 'warning')
-    return
-  }
 
   const outCount = edges.value.filter(e => e.source === params.source).length
   let label: string | undefined
@@ -1707,10 +1756,11 @@ function onConnect(params: Connection) {
     data = { condition: null, conditions: [] }
   } else if (sourceNode?.type === 'loop' && outCount >= 1) {
     /*
-     * 卡片的**第二条**出线：默认当「提前跳出」（与审批节点拖出第二条线默认绑「驳回」同一套做法）。
-     * 走向可以在上方面板改 —— 改完另一条自动就是「轮完」。
+     * 卡片除第一条以外的出线：默认当「提前跳出」（与审批节点拖出第二条线默认绑「驳回」同一套做法）。
+     * 「提前跳出」允许接**多条**，各自连到不同环节 —— 名字带序号，画布上才分得清是哪一条
+     * （见 earlyExitLabel）。
      */
-    label = '提前跳出'
+    label = earlyExitLabel(edges.value.filter(e => e.source === params.source))
     data = { loopExit: 'early' }
   } else if (sourceNode?.type === 'approval' && outCount >= 1) {
     // 审批节点出现第二条出线：按审批结论走的结果分支（默认绑定「驳回」，可再配置、可加附加条件）
@@ -1745,13 +1795,13 @@ function onConnect(params: Connection) {
     addSelectedEdges([selectedEdge.value])
     showMsg('已创建审批结果分支：在上方命名并选择对应审批结论（原主线保留「通过」兜底）', 'success')
   }
-  // 轮询卡片的第二条出线：给第一条（本来就是「轮完」那条）补个名字，两条各是什么一眼看出
-  if (sourceNode?.type === 'loop' && outCount === 1) {
+  // 轮询卡片的出线：给「轮完」那条补个名字，一眼看出哪条是轮完、哪条是提前跳出
+  if (sourceNode?.type === 'loop' && outCount >= 1) {
     const done = edges.value.find(e => e.source === params.source && e.data?.loopExit !== 'early')
     if (done && !done.label) done.label = '轮完'
     selectedEdge.value = edges.value.at(-1)
     addSelectedEdges([selectedEdge.value])
-    showMsg('已创建「提前跳出」出线：走向可在上方面板改（两条出线分别是轮完 / 提前跳出）', 'success')
+    showMsg('已创建「提前跳出」出线：可以继续拖出多条，环内那条「提前结束轮询」的线自己选跳到哪一条', 'success')
   }
 }
 
@@ -1861,13 +1911,13 @@ function isCardNode(type?: string): boolean {
 }
 
 /**
- * 新卡片的轮询缺省口径：**只写必填的「组别」**（其余留空 = 回落代码默认，
+ * 新卡片的轮询缺省口径：**只写必填的「团队」**（其余留空 = 回落代码默认，
  * 见 utils/approvalRotation 的 ROTATION_DEFAULTS）。
  *
  * 不把默认值固化进模板 —— 否则以后改默认口径（比如汇总是求和还是取最大）时，
  * 已经建好的卡片会被写死的字面量锁住（旧轮询面板就是靠"空 = 删字段"躲开这个坑）。
  */
-const DEFAULT_LOOP_ROTATION = { groupFrom: '组别' }
+const DEFAULT_LOOP_ROTATION = { groupFrom: '团队' }
 
 /**
  * 加一张「组间轮询」卡片。
@@ -1965,6 +2015,24 @@ function loopCardOuterApprovalsFor (cardId: string) {
   return collectExitTargets(nodes.value, cardId)
 }
 
+/**
+ * 这张卡片接出去的「提前跳出」线（可以有多条，见 `edge.data.loopExit`）。
+ *
+ * 传给卡片内部画布当**快捷候选**：环内那条「提前结束轮询」要选"跳哪一条"时，
+ * 直接从这几条里挑（显示线名 + 它连到的环节），比在几十个环节里找同名的目标清楚。
+ * 数据上仍然只存**目标环节 id**（`edge.data.exitTo`）—— 与"直接选环节"是同一个值，
+ * 所以卡片上的线改接到别处时，环内选过它的分支不会跟着变（这是配置期绑定，见 README 的口径）。
+ */
+function loopCardEarlyExitsFor (cardId: string) {
+  return edges.value
+    .filter(e => e.source === cardId && e.data?.loopExit === 'early')
+    .map(e => ({
+      id: String(e.id),
+      label: String(e.label || '提前跳出'),
+      targetId: String(e.target ?? ''),
+    }))
+}
+
 /** 正在编辑内部流程的卡片（对话框就地改它的 data，随画布快照一起保存） */
 const cardDialog = ref(false)
 const editingCardId = ref<string | null>(null)
@@ -1993,19 +2061,19 @@ function removeNodeById(id: string) {
 }
 
 /**
- * 给节点加一个**动态审批人**（部门负责人）。
+ * 给节点加一个**动态审批人**（团队负责人）。
  *
- * 模板里不写人名：建单时按数据行字段（默认「组别」）找到对应部门的负责人 ——
+ * 模板里不写人名：建单时按数据行字段（默认「团队」）找到对应部门的负责人 ——
  * 白板上的「推送至相关部门负责人」「团队负责人审批」就是这类环节。
  * 解析口径与失败处理见 utils/approvalRoles.ts（解析不出来会判那条建单失败）。
  * 默认字段名可在节点卡片上直接改。
  */
 function addRoleMemberTo(nodeId: string) {
   const node = nodes.value.find(n => n.id === nodeId)
-  // 审批节点与飞书提醒节点共用这套交互（提醒节点里 role = "提醒给该部门负责人"）
+  // 审批节点与飞书提醒节点共用这套交互（提醒节点里 role = "提醒给该团队负责人"）
   if (!node || (node.type !== 'approval' && node.type !== 'notify')) return
   const members = (node.data?.members ?? []) as ApprovalChainItem[]
-  members.push({ type: 'manager', name: '', role: { kind: 'dept_leader', deptFrom: '组别' } })
+  members.push({ type: 'manager', name: '', role: { kind: 'dept_leader', deptFrom: '团队' } })
   node.data = { ...node.data, members }
 }
 

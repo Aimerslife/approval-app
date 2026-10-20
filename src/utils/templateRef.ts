@@ -47,8 +47,26 @@ import type { ApprovalFlow } from '@/types/approval'
  */
 import { ensureRejectLoopBackInSteps } from '@/utils/approvalFlow'
 
-/** 一次建单最多展开多少个引用（防病态层层引用把单据撑爆） */
-const MAX_REFS = 50
+/**
+ * 一次建单最多展开多少个引用（防病态层层引用把单据撑爆）。
+ *
+ * ⚠️ 这个数是按**真实模板**定的，不是拍脑袋：线上「美1组模板」= 13 处引用
+ *    （每个组一段）× 每段里再引 4 张通知（本地仓 / 海外仓各 2）= **65 次展开**。
+ *    原来写 50，等于把这套正常模板判死 —— 报错还是那句"请减少引用数量"，
+ *    可用户数来数去只有 13 处引用，根本对不上（实测踩过）。
+ *    所以这里要留足冗余：引用次数 ≠ 画布上的卡片数，每张引用卡片都会把它引用的
+ *    模板连同**里面的引用**一起再展开一遍。
+ */
+const MAX_REFS = 500
+
+/**
+ * 展开后的节点总量上限。
+ *
+ * 引用上限防的是"数量"，这里防的是"体积"：17 次引用也可能搬进来几千个环节
+ * （源模板本身很大，或被层层引用），那种单子每条快照都有几 MB，列表和 rebuildChain 都会拖垮。
+ * 真实量级参考：美1组模板展开后 409 个节点、美2组模板 709 个 —— 上限留了一个数量级的余量。
+ */
+const MAX_EXPANDED_NODES = 5000
 
 /** 源模板（读取结果）：`flow` 是模板记录里的流程，`name` 只用于报错文案 */
 export interface TemplateRefSource {
@@ -86,15 +104,40 @@ export async function expandTemplateRefs (
 ): Promise<TemplateRefExpansion> {
   const issues: string[] = []
   const usedTemplates = new Map<string, string | undefined>()
-  let budget = MAX_REFS
+  /** 已展开的引用次数（到 MAX_REFS 就停，见常量说明） */
+  let expandedRefs = 0
+  /**
+   * 源模板缓存：**同一张源模板在一次展开里只读一次**。
+   *
+   * 不是优化洁癖：美1组模板有 13 处引用指向同一张「弃置模板-美1」，那张里又引了 4 张通知 ——
+   * 没有缓存时同一张模板要被读 13+ 次，一批几十行就是上千次 PB 往返，建单慢到像卡死。
+   * 缓存的生命周期只有这一次展开：源模板在建单途中被改是极小概率，而"同一单里两段内容不一致"更难接受。
+   * 读到 null（模板被删 / 没有流程）也缓存 —— 否则同一张坏模板会被反复重试。
+   */
+  const sources = new Map<string, TemplateRefSource | null>()
 
   /**
    * 一个节点走完之后，"上一级环节"变成谁 —— 与 `ensureRejectLoopBackInSteps` 内部的 prevId 口径一致：
    * 分支组（含我们注入的 `:reject-back`）不占上一级，真环节才占。
    */
   function tailStepId (node: any, fallback?: string): string | undefined {
+    /*
+     * 分支组 / 数据查询**不是**"一段的末尾"：它们是容器，真正办完的是里面的环节，
+     * 所以要往下钻。段尾是分支组（"分支各自到结束"这种画法）时，
+     * 末尾环节在分支**内部** —— 只返回 fallback 会把段尾算成"分支组之前那一环"（= 段外），
+     * 于是「按结论分流」各分支首个环节的"上一级"、以及链式引用的 prevId 都会落错地方。
+     *
+     * 各分支末尾不同时只能取一个（回退目标是 flow 里的静态值）：按 branches 顺序取
+     * 最后一个取得到的环节 —— 它至少是**这一段里真实办过的环节**，比段外那一环接近语义。
+     */
     if (node?.type === 'branch' || node?.type === 'probe') {
-      return fallback
+      return (node.branches ?? []).reduce(
+        (acc: string | undefined, b: any) => (b?.steps ?? []).reduce(
+          (inner: string | undefined, s: any) => tailStepId(s, inner),
+          acc,
+        ),
+        fallback,
+      )
     }
     return String(node?.id ?? '') || fallback
   }
@@ -140,10 +183,14 @@ export async function expandTemplateRefs (
         issues.push(`「引用模板」成环：${[...stack, refId].map(id => id.slice(0, 8)).join(' → ')}，请去掉其中一处引用`)
         continue
       }
-      if (budget-- <= 0) {
-        issues.push(`一次建单最多展开 ${MAX_REFS} 个「引用模板」，请减少引用数量或改成一张模板`)
+      if (expandedRefs >= MAX_REFS) {
+        issues.push(
+          `「${label}」超出上限：一次建单最多展开 ${MAX_REFS} 个引用模板`
+          + `（已展开 ${expandedRefs} 个，注意嵌套引用会一并展开），请减少引用数量或拆成多张模板`,
+        )
         continue
       }
+      expandedRefs++
 
       /*
        * 读源模板失败（网络 / 权限 / PB 异常）**不向上抛**：变成 issue，让这一条建单失败并点名卡片。
@@ -151,11 +198,17 @@ export async function expandTemplateRefs (
        * "模板没了" 与 "这次没读到"，否则运维会去删一张其实还在的模板。
        */
       let src: TemplateRefSource | null
-      try {
-        src = await loadFlow(refId)
-      } catch (error) {
-        issues.push(`「${label}」读取引用的模板失败：${error instanceof Error ? error.message : String(error)}`)
-        continue
+      if (sources.has(refId)) {
+        src = sources.get(refId) ?? null
+      } else {
+        try {
+          src = await loadFlow(refId)
+          sources.set(refId, src)
+        } catch (error) {
+          // 读失败不缓存：下一次（别的引用处）还有机会读到
+          issues.push(`「${label}」读取引用的模板失败：${error instanceof Error ? error.message : String(error)}`)
+          continue
+        }
       }
       if (!src) {
         issues.push(`「${label}」引用的模板已不存在（可能被删了），请回到模板编辑里重新选择`)
@@ -262,7 +315,37 @@ export async function expandTemplateRefs (
   }
 
   const expanded = await expandList(flow as unknown as any[], [])
+
+  /*
+   * 体积兜底（见 MAX_EXPANDED_NODES）：引用**次数**没超不代表搬进来的东西不多 ——
+   * 一张很大的源模板被引十几次，快照就会有几千个环节。这种单子建得出来但也用不了
+   * （列表 / rebuildChain / 审批页都会拖垮），所以在建单那一刻就报出来。
+   */
+  const nodeCount = countFlowNodes(expanded)
+  if (nodeCount > MAX_EXPANDED_NODES) {
+    issues.push(
+      `流程展开后有 ${nodeCount} 个节点，超过上限 ${MAX_EXPANDED_NODES}`
+      + `（引用模板展开后体积过大），请减少引用或拆成多张模板`,
+    )
+  }
+
   return { flow: expanded as ApprovalFlow, issues, usedTemplates: [...usedTemplates].map(([id, name]) => ({ id, name })) }
+}
+
+/** 流程里的节点总数（顶层 + 分支 / 轮询卡片内部都算），见 MAX_EXPANDED_NODES */
+function countFlowNodes (nodes: any[]): number {
+  let n = 0
+  for (const node of nodes ?? []) {
+    if (!node || typeof node !== 'object') {
+      continue
+    }
+    n++
+    for (const b of node.branches ?? []) {
+      n += countFlowNodes(b?.steps ?? [])
+    }
+    n += countFlowNodes(node.steps ?? [])
+  }
+  return n
 }
 
 /**

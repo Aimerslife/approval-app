@@ -5,7 +5,8 @@
             {{ treeError }}
         </v-alert>
         <!-- 不设 open-all：树默认收起，点击部门再展开，减少 DOM 数量 -->
-        <v-treeview v-else-if="treeItems.length" :items="treeItems" :hide-actions="true" indent-lines density="compact"
+        <v-treeview v-else-if="treeItems.length" :items="treeItems" :hide-actions="true" indent-lines
+            indent-lines-opacity="0.2" density="compact"
             item-value="id" activatable open-on-click color="#E8F0FE" active-class="tree-active-item"
             v-model:activated="activated" @update:activated="onActivated">
             <template v-slot:title="{ item }">

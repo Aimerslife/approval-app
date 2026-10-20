@@ -339,7 +339,7 @@ export interface BiUploadSummary {
  *
  * ⚠️ 走的是 **app server**（默认 3002，经 vite 的 `/api/bi` 代理），**不是**直连 PB：
  *   1) `bi_rows` 的 createRule / updateRule 都是 null（只有管理员可写），浏览器直写会 403；
- *   2) 唯一键去重（makeSyncKey = SKU|店铺|仓位|组别）、冲突检查、差异比对那套逻辑
+ *   2) 唯一键去重（makeSyncKey = SKU|团队|仓位|是否属于待评估库存|店铺）、冲突检查、差异比对那套逻辑
  *      只在 server/biSync.ts 里有一份，前端再实现一遍必然分叉。
  *
  * 所以这里用 fetch 而不是 pb.send：`/api/bi` 前缀在 vite.config.mts 里被专门代理到
@@ -476,7 +476,7 @@ export interface SnapshotSyncSummary {
  *                           **默认不写**：那些列的 0 多半是"从没被写过"（金额类很常见），
  *                           写下去等于把界面上的金额刷成 0（见 server/snapshotSync.ts 的说明）。
  * @param opts.rekey          true = 顺带按当前列重算 `sync_key`（唯一键）。
- *                           改了「仓位 / 组别 / SKU / 呆滞」这类**参与键的列**之后要用它，
+ *                           改了「SKU / 团队 / 仓位 / 待评估 / 店铺」这类**参与键的列**之后要用它，
  *                           否则下次全量同步认不出这些行。冲突（两行同一个新键）会跳过并报出来。
  */
 export async function syncBiSnapshots (
@@ -544,6 +544,45 @@ export async function deleteApprovalOrder (id: string): Promise<DeleteOrderSumma
     throw new Error(payload?.msg || `删除失败：HTTP ${res.status}`)
   }
   return payload.data as DeleteOrderSummary
+}
+
+/**
+ * 批量删除的结果，形状与 server/orderDelete.ts 的 DeleteHistorySummary 一致。
+ *
+ * `dryRun = true` 时只有 `targeted` 有意义（其余是 0）—— 确认框就是靠它把
+ * "将要删掉多少张"先摆出来。
+ */
+export interface DeleteHistorySummary {
+  dryRun: boolean
+  /** 命中的历史审批单数（dryRun 时 = 将要删掉多少） */
+  targeted: number
+  /** 真删掉的单数 */
+  deletedOrders: number
+  /** 一起清掉的附件条数 */
+  filesDeleted: number
+  by: { id: string, role: string, name?: string, email?: string }
+}
+
+/**
+ * 删除**全部历史审批单**（已办结的：通过 / 驳回）。
+ *
+ * ⚠️ 删的是"一类"，不看页面上的筛选、也不限于当前页 —— 进行中的单不在此列
+ *    （口径与 useApprovalTable 的 historyRows 一致，判定在服务端）。
+ *    `dryRun = true` 只统计不删。
+ *
+ * 权限、批量删除与附件清理都在服务端（见 server/orderDelete.ts 的 deleteHistoryOrders）：
+ * 前端藏按钮只是界面礼貌。
+ */
+export async function deleteHistoryOrders (dryRun = false): Promise<DeleteHistorySummary> {
+  const res = await fetch(`/api/approval/orders${dryRun ? '?dryRun=1' : ''}`, {
+    method: 'DELETE',
+    headers: { Authorization: pb.authStore.token },
+  })
+  const payload = await res.json().catch(() => null)
+  if (!res.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.msg || `删除失败：HTTP ${res.status}`)
+  }
+  return payload.data as DeleteHistorySummary
 }
 
 /* ==================== 从 bi_rows 读数据 ==================== */

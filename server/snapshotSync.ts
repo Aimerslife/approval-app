@@ -45,8 +45,8 @@ import { type AdminCaller, adminToken, assertSuperAdmin, PB_URL } from './pbAdmi
  *
  * ## 顺带能重算 `sync_key`（`?rekey=1`）
  *
- * 唯一键是 `SKU|店铺|仓位|组别|是否属于呆滞库存`（`src/utils/biRowFields.ts`）。
- * 直接在库里改了**参与键的那几列**（仓位 / 组别 / SKU / 呆滞）之后，行里的 `sync_key`
+ * 唯一键是 `SKU|团队|仓位|是否属于待评估库存|店铺`（`src/utils/biRowFields.ts`）。
+ * 直接在库里改了**参与键的那几列**（SKU / 团队 / 仓位 / 待评估 / 店铺）之后，行里的 `sync_key`
  * 还是旧值 —— 下次全量同步就认不出它了（会"新建一条同键行 + 把这条当 orphan"）。
  * 打开 rekey 就按**当前列**把键重算一遍（口径与写快照同一套：列里有值取列、否则取快照）。
  *

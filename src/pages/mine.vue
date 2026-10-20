@@ -21,7 +21,7 @@
       <v-divider class="mt-3" />
 
       <v-data-table v-model:page="page" class="text-[12px] mine-table" border density="compact" fixed-header
-        :headers="headers" fixed-footer hover :items="filteredRows" :items-per-page="itemsPerPage" :loading="loading"
+        :headers="headers" fixed-footer hover :items="filteredRows" :items-per-page="itemsPerPage"
         striped="odd" @click:row="handleRowClick">
         <template #item.order_no="{ value }">
           <span class="font-bold">{{ value }}</span>
@@ -74,7 +74,7 @@
 
       <v-data-table v-model:page="historyPage" class="text-[12px] mine-table" border density="compact" fixed-footer
         fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
-        :loading="loading" striped="odd" @click:row="handleRowClick">
+        striped="odd" @click:row="handleRowClick">
         <template #item.order_no="{ value }">
           <span class="font-bold">{{ value }}</span>
         </template>
@@ -111,7 +111,7 @@
     </v-sheet>
   </v-container>
 
-  <v-navigation-drawer v-model="setOpen" location="right" permanent temporary width="950">
+  <v-navigation-drawer v-model="setOpen" location="right" permanent temporary width="1200">
     <template #prepend>
       <div class="d-flex justify-space-between align-center px-2 py-1">
         <span class="text-[13px]">审批视图</span>
@@ -154,7 +154,7 @@
             时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 selectedStepGroups），
             弹窗里把这一串动作连着办（办完自动接下一环）。
           -->
-          <ApprovalNode v-for="(g, gi) in selectedStepGroups" :key="`${selectedOrder?.id}-${g.stepIds[0] || gi}`"
+          <ApprovalNode v-for="(g, gi) in selectedStepGroups" :key="`${selectedOrder?.id}-${g.stepIds[0] || gi}`" hide-handle
             :allowed-options="selectedOptionItems[g.stepIds[0]]" :allowed-results="selectedResultOptions[g.stepIds[0]]"
             :can-handle="g.indexes.includes(selectedCurrentStep)" :data="g.steps[0]" :index="g.indexes[0]"
             :in-discard-segment="discardMarkOf(g, selectedDiscardMarks)?.seq"
@@ -170,6 +170,25 @@
         </v-timeline>
       </div>
     </v-container>
+
+    <!--
+      办理面板：放在抽屉的 **append 区** —— 它在内容滚动区之外，天然钉在抽屉最底部，
+      内容再长也始终可见（sticky 只会在内容末尾"跟着走"，内容短时反而悬在半空）。
+      入口只有它 —— 时间线节点内的「办理」已用 hide-handle 关掉；面板本体与审批页 / 首页同一个组件。
+    -->
+    <template #append>
+      <div class="drawer-dock">
+        <HandleDock mode="dialog" :groups="selectedStepGroups" :chain="selectedChain" :current-step="selectedCurrentStep"
+          :option-items="selectedOptionItems" :result-options="selectedResultOptions" :order="selectedOrder"
+          :receiver-team="selectedReceiverTeam" :remaining-qty="selectedRemainingQty"
+          :stock-amount="selectedStockAmount" :stock-qty="selectedStockQty" @submit="onDrawerSubmit">
+          <!-- 抄送 / 转办：与审批页同一个组件、同一份落库逻辑（components/approval/HandleDock 的 extra 槽） -->
+          <template #extra>
+            <SelectNode @select="handleSelect" />
+          </template>
+        </HandleDock>
+      </div>
+    </template>
   </v-navigation-drawer>
 
   <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000" variant="tonal">
@@ -183,6 +202,11 @@ import { type DeleteOrderSummary } from '@/api/api'
 // 筛选条（搜索 / 下拉 / 日期 / 确认 / 重置）：与首页两张表共用同一个组件，控件定义在 utils/approvalFilters
 import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
 import ApprovalNode from '@/components/ApprovalNode.vue'
+// 抽屉底部的办理面板：三处办理入口共用（内含 ApprovalHandleForm）
+import HandleDock from '@/components/approval/HandleDock.vue'
+// 抄送 / 转办：选人组件与落库逻辑，与审批页共用同一份
+import SelectNode from '@/components/streamNodes/SelectNode.vue'
+import { useApprovalSelect } from '@/composables/useApprovalSelect'
 // 操作栏的「删除审批单」：按钮内置权限判断与确认框（与 home.vue 共用同一个组件）
 import DeleteOrderButton from '@/components/DeleteOrderButton.vue'
 // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
@@ -381,15 +405,6 @@ function toRow(order: ApprovalOrder): ApprovalRow {
 
 /** 全部审批单（approval_chain），已按创建时间倒序 —— 见 getApprovalOrder */
 const orders = ref<ApprovalOrder[]>([])
-
-/**
- * 审批单取数中 —— 「当前」「历史」两张表**共用**这一个 flag。
- *
- * 两张表是同一份 orders 的两个切面（见下面的 pendingRows / historyRows），
- * 一次请求同时喂它们；拆成两个 flag 只会一个先亮一个后亮，反而像出了两次错。
- * 写法与仓库其余表格一致：进去置 true、复位放 finally（失败也不会卡在加载态）。
- */
-const loading = ref(false)
 
 /**
  * 「超时阈值」的来源：与「提醒设置」的推送规则**同源** —— 那边把阈值改成 24，
@@ -714,18 +729,30 @@ const { submitNode } = useNodeSubmit({
   },
 })
 
+/**
+ * 抄送 / 转办：落库逻辑在 composables/useApprovalSelect.ts（与审批页同一份）。
+ * 回填口径与提交一致 —— 必须更新**列表里那条**，抽屉的时间线才会跟着变。
+ */
+const { handleSelect } = useApprovalSelect({
+  order: selectedOrder,
+  chain: selectedChain,
+  stepIds: selectedStepIds,
+  currentStep: selectedCurrentStep,
+  onMessage: showMsg,
+  onUpdated: updated => {
+    orders.value = orders.value.map(o => (o.id === updated.id ? { ...o, ...updated } : o))
+    const row = orders.value.find(o => o.id === updated.id)
+    if (row) selectedNode.value = toRow(row)
+  },
+})
+
 function onDrawerSubmit(payload: NodeSubmitPayload) {
   void submitNode(payload)
 }
 
 async function getDatas() {
-  loading.value = true
-  try {
-    orders.value = await getApprovalOrder()
-    console.log(orders.value)
-  } finally {
-    loading.value = false
-  }
+  orders.value = await getApprovalOrder()
+  console.log(orders.value)
 }
 
 onMounted(() => {
@@ -736,6 +763,24 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+/*
+ * 抽屉底部的办理面板：挂在 v-navigation-drawer 的 #append 区（滚动之外，天然贴底）。
+ * 底色必须不透明 —— 内容从它上面滚过去时，否则文字会透出来糊成一片。
+ */
+.drawer-dock {
+  background: rgb(var(--v-theme-surface));
+  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+/*
+ * Vuetify 的 drawer 内容区是 `flex: 0 1 auto`（不拉伸），append 区 `flex: none`——
+ * 内容不足一屏时面板会紧贴内容而不是抽屉底部。让内容区吃掉剩余空间，面板才会被压到底。
+ */
+:deep(.v-navigation-drawer__content) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .mine-block {
   flex: 1 1 auto;
   /* 最小高度：内容少也不会缩成一条（约 8 行 + 表头） */

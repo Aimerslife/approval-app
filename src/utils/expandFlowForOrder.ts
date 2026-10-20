@@ -1,4 +1,5 @@
 import type { ApprovalFlow } from '@/types/approval'
+import { ensureRejectLoopBack } from '@/utils/approvalFlow'
 import { expandProbes, flowHasProbe } from '@/utils/approvalProbe'
 import { expandRotations } from '@/utils/approvalRotation'
 import { getTemplateFlowForRef } from '@/utils/collection'
@@ -71,6 +72,18 @@ export async function expandFlowForOrder (
         return { flow, issues: probed.issues }
       }
       flow = probed.flow
+      /*
+       * ①.5 查询展开之后补一次「驳回 → 回退上一级」（幂等，见 utils/approvalFlow 的 ensureRejectLoopBack）。
+       *
+       * 为什么必须在这里补：查询保存期还是 `probe` 节点，早先的补丁逻辑不认它的分支
+       * （只有建单期才把它展开成普通分支组）—— 于是**存量模板**里挂在查询分支中的环节
+       * （最典型：进入轮询的第一个环节）一直没有「回退」这个选项，重存模板也补不上。
+       * 展开后补一次，存量模板的新建单就有回退了。
+       *
+       * ⚠️ 必须排在 ② 之前：轮询卡片内部补到的回退分支，要被按环复制
+       *    （见 utils/approvalRotation 的 stampRing）才会出现在每一环上。
+       */
+      flow = ensureRejectLoopBack(flow)
     } catch (error) {
       // 查不出来不猜（列名写错 / 占位符取不到值都在这里暴露）
       return { flow, issues: [error instanceof Error ? error.message : String(error)] }

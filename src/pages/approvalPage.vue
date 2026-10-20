@@ -1,5 +1,5 @@
 <template>
-  <v-container class="pt-0 pl-0" fluid>
+  <v-container class="pt-0 px-0" fluid>
     <v-sheet class="sticky top-8 z-10 mt-0 px-5 py-3 d-flex justify-between" :class="{ 'tabs-scrolled': scrolled }"
       :style="{ width: barWidth + 'px', left: barLeft + 'px' }">
       <div class="d-flex align-center gap-2">
@@ -39,13 +39,10 @@
 
     <v-row gap="0">
       <v-col ref="leftColRef" class="relative" cols="4">
-        <v-container class="pb-10">
+        <!-- 底部留白跟固定办理面板的实测高度走（展开时面板变高，留白同步增加） -->
+        <v-container class="pb-10" :style="{ paddingBottom: timelinePaddingBottom }">
           <v-timeline density="compact" side="end" truncate-line="both" width="100%">
-            <!--
-              时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 stepGroups），
-              弹窗里把这一串动作连着办（办完自动接下一环）。
-            -->
-            <ApprovalNode v-for="(g, gi) in stepGroups" :key="g.stepIds[0] || gi"
+            <ApprovalNode v-for="(g, gi) in stepGroups" :key="g.stepIds[0] || gi" hide-handle
               :allowed-options="stepOptionItems[g.stepIds[0]]"
               :allowed-results="stepResultOptions[g.stepIds[0]]" :data="g.steps[0]" :discard-segment-size="discardMarkOf(g, discardMarks)?.size"
               :in-discard-segment="discardMarkOf(g, discardMarks)?.seq" :index="g.indexes[0]"
@@ -58,52 +55,52 @@
               <template #icon>
                 <v-icon color="white" size="14">mdi-inbox-arrow-down</v-icon>
               </template>
-
               <div class="d-flex align-center gap-2">
                 <v-chip color="primary" label size="x-small" variant="flat">
-                  <span class="text-[9px]">{{ receiver.pick === 'team' ? '接收团队' : '接收组别' }}</span>
+                  <span class="text-[9px]">{{ receiver.pick === 'team' ? '接收部门' : '接收团队' }}</span>
                 </v-chip>
-
                 <v-avatar class="mr-1" size="22">
                   <v-img v-if="receiver.avatar" cover :src="proxyAvatar(receiver.avatar)" />
                   <v-icon v-else size="13">mdi-account</v-icon>
                 </v-avatar>
-
                 <span class="text-[12px]">{{ receiver.name }}</span>
                 <span v-if="receiver.manager" class="text-[11px] text-medium-emphasis">
-                  {{ receiver.pick === 'team' ? '负责人' : '组长' }} {{ receiver.manager }}
+                  {{ receiver.pick === 'team' ? '部门负责人' : '团队负责人' }} {{ receiver.manager }}
                 </span>
                 <span v-else-if="receiver.department" class="text-[11px] text-medium-emphasis">
                   {{ receiver.department }}
                 </span>
                 <span v-else-if="receiver.email" class="text-[11px] text-medium-emphasis">{{ receiver.email }}</span>
               </div>
-
               <div class="mt-1 text-[11px] text-medium-emphasis">流程到此结束：后面接的环节不再有人办理</div>
             </v-timeline-item>
-
-            <!-- 时间线最后一条：流转**为什么**停下（办完 / 走到结束节点 / 命中终结结论 / 卡住） -->
             <FlowEndNote :end="runtime.end" />
           </v-timeline>
         </v-container>
 
-        <v-sheet class="fixed bottom-0 z-10 mt-0 px-5 py-3 d-flex justify-end gap-3 tabs-scrolled"
+        <v-sheet ref="dockRef" class="fixed bottom-0 z-10 tabs-scrolled handle-panel"
           :style="{ width: barWidth + 'px', left: barLeft + 'px' }">
-          <SelectNode @select="handleSelect" />
+          <HandleDock :groups="stepGroups" :chain="runtime.chain" :current-step="runtime.currentStep"
+            :option-items="stepOptionItems" :result-options="stepResultOptions" :order="orderDatas"
+            :receiver-team="receiverTeam" :remaining-qty="remainingQty" :stock-amount="stockAmount"
+            :stock-qty="stockQty" @submit="onNodeSubmit">
+            <!-- 抄送 / 转办：审批页单独有这一入口（抽屉里没有） -->
+            <template #extra>
+              <SelectNode @select="handleSelect" />
+            </template>
+          </HandleDock>
         </v-sheet>
       </v-col>
 
       <v-col cols="8">
-        <v-sheet class="pl-3 mt--8">
+        <v-sheet class="pl-3 mt--11">
           <ProductInfoCard :headers="headers" :product="product" @send-img="handleImg" />
         </v-sheet>
       </v-col>
     </v-row>
-
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000" variant="tonal">
       {{ snackbar.text }}
     </v-snackbar>
-
     <v-overlay v-model="overlay" @click="overlay = false">
       <div class="d-flex align-center justify-center" style="width: 100vw; height: 100vh">
         <v-img contain max-height="70vh" :src="imgUrl" :style="{ maxWidth: '70vw' }" width="400" rounded="xl"/>
@@ -123,6 +120,8 @@ import type {
 import useClipboard from 'vue-clipboard3'
 import { proxyAvatar, sendFeishuCard } from '@/api/api'
 import ApprovalNode from '@/components/ApprovalNode.vue'
+// 底部办理面板：三处办理入口共用同一份实现（内含 ApprovalHandleForm）
+import HandleDock from '@/components/approval/HandleDock.vue'
 // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
 import FlowEndNote from '@/components/FlowEndNote.vue'
 import ProductInfoCard from '@/components/ProductInfoCard.vue'
@@ -177,22 +176,11 @@ async function copyOrderNo(order_no: string | undefined) {
 // 显式标注类型：PB 返回的是 RecordModel，ref({}) 会被推成 Ref<{}>，
 // 下面 product.value = data2?.items[0] 就会报 TS2322（RecordModel 不能赋给 {}）
 const product = ref<Record<string, unknown>>({})
-/**
- * 接收数量的账：总库存数量 / 已接收 / 剩余（= 一批货先被部分接收后，还剩多少给后面的组）。
- *
- * 与流程引擎**共用同一份口径**（types/approval 的 receivedQuantities）：
- * 页面上的上限与流程的分流依据（条件「剩余接收数量 > 0」）必须一致，
- * 否则会出现"页面能填、流程却按另一个数分流"。总库存数量优先取**建单快照**
- * （与条件取值同源），快照里没有才退回关联产品。
- */
+
 const qtyLedger = computed(() =>
   receivedQuantities(orderDatas.value?.chain?.decisions ?? [], flowContextOfOrder(orderDatas.value)),
 )
-/**
- * 本单产品的「总库存数量」/「总库存金额」→ 下发给办理弹窗。
- * 前者：选中**全部接收**时接收数量就是它（不可修改），也是接收/回收数量的上限；
- * 后者：回收金额的上界（必须小于，见 ApprovalNode 的 lessThan）。
- */
+
 const stockQty = computed(() =>
   String(qtyLedger.value.total ?? toProductView(product.value)['总库存数量'] ?? ''),
 )
@@ -291,6 +279,23 @@ const leftColRef = ref<{ $el: HTMLElement } | null>(null)
 const barWidth = ref(0)
 const barLeft = ref(0)
 let resizeObserver: ResizeObserver | null = null
+
+/**
+ * 底部固定办理条（`.handle-panel`）的实测高度。
+ *
+ * 为什么不用固定值：这条是 `fixed bottom-0` 贴在视口底边的，折叠时只有一条标题行，
+ * 点「办理」展开后高度最高 60vh（内容区内部滚动，见 HandleDock 的样式），
+ * 而且进入页面时可能因为「默认展开」设置一上来就是展开态 —— 写死 px 要么盖住时间线末尾，
+ * 要么收起后留一大块空白。所以量实高，padding 跟着它走。
+ */
+const dockRef = ref<{ $el: HTMLElement } | null>(null)
+const dockHeight = ref(0)
+let dockObserver: ResizeObserver | null = null
+
+/** 时间线容器的底部留白 = 面板高度 + 24（留一点视觉间隙）；量不到时退回原来的 40px */
+const timelinePaddingBottom = computed(() => (dockHeight.value > 0
+  ? `${Math.round(dockHeight.value) + 24}px`
+  : '40px'))
 
 function syncBottomBar() {
   const el = leftColRef.value?.$el as HTMLElement | undefined
@@ -691,6 +696,18 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(syncBottomBar)
     resizeObserver.observe(el)
   }
+  /*
+   * 底部办理面板的高度变化（点「办理」展开 / 收起、换单后内容变高）→ 更新留白。
+   * 用 getBoundingClientRect 而不是 contentRect：面板的内边距也算在占位里。
+   */
+  const dock = dockRef.value?.$el
+  if (dock) {
+    dockObserver = new ResizeObserver(() => {
+      dockHeight.value = dock.getBoundingClientRect().height
+    })
+    dockObserver.observe(dock)
+    dockHeight.value = dock.getBoundingClientRect().height
+  }
   getDatas()
 })
 
@@ -699,6 +716,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', syncBottomBar)
   resizeObserver?.disconnect()
   resizeObserver = null
+  dockObserver?.disconnect()
+  dockObserver = null
 })
 </script>
 
@@ -706,6 +725,8 @@ onUnmounted(() => {
 .tabs-scrolled {
   box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.15);
 }
+
+/* 面板本体的样式（圆角 / 限高 / 内部滚动）在 HandleDock 里，这里只管固定定位与阴影 */
 
 :deep(.v-timeline--vertical.v-timeline--side-end) {
   grid-template-columns: 0 min-content 1fr;
