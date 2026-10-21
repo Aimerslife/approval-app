@@ -130,6 +130,38 @@ export function orderHandledBy (order: ApprovalOrder, who?: ApprovalChainItem | 
 }
 
 /**
+ * 这张单**抄送给了他**：链路上（含运行期追加的抄送）有 `type === 'cc'` 的成员是他。
+ *
+ * 「我的审批单」页「抄送我的」那一档的口径。与 orderHandledBy 刻意分开：
+ * 抄送只是"通知到了"，不代表他对这张单做过决定，所以不算「我经手过」
+ * （见 orderHandledBy 的说明）——但在「抄送我的」里必须看得到。
+ *
+ * @param who 登录者（userStore.member）；没登录时调用方传 undefined，这里一律返回 false
+ */
+export function orderCcTo (order: ApprovalOrder, who?: ApprovalChainItem | null): boolean {
+  if (!who) {
+    return false
+  }
+  const rt = runtimeOf(order)
+  return rt.chain.some(step => (step ?? []).some(m => m?.type === 'cc' && sameApprover(m, who)))
+}
+
+/**
+ * 这张单是**他提交的**（「我的审批单」页「我发起的」那一档）。
+ *
+ * 只能按建单时落库的 `creator`（users id）判 —— 快照里没有"提交人"这个东西：
+ * 链路上只有审批人（manager）与抄送人（cc），都没有"谁建的"的含义。
+ *
+ * 历史单（加字段之前建的）没有 creator，这里返回 false，不会把它们错算给别人。
+ *
+ * @param userId 登录者 id（userStore.user?.id），与 creator 同源
+ */
+export function orderCreatedBy (order: ApprovalOrder, userId?: string | null): boolean {
+  const id = String(userId ?? '').trim()
+  return !!id && String(order.creator ?? '') === id
+}
+
+/**
  * 审批页右上角「上一个 / 下一个」该跳到哪两张单。
  *
  * 队列 = **某人名下的在办单**（按 `-created` 排，与首页表格同序，见 pages/approvalPage）。

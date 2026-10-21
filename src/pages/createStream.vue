@@ -191,13 +191,23 @@
 
                   <span v-if="selectedEdgeConditions.length === 0" class="mt-1">{{
                     isResultEdge ? '主线（审批通过/其他结论未命中时走这条）'
-                      : (isRefEdge ? '兜底主线（这一段最后办出来的结论没绑到别的线时走这条）'
+                      : (isRefEdge
+                        ? (isOnlyRefOut
+                          ? '默认（这一段走完继续下一环；选个结论就变成分流，其它结论自动走「结束」）'
+                          : '兜底主线（这一段最后办出来的结论没绑到别的线时走这条）')
                         : '默认分支（条件都不命中时走这条）')
                     }}</span>
                 </label>
-                              <template
-                                v-if="isBranchEdge && (isResultEdge || isRefEdge) && selectedEdgeConditions.length > 0"
-                              >
+
+                <!--
+                  引用卡片的出线：结论下拉**常显**（单出线也给）。
+                  单出线绑结论 = "命中继续 / 其它结论结束"，兜底出口由编译器补（singleLineRefBranches），
+                  所以这里不能再要求"先画第二条线"才给下拉 —— 那正是"必须外接两条线"的由来。
+                -->
+                <template
+                  v-if="isBranchEdge && (isResultEdge || isRefEdge)
+                    && (selectedEdgeConditions.length > 0 || (isRefEdge && isOnlyRefOut))"
+                >
                 <div class="panel-row">
                   <span class="panel-label">审批结论</span>
 
@@ -208,6 +218,10 @@
                       {{ r.label }}
                     </option>
                   </select>
+                </div>
+                <div v-if="isRefEdge && isOnlyRefOut" class="panel-hint ml-3">
+                  只有这一条出线时：这一段最后办出来的结论命中它就继续，其它结论整单结束 ——
+                  兜底出口由流程自动补，不必再连一条线到「结束」
                 </div>
                 <div v-if="selectedEdgeResult === 'other_reason'" class="panel-hint ml-3">
                   「其他原因」通常需要再细化：可追加条件，如 result_label 包含关键词、amount 大于 5000；
@@ -829,7 +843,13 @@ const isResultEdge = computed(() => {
 })
 
 /**
- * 选中连线是否为「引用模板的分流线」：引用卡片出线，且卡片已有 ≥2 条出线。
+ * 选中连线是否为「引用模板的分流线」：**只要是引用卡片的出线就算**（一条也算）。
+ *
+ * 为什么单条出线也要给面板：引用卡片天生带一个"默认结束"的出口 ——
+ * 这一段最后办出来的结论绑到了这条线就继续，**没绑到的结论整单结束**
+ * （兜底出口由编译器补，见 utils/approvalFlow 的 singleLineRefBranches，不必真画第二条线）。
+ * 以前这里要求 ≥2 条出线，结果"一条线"时面板不给「审批结论」，
+ * 用户必须先拖一条信息量为零的线到「结束」才能配结论 —— 这就是"要外接两条线才能分流"。
  *
  * 与审批结果分支**共用同一套交互**（线路名称 / 绑结论 / 条件 / 兜底主线）——
  * 差别只在"结论从哪来"：那边是上一环节的审批结论，这边是**被引用那一段最后办出来的结论**；
@@ -840,9 +860,14 @@ const isResultEdge = computed(() => {
 const isRefEdge = computed(() => {
   const edge = selectedEdge.value
   if (!edge) return false
-  const src = nodes.value.find(n => n.id === edge.source)
-  if (src?.type !== 'ref') return false
-  return edges.value.filter(e => e.source === edge.source).length > 1
+  return nodes.value.find(n => n.id === edge.source)?.type === 'ref'
+})
+
+/** 这条引用出线是不是**唯一**那条（单出线：不绑结论 = 穿过去，绑了 = 分流 + 其它结论结束） */
+const isOnlyRefOut = computed(() => {
+  const edge = selectedEdge.value
+  if (!edge) return false
+  return edges.value.filter(e => e.source === edge.source).length === 1
 })
 
 /**
@@ -1573,13 +1598,13 @@ function isBranchEdgeOf(edge: any): boolean {
    * 「审批节点」与「引用卡片」都能按结论分流（审批 = 上一环节的结论；引用 = 被引用那一段
    * 最后办出来的结论），但门槛不同：
    *   · 审批节点：**≥2 条出线**才算分流（单出线 = 顺序往下，条件不生效）；
-   *   · 引用卡片：≥2 条出线算分流；**单出线但这条线绑了结论也算** ——
-   *     那是"命中该结论继续、其它结论结束"（编译器自动补兜底出口），
+   *   · 引用卡片：**任一条件都算**（一条出线也算）—— 它自带"其它结论 → 结束"的兜底出口，
+   *     单出线绑上结论就是"命中继续、其它结束"（编译器自动补兜底，见 singleLineRefBranches）。
    *     所以这条线必须能在面板里改结论，不能锁死成"穿过去"。
    */
   const outCount = edges.value.filter(e => e.source === edge.source).length
   const resultBranchable = (source?.type === 'approval' && outCount > 1)
-    || (source?.type === 'ref' && (outCount > 1 || edgeBindsResult(edge.id)))
+    || source?.type === 'ref'
   return source?.type === 'condition' || resultBranchable
 }
 
@@ -1606,11 +1631,15 @@ function onEdgeClick({ edge }: { edge: any }) {
 
 /**
  * 面板首行「默认分支 / 主线」开关：与分支名输入同排，
- * 按当前连线类型分发——条件分支清空条件，审批结果分支切回主线（无审批结论）。
+ * 按当前连线类型分发——条件分支清空条件，
+ * 审批结果 / 引用分流切回"主线"（无结论）。
+ *
+ * ⚠️ 引用出线也要走 toggleResultMain：它的第一个条件就是「审批结论」，
+ * 不能退到 toggleDefaultBranch（那会塞一条空条件，等于让用户从零手填字段条件）。
  */
 function onMainToggle(e: Event) {
   const checked = (e.target as HTMLInputElement).checked
-  if (isResultEdge.value) toggleResultMain(checked)
+  if (isResultEdge.value || isRefEdge.value) toggleResultMain(checked)
   else toggleDefaultBranch(checked)
 }
 
@@ -1626,8 +1655,8 @@ function addCondition() {
   const edge = ensureEdgeData()
   if (!edge) return
   const list = edge.data.conditions as ConditionExpr[]
-  // 结果分支必须先有结论才能附条件（按"有没有结论条件"判断，不是按下标）
-  if (isResultEdge.value && !list.some(isResultCondition)) {
+  // 结果分支（审批 / 引用）必须先有结论才能附条件（按"有没有结论条件"判断，不是按下标）
+  if ((isResultEdge.value || isRefEdge.value) && !list.some(isResultCondition)) {
     list.push({ field: 'result', op: 'eq', value: 'reject' })
   }
   list.push({ field: '', op: 'eq', value: '' })
@@ -1741,6 +1770,7 @@ function onConnect(params: Connection) {
   let label: string | undefined
   let data: FlowGraphEdge['data'] | undefined
   let newResultBranch = false
+  let newRefBranch = false
   if (sourceNode?.type === 'probe') {
     /*
      * 数据查询的两条出边按拖出顺序自动命名：第一条「存在」、第二条「不存在」。
@@ -1770,6 +1800,23 @@ function onConnect(params: Connection) {
       conditions: [{ field: 'result', op: 'eq', value: 'reject' }],
     }
     newResultBranch = true
+  } else if (sourceNode?.type === 'ref') {
+    /*
+     * 引用卡片：**第一条线就是「默认分流」** —— 这一段最后办出来的结论都走它；
+     * 在面板里绑上结论后，就变成"命中该结论继续、其它结论整单结束"
+     * （兜底出口由编译器补，见 utils/approvalFlow 的 singleLineRefBranches）。
+     *
+     * 所以不必先画两条线：第一条给个可改的名字、直接选中，面板里「审批结论」常显。
+     * 第二条以后按结果分支建（默认绑「驳回」），与审批节点的分流同构。
+     */
+    label = outCount === 0 ? '默认' : ''
+    data = outCount === 0
+      ? { condition: null, conditions: [] }
+      : {
+          condition: { field: 'result', op: 'eq', value: 'reject' },
+          conditions: [{ field: 'result', op: 'eq', value: 'reject' }],
+        }
+    newRefBranch = true
   }
   edges.value.push({
     id: uid(),
@@ -1802,6 +1849,17 @@ function onConnect(params: Connection) {
     selectedEdge.value = edges.value.at(-1)
     addSelectedEdges([selectedEdge.value])
     showMsg('已创建「提前跳出」出线：可以继续拖出多条，环内那条「提前结束轮询」的线自己选跳到哪一条', 'success')
+  }
+  // 引用卡片的出线：建完就选中，面板直接就是这条"可编辑的分流"
+  if (newRefBranch) {
+    selectedEdge.value = edges.value.at(-1)
+    addSelectedEdges([selectedEdge.value])
+    showMsg(
+      outCount === 0
+        ? '已创建引用分流：在上方面板选一个结论，就是"命中继续、其它结论整单结束"（不选则这一段走完继续下一环）'
+        : '已创建引用分流：在上方命名并选择对应结论（原「默认」线继续兜底）',
+      'success',
+    )
   }
 }
 

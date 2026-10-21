@@ -1,7 +1,7 @@
 <template>
   <div class="d-inline-flex align-center gap-1">
-    <v-btn size="small" variant="text"  @click="openPicker('cc')" prepend-icon="mdi-email-plus-outline">抄送</v-btn>
-    <v-btn size="small" variant="text" @click="openPicker('transfer')" prepend-icon="mdi-share-all-outline">转办
+    <v-btn size="small" variant="text" :disabled="disabled" @click="openPicker('cc')" prepend-icon="mdi-email-plus-outline">抄送</v-btn>
+    <v-btn size="small" variant="text" :disabled="disabled" @click="openPicker('transfer')" prepend-icon="mdi-share-all-outline">转办
     </v-btn>
     <!-- 人员选择弹窗 -->
     <v-dialog v-model="showPicker" max-width="620">
@@ -83,6 +83,17 @@ import DepartmentNode from '../DepartmentNode.vue'
 import SelectedUsers from '../SelectedUsers.vue'
 
 type Action = 'cc' | 'transfer'
+
+/**
+ * disabled：把「抄送 / 转办」两个入口一起置灰。
+ *
+ * 用在**不可再动这张单**的场景 —— 目前是「我的审批单」的历史板块（单已办结 / 已不在我这一环），
+ * 那边只做查看，不应该再往流程里塞抄送人或转办。
+ * 只置灰按钮、不隐藏：让人看得出现在有这两个能力，只是此刻不能用（避免误以为功能缺失）。
+ */
+withDefaults(defineProps<{ disabled?: boolean }>(), {
+  disabled: false,
+})
 
 const emit = defineEmits<{ select: [payload: { action: Action, user: UserBrief }] }>()
 

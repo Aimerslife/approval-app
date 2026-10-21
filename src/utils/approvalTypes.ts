@@ -600,6 +600,66 @@ export function resolveTypeTemplates (
   return DEFAULT_TYPE_TEMPLATES.map(t => resolveTypeTemplate(t.code, layers))
 }
 
+/**
+ * 建单期要随单据带走的那一份：只留**非空壳**的行。
+ *
+ * 空壳（`fields` 为空、没有 note / fixedValues / effects、也没被停用）与内置默认完全一致，
+ * 存进快照只是白占体积 —— 22 个结论里大部分都是这种。
+ * 读的一侧永远经 `typeTemplateFromSnapshot` 兜底，所以"没存"与"存了空壳"是同一种结果。
+ */
+export function slimTypeTemplates (list: readonly ApprovalTypeTemplate[]): Record<string, ApprovalTypeTemplate> {
+  const kept = list.filter(t =>
+    t.fields.length > 0
+    || !!t.fixedValues
+    || !!t.note
+    || t.enabled === false
+    || (t.effects?.length ?? 0) > 0,
+  )
+  return Object.fromEntries(kept.map(t => [t.code, t]))
+}
+
+/**
+ * 读单据快照里的 `types`（建单期由 slimTypeTemplates 写进去）。
+ *
+ * 容错：老单（那会儿还没有这一项）/ 手改坏的 JSON / 少字段 —— 一律当"没配"跳过，
+ * 最后由 typeTemplateFromSnapshot 回落到内置默认（= 改造前的行为）。
+ */
+export function typesFromSnapshot (raw: unknown): Record<string, ApprovalTypeTemplate> {
+  if (!raw || typeof raw !== 'object') {
+    return {}
+  }
+  const out: Record<string, ApprovalTypeTemplate> = {}
+  for (const [code, value] of Object.entries(raw as Record<string, unknown>)) {
+    const t = value as Partial<ApprovalTypeTemplate> | null | undefined
+    if (!t || typeof t !== 'object' || !Array.isArray(t.fields)) {
+      continue
+    }
+    out[code] = {
+      code,
+      name: String(t.name ?? code),
+      fields: normalizeTypeFields(t.fields),
+      ...(t.fixedValues ? { fixedValues: t.fixedValues } : {}),
+      ...(t.note ? { note: String(t.note) } : {}),
+      ...(t.enabled === false ? { enabled: false } : {}),
+      ...(Array.isArray(t.effects) ? { effects: t.effects.map(String) } : {}),
+    }
+  }
+  return out
+}
+
+/**
+ * 办理期取某个结论**生效**的模板：**只读快照**。
+ *
+ * 这是文件头第 2 条边界的落点：运行期不查 `approval_types` 表，
+ * 否则今天改一下模板，历史单的填写项会跟着变。快照里没有（老单）→ 内置默认。
+ */
+export function typeTemplateFromSnapshot (
+  snapshot: Record<string, ApprovalTypeTemplate> | undefined,
+  code: string,
+): ApprovalTypeTemplate {
+  return snapshot?.[code] ?? defaultTypeTemplateOf(code)
+}
+
 /** 这条字段当前是否要展示（联动口径见 TypeField.showWhen） */
 export function isFieldVisible (field: TypeField, values: Record<string, unknown>): boolean {
   if (!field.showWhen) {

@@ -10,6 +10,7 @@ export {}
 declare global {
   const EffectScope: typeof import('vue').EffectScope
   const PENDING_REFRESH_MS: typeof import('../src/stores/pending').PENDING_REFRESH_MS
+  const SANDBOX_ROW_PAGE_SIZE: typeof import('../src/composables/useSandbox').SANDBOX_ROW_PAGE_SIZE
   const acceptHMRUpdate: typeof import('pinia').acceptHMRUpdate
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
@@ -259,6 +260,7 @@ declare global {
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
   const useSSRWidth: typeof import('@vueuse/core').useSSRWidth
+  const useSandbox: typeof import('../src/composables/useSandbox').useSandbox
   const useScreenOrientation: typeof import('@vueuse/core').useScreenOrientation
   const useScreenSafeArea: typeof import('@vueuse/core').useScreenSafeArea
   const useScriptTag: typeof import('@vueuse/core').useScriptTag
@@ -341,4 +343,7 @@ declare global {
   // @ts-ignore
   export type { UseApprovalSelectOptions } from '../src/composables/useApprovalSelect'
   import('../src/composables/useApprovalSelect')
+  // @ts-ignore
+  export type { SandboxMemo } from '../src/composables/useSandbox'
+  import('../src/composables/useSandbox')
 }

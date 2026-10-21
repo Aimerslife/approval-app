@@ -1,301 +1,227 @@
 <template>
-  <v-container class="py-2 px-4 min-h-[100vh] bg-app d-flex flex-column" fluid>
-    <!-- 上：当前待办（我名下的在办单） -->
-    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column card-border" rounded="15">
-      <div class="block-title">当前审批</div>
-
-      <!-- 容器最大宽度放宽到 720：多了一个「进度」下拉，600px 下三个控件会被压得很窄 -->
-      <div class="p-2 d-flex items-center justify-between gap-4 max-w-[720px]">
-        <v-text-field v-model="search" density="compact" flat class="filter-input" hide-details label="搜索"
-          prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" />
-        <v-select v-model="modelFilter" class="filter-select" clearable density="compact" flat hide-details
-          :items="modelOptions" label="主MODEL" :menu-props="{ contentClass: 'filter-menu' }" single-line
-          variant="outlined" />
-        <!-- 进度：正常 / 超时 / 滞留。候选是固定三档（见 progressOptions），不是从当前数据里派生的 -->
-        <v-select v-model="progressFilter" class="filter-select" clearable density="compact" flat hide-details
-          :items="progressOptions" label="进度" :menu-props="{ contentClass: 'filter-menu' }" single-line
-          variant="outlined" />
-        <v-btn color="#0052D9" size="small" variant="flat">确认</v-btn>
-      </div>
-
-      <v-divider class="mt-3" />
-
-      <v-data-table v-model:page="page" class="text-[12px] mine-table" border density="compact" fixed-header
-        :headers="headers" fixed-footer hover :items="filteredRows" :items-per-page="itemsPerPage"
-        striped="odd" @click:row="handleRowClick">
-        <template #item.order_no="{ value }">
-          <span class="font-bold">{{ value }}</span>
-        </template>
-
-        <!-- 页脚只留一条紧凑分页：默认那套（大按钮 + 上下留白）要吃掉一整行表体 -->
-        <template #bottom>
-          <div class="d-flex justify-center">
-            <v-pagination v-model="page" :length="pageCount" size="small" :total-visible="7" />
-          </div>
-        </template>
-        <!-- 状态：文案与颜色由行里带出来（未审批 / 审批中 / 待定 / 通过 / 驳回，见 utils/approvalFilters） -->
-        <template #item.status="{ item }">
-          <v-chip :color="item.statusColor" label size="x-small">{{ item.statusText }}</v-chip>
-        </template>
-        <!-- 进度：按"这一环等了几个**工作日小时**"判 正常 / 超时 / 滞留（见 utils/approvalProgress） -->
-        <template #item.process="{ item }">
-          <v-chip :color="item.processColor" label size="x-small" :title="item.processDetail">{{ item.processText }}</v-chip>
-        </template>
-
-        <template #item.created="{ value }">
-          {{ formatDate(value) }}
-        </template>
-
-        <template #item.actions="{ item }">
-          <v-btn color="primary" variant="text" @click.stop="goApproval(item)">
-            <span class="text-[13px]">审批</span>
-          </v-btn>
-
-          <!-- 删除审批单：按钮里自带权限判断（只有超级管理员看得见）与确认框 -->
-          <DeleteOrderButton :row="item" @deleted="onOrderDeleted" @error="onDeleteFailed" />
-        </template>
-      </v-data-table>
-    </v-sheet>
-
-    <!-- 下：历史审批（我经手过的已办结单） -->
-    <v-sheet class="mine-block overflow-hidden mt-3 p-4 d-flex flex-column card-border" rounded="15">
-      <div class="d-flex align-center justify-space-between">
-        <div class="block-title">历史审批</div>
-        <span class="text-[12px] text-medium-emphasis">
-          我经手过的单（含仍在流转的）· 共 {{ historyRows.length }} 张
-        </span>
-      </div>
-
-      <ApprovalFilterBar :dirty="historyDirty" :filters="historyFilters" :options="historyOptions"
-        :select-keys="['statusText', 'approver', '主MODEL']" :select-labels="{ approver: '最后办理人' }"
-        @apply="applyHistoryFilters" @patch="patchHistoryFilters" @reset="resetHistoryFilters" />
-
-      <v-divider class="mt-3" />
-
-      <v-data-table v-model:page="historyPage" class="text-[12px] mine-table" border density="compact" fixed-footer
-        fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
-        striped="odd" @click:row="handleRowClick">
-        <template #item.order_no="{ value }">
-          <span class="font-bold">{{ value }}</span>
-        </template>
-
-        <template #item.status="{ item }">
-          <v-chip :color="item.statusColor" label size="x-small">{{ item.statusText }}</v-chip>
-        </template>
-
-        <!-- 最后的审批结论（只有本表有这一列）：悬浮看办理人 / 意见 / 时间 -->
-        <template #item.conclusion="{ item }">
-          <span :title="item.conclusionDetail">{{ item.conclusion }}</span>
-        </template>
-
-        <template #item.created="{ value }">
-          {{ formatDate(value) }}
-        </template>
-
-        <template #item.actions="{ item }">
-          <v-btn color="primary" variant="text" @click.stop="goApproval(item)">
-            <span class="text-[13px]">查看</span>
-          </v-btn>
-
-          <!-- 删除审批单：按钮里自带权限判断（只有超级管理员看得见）与确认框 -->
-          <DeleteOrderButton :row="item" @deleted="onOrderDeleted" @error="onDeleteFailed" />
-        </template>
-
-        <!-- 页脚只留一条紧凑分页（与上面那张表同一口径） -->
-        <template #bottom>
-          <div class="d-flex justify-center">
-            <v-pagination v-model="historyPage" :length="historyPageCount" size="small" :total-visible="7" />
-          </div>
-        </template>
-      </v-data-table>
-    </v-sheet>
-  </v-container>
-
-  <v-navigation-drawer v-model="setOpen" location="right" permanent temporary width="1200">
-    <template #prepend>
-      <div class="d-flex justify-space-between align-center px-2 py-1">
-        <span class="text-[13px]">审批视图</span>
-
-        <v-icon-btn color="#727272" size="40" variant="text" @click="setClose">
-          <v-icon size="20">mdi-unfold-less-vertical</v-icon>
+  <v-container class="d-flex ga-3 bg-app h-[calc(100vh-32px)] p-0" fluid>
+    <!-- ==================== 左：分类 ==================== -->
+    <v-sheet class="mine-rail d-flex flex-column card-border pa-2 pt-4">
+      <div class="d-flex align-center justify-space-between px-1 pb-1">
+        <span class="text-[13px] font-bold">审批中心</span>
+        <v-icon-btn size="x-small" title="刷新列表" variant="text" @click="getDatas">
+          <v-icon size="16">mdi-refresh</v-icon>
         </v-icon-btn>
       </div>
-
-      <v-divider />
-    </template>
-    <!-- 默认槽位在 .v-navigation-drawer__content 内自动滚动 -->
-    <v-container>
-      <v-sheet class="text-[13px] mb-2 d-flex items-center justify-between">
-        <span>审批单号：{{ selectedNode?.order_no ?? '—' }}
-          <!-- 没有上/下一条时置灰（v-icon-btn 的 disabled 会加 .v-icon-btn--disabled：
-               opacity .26 + graytext + pointer-events: none） -->
-          <v-icon-btn :disabled="!hasPrevStep" size="x-small" title="上一条" @click="backStep">
-            <v-icon>mdi-menu-left</v-icon>
-          </v-icon-btn>
-
-          <v-icon-btn :disabled="!hasNextStep" size="x-small" title="下一条" @click="nextStep">
-            <v-icon>mdi-menu-right</v-icon>
-          </v-icon-btn>
-        </span>
-
-        <span>当前审批人：{{ selectedNode?.approver ?? '—' }}</span>
-
-        <span>审批状态：<v-chip :color="selectedNode?.statusColor" size="x-small">
-            {{ selectedNode?.statusText ?? '—' }}
-          </v-chip>
-        </span>
-      </v-sheet>
-
-      <GoodsInfo :product="selectedOrder?.expand?.relation" />
-
-      <div class="px-2 py-4  rounded bg-app">
-        <v-timeline density="compact" side="end" truncate-line="both" width="100%">
-          <!--
-            时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 selectedStepGroups），
-            弹窗里把这一串动作连着办（办完自动接下一环）。
-          -->
-          <ApprovalNode v-for="(g, gi) in selectedStepGroups" :key="`${selectedOrder?.id}-${g.stepIds[0] || gi}`" hide-handle
-            :allowed-options="selectedOptionItems[g.stepIds[0]]" :allowed-results="selectedResultOptions[g.stepIds[0]]"
-            :can-handle="g.indexes.includes(selectedCurrentStep)" :data="g.steps[0]" :index="g.indexes[0]"
-            :in-discard-segment="discardMarkOf(g, selectedDiscardMarks)?.seq"
-            :discard-segment-size="discardMarkOf(g, selectedDiscardMarks)?.size" :length="selectedChain.length"
-            :next-steps="nextStepsOf(g, selectedOptionItems, selectedResultOptions)"
-            :option-context="optionContextOf(selectedOrder, selectedChain, g.indexes[0])" :prev-time="g.startTimes[0]"
-            :receiver-team="selectedReceiverTeam" :start-time="selectedOrder?.created"
-            :remaining-qty="selectedRemainingQty" :stock-amount="selectedStockAmount" :stock-qty="selectedStockQty"
-            @submit="onDrawerSubmit" />
-
-          <!-- 时间线最后一条：流转为什么停下（与审批页同一口径） -->
-          <FlowEndNote :end="selectedFlowEnd" />
-        </v-timeline>
-      </div>
-    </v-container>
-
-    <!--
-      办理面板：放在抽屉的 **append 区** —— 它在内容滚动区之外，天然钉在抽屉最底部，
-      内容再长也始终可见（sticky 只会在内容末尾"跟着走"，内容短时反而悬在半空）。
-      入口只有它 —— 时间线节点内的「办理」已用 hide-handle 关掉；面板本体与审批页 / 首页同一个组件。
-    -->
-    <template #append>
-      <div class="drawer-dock">
-        <HandleDock mode="dialog" :groups="selectedStepGroups" :chain="selectedChain" :current-step="selectedCurrentStep"
-          :option-items="selectedOptionItems" :result-options="selectedResultOptions" :order="selectedOrder"
-          :receiver-team="selectedReceiverTeam" :remaining-qty="selectedRemainingQty"
-          :stock-amount="selectedStockAmount" :stock-qty="selectedStockQty" @submit="onDrawerSubmit">
-          <!-- 抄送 / 转办：与审批页同一个组件、同一份落库逻辑（components/approval/HandleDock 的 extra 槽） -->
-          <template #extra>
-            <SelectNode @select="handleSelect" />
+      <!-- 搜索只作用于卡片列表；历史表格用它自己的筛选条（见 ApprovalFilterBar） -->
+      <v-text-field v-if="tab !== 'history'" v-model="keyword" class="filter-input my-3 max-h-[30px]" density="compact"
+        flat hide-details label="搜索" prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" />
+      <v-list class="py-0" density="compact" nav>
+        <v-list-item v-for="item in tabItems" :key="item.value" :active="tab === item.value" class="mine-tab"
+          color="primary" rounded="lg" @click="switchTab(item.value)">
+          <template #prepend>
+            <v-icon size="17">{{ item.icon }}</v-icon>
           </template>
-        </HandleDock>
-      </div>
-    </template>
-  </v-navigation-drawer>
+          <v-list-item-title class="text-[12.5px]">{{ item.text }}</v-list-item-title>
+          <template #append>
+            <span class="rail-count">{{ item.count }}</span>
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-sheet>
+    <!-- ==================== 中 + 右 ==================== -->
+    <div class="mine-main d-flex ga-3 min-w-0">
+      <!-- 历史审批单：保留原来的表格 -->
+      <v-sheet v-if="tab === 'history'" class="mine-table-col d-flex flex-column card-border overflow-hidden pt-2 px-2">
+        <div class="d-flex align-center justify-space-between px-3 pt-2">
+          <span class="text-[14px] font-bold">历史审批单</span>
+          <span class="text-[12px] text-medium-emphasis">
+            我经手过的单（含仍在流转的）· 共 {{ historyRows.length }} 张
+          </span>
+        </div>
+        <ApprovalFilterBar :dirty="historyDirty" :filters="historyFilters" :options="historyOptions"
+          :select-keys="['statusText', 'approver', '主MODEL']" :select-labels="{ approver: '最后办理人' }"
+          @apply="applyHistoryFilters" @patch="patchHistoryFilters" @reset="resetHistoryFilters" />
+        <v-divider />
+        <v-data-table v-model:page="historyPage" border class="text-[12px] mine-table" density="compact" fixed-footer
+          fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
+          striped="odd" @click:row="handleRowClick">
+          <template #item.order_no="{ value }">
+            <span class="font-bold">{{ value }}</span>
+          </template>
+          <template #item.status="{ item }">
+            <v-chip :color="item.statusColor" label size="x-small">{{ item.statusText }}</v-chip>
+          </template>
+          <!-- 最后的审批结论（只有本表有这一列）：悬浮看办理人 / 意见 / 时间 -->
+          <template #item.conclusion="{ item }">
+            <span :title="item.conclusionDetail">{{ item.conclusion }}</span>
+          </template>
+          <template #item.created="{ value }">
+            {{ formatDate(value) }}
+          </template>
+          <template #item.actions="{ item }">
+            <v-btn color="primary" variant="text" @click.stop="goApproval(item)">
+              <span class="text-[13px]">查看</span>
+            </v-btn>
+            <!-- 删除审批单：按钮里自带权限判断（只有超级管理员看得见）与确认框 -->
+            <DeleteOrderButton :row="item" @deleted="onOrderDeleted" @error="onDeleteFailed" />
+          </template>
+          <!-- 页脚只留一条紧凑分页 -->
+          <template #bottom>
+            <div class="d-flex justify-center">
+              <v-pagination v-model="historyPage" :length="historyPageCount" size="small" :total-visible="7" />
+            </div>
+          </template>
+        </v-data-table>
+      </v-sheet>
+      <!-- 待办 / 抄送我的 / 我发起的：卡片列表 -->
+      <v-sheet v-else class="mine-card-col d-flex flex-column  overflow-hidden bg-transparent py-2">
+        <div class="d-flex align-center justify-space-between px-3 pt-2">
+          <span class="text-[13px]">{{ activeTabText }}</span>
+          <div>
+            <span class="text-[12px] text-medium-emphasis mr-2">共 {{ cardRows.length }} 张</span>
+            <v-icon-btn :title="sortTitle" class="sort-btn" size="small" variant="text" @click="toggleSort">
+              <v-icon size="18">
+                {{ sortOrder === 'desc' ? 'mdi-sort-ascending' : 'mdi-sort-descending' }}
+              </v-icon>
+            </v-icon-btn>
+          </div>
+        </div>
+        <div class="order-list overflow-y-auto pa-2">
+          <v-card v-for="row in cardRows" :key="row.id" class="order-card" variant="flat"
+            :class="{ 'order-card--active': row.id === selectedNode?.id }" rounded="lg" @click="selectRow(row)">
+            <v-card-title class="order-card__head d-flex align-start justify-space-between">
+              <span class="order-card__title">{{ row.order_no }}</span>
+              <v-chip class="order-card__status" :color="row.statusColor" label size="x-small">
+                {{ row.statusText }}
+              </v-chip>
+            </v-card-title>
+            <v-card-text class="order-card__body">
+              <div class="d-flex align-center ga-2">
+                <v-avatar :color="row.statusColor" size="20" variant="tonal">
+                  <v-img v-if="avatarOf(row)" alt="" cover :src="avatarOf(row)" @error="onAvatarError(row)" />
+                  <span v-else class="text-[10px] font-bold">{{ initialOf(row.approver) }}</span>
+                </v-avatar>
+                <span class="text-[12px]">{{ row.approver }}</span>
+                <span class="text-[11px] text-medium-emphasis ellipsis">{{ row.ownerDept }}</span>
+              </div>
+              <div class="mt-1.5 text-[12px] d-flex flex-column ga-0.5">
+                <span class="ellipsis">SKU：{{ row.sku }}</span>
+                <span class="ellipsis">主MODEL：{{ row.主MODEL }}</span>
+              </div>
+            </v-card-text>
+            <v-card-actions class="d-flex justify-space-between text-[11px]">
+              <v-chip :color="row.processColor" label size="x-small" variant="text">
+                {{ tab === 'pending' ? `已等待 ${row.duration}` : `历时 ${row.duration}` }}
+              </v-chip>
+              <span class="text-medium-emphasis">{{ formatDate(row.created) }}</span>
+            </v-card-actions>
+          </v-card>
 
-  <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000" variant="tonal">
-    {{ snackbar.text }}
-  </v-snackbar>
+          <div v-if="cardRows.length === 0" class="empty-hint d-flex flex-column align-center justify-center">
+            <v-icon color="medium-emphasis" size="36">mdi-inbox-outline</v-icon>
+            <span class="text-[12px] text-medium-emphasis mt-2">{{ emptyText }}</span>
+          </div>
+        </div>
+      </v-sheet>
+      <!-- ==================== 右：审批流程面板 ==================== -->
+      <v-sheet v-if="showDetail" class="mine-detail min-w-0" :class="{ 'mine-detail--fixed': tab === 'history' }"
+        rounded="15">
+        <ApprovalDetailView :closable="tab === 'history'" :has-next="hasNextStep" :has-prev="hasPrevStep"
+          :index="selectedIndex + 1" :order="selectedOrder" :readonly="tab === 'history'" :total="activeRows.length"
+          @close="closeDetail" @next="nextStep" @prev="backStep" @select="handleSelect" @submit="onDrawerSubmit" />
+      </v-sheet>
+    </div>
+
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000" variant="tonal">
+      {{ snackbar.text }}
+    </v-snackbar>
+  </v-container>
 </template>
 
 <script setup lang="ts">
-import type { ApprovalChainItem, ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
-import { type DeleteOrderSummary } from '@/api/api'
-// 筛选条（搜索 / 下拉 / 日期 / 确认 / 重置）：与首页两张表共用同一个组件，控件定义在 utils/approvalFilters
+import type { DeleteOrderSummary } from '@/api/api'
+import type { ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
+// 右侧「审批详情」：与首页抽屉共用同一个组件（信息 + 流程时间线 + 办理入口）
+import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
+// 筛选条（搜索 / 下拉 / 日期 / 确认 / 重置）：与首页两张表共用同一个组件
 import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
-import ApprovalNode from '@/components/ApprovalNode.vue'
-// 抽屉底部的办理面板：三处办理入口共用（内含 ApprovalHandleForm）
-import HandleDock from '@/components/approval/HandleDock.vue'
-// 抄送 / 转办：选人组件与落库逻辑，与审批页共用同一份
-import SelectNode from '@/components/streamNodes/SelectNode.vue'
-import { useApprovalSelect } from '@/composables/useApprovalSelect'
 // 操作栏的「删除审批单」：按钮内置权限判断与确认框（与 home.vue 共用同一个组件）
 import DeleteOrderButton from '@/components/DeleteOrderButton.vue'
-// 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
-import FlowEndNote from '@/components/FlowEndNote.vue'
-import GoodsInfo from '@/components/GoodsInfo.vue'
-import { drawerSet } from '@/composables/useEditorFullscreen'
+import { useApprovalSelect } from '@/composables/useApprovalSelect'
 // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
 import { useNodeSubmit } from '@/composables/useNodeSubmit'
-import {
-  APPROVAL_STATUS,
-  collectStepOptionItems,
-  collectStepResultOptions,
-  receivedQuantities,
-} from '@/types/approval'
+// 头像目录：单据快照里不存成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
+import { useAvatarDirectory } from '@/stores/avatarDirectory'
+// 登录者（审批链成员的形状）：三档"我的单"都拿它跟链上成员比（见 orderPendingOn / orderCcTo）
+import { useUserStore } from '@/stores/user'
+import { APPROVAL_STATUS } from '@/types/approval'
 /*
  * 展示状态（未审批 / 审批中 / 待定 / 通过 / 驳回）与首页表格共用同一份派生口径；
- * 筛选（选项推导 / 应用条件 / 等价比较）也共用同一份 —— 历史板块的筛选条走的就是这些（见下方 historyFilters）。
+ * 筛选（选项推导 / 应用条件 / 等价比较）也共用同一份 —— 历史板块的筛选条走的就是这些。
  */
 import {
   applyApprovalFilters,
   applyFilterPatch,
   APPROVAL_STAGE_META,
+  type ApprovalStage,
   approvalStageOf,
   createApprovalFilters,
   filterOptions,
-  filtersEqual,
-  resetApprovalFilters,
-  type ApprovalStage,
-  SELECT_FILTERS,
-  toCellText,
   type FilterPatch,
+  filtersEqual,
+  isoDay,
+  resetApprovalFilters,
+  SELECT_FILTERS,
   type SelectFilterKey,
+  toCellText,
 } from '@/utils/approvalFilters'
-// 条件求值上下文（建单快照优先）：算剩余接收数量、取「平台」快照都要用它，与流程引擎同源
-import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
+// 条件求值上下文（建单快照优先）：业务字段取快照值，与流程引擎同源
+import { flowContextOfOrder } from '@/utils/approvalFlow'
 /*
  * 「进度」列（正常 / 超时 / 滞留）：判据是"这一环等了几个工作日小时"。
  * 纯函数模块 —— 阈值的来源（提醒设置里的超时阈值）由本页读出来后传进去，见下方 pushRules。
  */
 import {
-  APPROVAL_PROGRESS_LIST,
   APPROVAL_PROGRESS_META,
-  approvalProgressDetail,
   type ApprovalProgress,
+  approvalProgressDetail,
   approvalProgressOf,
 } from '@/utils/approvalProgress'
 import {
-  discardMarkOf,
-  discardMarksOf,
-  groupApproverSteps,
   lastHandledOf,
   mainOf,
-  nextStepsOf,
+  orderCcTo,
+  orderCreatedBy,
   orderHandledBy,
   orderPendingOn,
   runtimeOf,
   stepStartTimesOf,
 } from '@/utils/approvalRuntime'
-// 登录者（审批链成员的形状）：两档"自己名下"都拿它跟链上成员比（见 orderPendingOn / orderHandledBy）
-import { useUserStore } from '@/stores/user'
 // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
 import { toProductView } from '@/utils/biRowFields'
 import { getApprovalOrder } from '@/utils/collection'
 // 推送规则（只为了拿「超时阈值」）：与提醒设置、超时跑批同源，读不到就用默认规则
 import { DEFAULT_PUSH_RULES, type PushRules } from '@/utils/pushRules'
 import { loadPushRules } from '@/utils/pushRulesStore'
-import { formatDate, formatTimeDiff, generateApprovalChain } from '@/utils/utils'
-// 工作日小时（周末不计）：与服务端超时跑批**共用同一份**实现，表格与提醒不会各算一套
+import { formatDate, formatTimeDiff } from '@/utils/utils'
+// 工作日小时（周末不计）：与服务端超时跑批**共用同一份**实现
 import { workingHoursBetween } from '@/utils/workingHours'
 
+const router = useRouter()
 const userStore = useUserStore()
 /** 登录者（审批链成员形状）；未登录是 undefined —— 那种情况下"我的单"一律为空 */
 const me = computed(() => userStore.member)
+/** 登录者 id：与 approval_chain.creator 同源（「我发起的」按它判，见 orderCreatedBy） */
+const userId = computed(() => userStore.user?.id ?? '')
 
-const open = shallowRef(false)
-const router = useRouter()
-/**
- * 抽屉开关。原先还叠了一个早已废弃的 tab 状态（'home' | 'history'，界面上没有 tab 了），
- * 一并去掉：那个条件写死为 true，留着只会让人以为还有什么模式要切。
+/*
+ * 左栏的四个分类。值即状态，模板里据此决定中栏渲染卡片还是表格。
+ * 「历史审批单」保持原来的表格形态（筛选条 / 分页 / 删除都在），其余三档用卡片列表。
  */
-const setOpen = computed(() => open.value)
-const page = ref(1)
-const itemsPerPage = ref(17)
+type MineTab = 'pending' | 'cc' | 'created' | 'history'
+const tab = ref<MineTab>('pending')
 
 interface ApprovalRow {
   id: string
   order_no: string
   status: number
-  /** 展示状态**取值** 0..6（未审批/审批中/待定/通过/驳回/已接收/异常，见 utils/approvalFilters 的 APPROVAL_STAGE） */
+  /** 展示状态**取值** 0..6（未审批/审批中/待定/通过/驳回/已接收/异常，见 utils/approvalFilters） */
   statusStage: ApprovalStage
   /** 展示状态：文案 + 颜色（同上，取值的文字表达） */
   statusText: string
@@ -315,22 +241,31 @@ interface ApprovalRow {
   /**
    * 建单快照里的「平台」。
    *
-   * 本页不显示这一列，但**必须有**：本页历史板块的筛选走的是共享实现
+   * 本页不显示这一列，但**必须有**：历史板块的筛选走的是共享实现
    * （utils/approvalFilters 的 applyApprovalFilters），而它要求行满足 FilterableRow ——
    * 少了这个字段，整行只能在类型上退化，模板里连 item.statusColor 都取不到。
    */
   平台: string
   /**
    * 「进度」列：这一单在**当前环节**已经压了多久 → 正常 / 超时 / 滞留
-   * （判据与阈值见 utils/approvalProgress：超时 = 提醒设置里的阈值，滞留 = 5 个工作日）。
-   * 只有「当前审批」那张表摆这一列 —— 已办结的单没有"压在我手上多久"可言。
+   * （判据与阈值见 utils/approvalProgress）。
    */
   processStage: ApprovalProgress
   processText: string
   processColor: string
   /** 进度单元格的悬浮说明（等了多久、对着哪个阈值、会不会发提醒） */
   processDetail: string
-  }
+  /** 卡片标题：产品名称 → 主MODEL → 单号（卡片上最醒目的那一行） */
+  title: string
+  /** 卡片上那个人（当前审批人 / 最后办理人）的部门 */
+  ownerDept: string
+  /**
+   * 卡片头像要用的「人」：只留认人用的 open_id / email（老单的成员自带 avatar，一并带上）。
+   * 新单快照里**不存头像**（见 types/approval 的 slimFlowMembers），展示时用这两个键去头像目录现查
+   * （stores/avatarDirectory 的 avatarOf）—— 与时间线里的成员头像同一口径。
+   */
+  owner: { open_id?: string, email?: string, avatar?: string } | null
+}
 
 /** 与审批页同一套口径：有 flow 就按 flow + decisions 重算，旧单（只有 chain、没有 flow）原样沿用 */
 function toRow(order: ApprovalOrder): ApprovalRow {
@@ -339,7 +274,7 @@ function toRow(order: ApprovalOrder): ApprovalRow {
   // 业务字段取**建单时的快照**（与首页表格、条件求值同一口径；旧单没有快照就是 '—'）
   const ctx = flowContextOfOrder(order)
 
-  const approverName = (rt.currentStep >= 0 ? mainOf(rt.chain[rt.currentStep]) : lastHandledOf(rt.chain))?.name
+  const owner = rt.currentStep >= 0 ? mainOf(rt.chain[rt.currentStep]) : lastHandledOf(rt.chain)
   // 办结时间 = 最后一个有办理时间的环节；还没办结就算到当下
   let finishedAt: string | undefined
   for (const step of rt.chain) {
@@ -365,11 +300,7 @@ function toRow(order: ApprovalOrder): ApprovalRow {
     : ''
   /*
    * 「进度」：这一单在**我这一环**已经等了几个**工作日小时**（周末不计）→ 正常 / 超时 / 滞留。
-   *
-   * 计时起点用 stepStartTimesOf（与表格「审批时长」、抽屉里每步耗时同一套口径）：
-   * 在办取**当前待办环节**的起始时间；已办结的单没有"当前环节"（这一列也不显示），按 0 算。
-   * 阈值取「提醒设置」里的 overdueHours —— 表格与飞书提醒必须同一个口径，
-   * 否则会出现"表格显示超时、提醒却还没发"这种没法解释的情况。
+   * 计时起点用 stepStartTimesOf（与表格「审批时长」、时间线里每步耗时同一套口径）。
    */
   const starts = stepStartTimesOf(order, rt.chain)
   const startedAt = rt.currentStep >= 0 ? starts[rt.currentStep] : ''
@@ -379,6 +310,8 @@ function toRow(order: ApprovalOrder): ApprovalRow {
     : 0
   const processStage = approvalProgressOf(waitingHours, pushRules.value.overdueHours)
   const processMeta = APPROVAL_PROGRESS_META[processStage]
+  const productName = String(p['产品名称'] ?? '').trim()
+  const model = String(p['主MODEL'] ?? '—')
   return {
     id: order.id,
     order_no: order.order_no ?? order.id,
@@ -387,9 +320,9 @@ function toRow(order: ApprovalOrder): ApprovalRow {
     statusText: stageMeta.text,
     statusColor: stageMeta.color,
     sku: String(p.SKU ?? p['库存SKU'] ?? '—'),
-    主MODEL: String(p['主MODEL'] ?? '—'),
+    主MODEL: model,
     部门: String(p['部门'] ?? '—'),
-    approver: approverName ?? '—',
+    approver: owner?.name ?? '—',
     duration: formatTimeDiff(order.created, finishedAt ?? null),
     created: order.created ?? '',
     conclusion,
@@ -400,6 +333,10 @@ function toRow(order: ApprovalOrder): ApprovalRow {
     processText: processMeta.text,
     processColor: processMeta.color,
     processDetail: approvalProgressDetail(processStage, waitingHours, pushRules.value.overdueHours),
+    // 卡片标题：业务上有产品名就用它，其次型号，都没有才退到单号（不至于出现一张没有标题的卡）
+    title: productName || (model === '—' ? (order.order_no ?? order.id) : model),
+    ownerDept: owner?.department || String(p['部门'] ?? '') || '—',
+    owner: owner ? { open_id: owner.open_id, email: owner.email, avatar: owner.avatar } : null,
   }
 }
 
@@ -409,106 +346,224 @@ const orders = ref<ApprovalOrder[]>([])
 /**
  * 「超时阈值」的来源：与「提醒设置」的推送规则**同源** —— 那边把阈值改成 24，
  * 进度列的"超时"跟着提前（滞留那档是白板写死的 5 个工作日，不随它变）。
- * 读不到（表还没建 / 没配过）就用默认规则，与超时跑批的兜底完全一致。
- *
- * 为什么放在这里而不是 toRow 里现读：toRow 是同步的，而读规则是异步 —— 见 loadProgressRules。
- * 它是 ref，规则到位后 pendingRows / historyRows 会自己重算（toRow 读的就是它）。
+ * 它是 ref，规则到位后各行会自己重算（toRow 读的就是它）。
  */
 const pushRules = ref<PushRules>({ ...DEFAULT_PUSH_RULES })
 
 /** 拉一次推送规则（只为进度列的超时阈值；loadPushRules 读失败会回落默认规则，不会抛） */
-async function loadProgressRules () {
+async function loadProgressRules() {
   pushRules.value = (await loadPushRules()).rules
 }
 
-const pendingRows = computed(() => orders.value.filter(o => orderPendingOn(o, me.value)).map(toRow))
+/* ==================== 三档"我的单" ==================== */
+
+/** 待办：此刻压在我手上的在办单 */
+const pendingRows = computed(() =>
+  orders.value.filter(o => orderPendingOn(o, me.value)).map(o => toRow(o)),
+)
+
+/** 抄送我的：链路上（含运行期追加的抄送）有 type='cc' 的成员是我 */
+const ccRows = computed(() =>
+  orders.value.filter(o => orderCcTo(o, me.value)).map(o => toRow(o)),
+)
+
+/** 我发起的：建单时落库的 creator 是我（历史单没有这个字段，不会误算） */
+const createdRows = computed(() =>
+  orders.value.filter(o => orderCreatedBy(o, userId.value)).map(o => toRow(o)),
+)
+
+/** 历史审批单：我经手过、且此刻没压回我手上（驳回回退会把单送回我这一环，那种算待办） */
 const historyRows = computed(() =>
   orders.value
-    // 排除"此刻又压回我手上"的那些（驳回回退会把单子送回我这一环，那种算待办）
     .filter(o => !orderPendingOn(o, me.value))
     .filter(o => orderHandledBy(o, me.value))
-    .map(toRow),
+    .map(o => toRow(o)),
 )
 
-const search = ref('')
+/** 左栏的四个分类（文案 / 图标 / 计数） */
+const tabItems = computed(() => [
+  { value: 'pending' as const, text: '待办', icon: 'mdi-inbox-arrow-down-outline', count: pendingRows.value.length },
+  { value: 'cc' as const, text: '抄送我的', icon: 'mdi-email-outline', count: ccRows.value.length },
+  { value: 'created' as const, text: '我发起的', icon: 'mdi-send-outline', count: createdRows.value.length },
+  { value: 'history' as const, text: '历史审批单', icon: 'mdi-history', count: historyRows.value.length },
+])
 
-const typeFilter = ref<string | null>(null)
-const modelFilter = ref<string | null>(null)
-/** 「进度」筛选：正常 / 超时 / 滞留（与表格里那一列同源，见 toRow 的 processText） */
-const progressFilter = ref<string | null>(null)
+const activeTabText = computed(() => tabItems.value.find(t => t.value === tab.value)?.text ?? '')
 
-const dateRange = ref<(Date | string)[]>([])
+const emptyText = computed(() => {
+  if (!userStore.isLoggedIn) {
+    return '登录后可以看到你名下的审批单'
+  }
+  if (tab.value === 'cc') {
+    return '还没有抄送给你的审批单'
+  }
+  if (tab.value === 'created') {
+    return '还没有你发起的审批单（发起后才会出现在这里）'
+  }
+  return '当前没有待办，先歇一会儿'
+})
 
-const modelOptions = computed(() =>
-  [...new Set(pendingRows.value.map(r => r.主MODEL))].filter(v => v && v !== '—'),
+/* ==================== 卡片列表的搜索 / 时间筛选 / 排序 ==================== */
+
+const keyword = ref('')
+
+type SortOrder = 'desc' | 'asc'
+
+/** 排序方向：图标按钮切换（desc = 最新优先，asc = 最早优先） */
+const sortOrder = ref<SortOrder>('desc')
+
+/** 排序按钮的悬浮说明：写清楚"现在是哪种、点了会变成哪种" */
+const sortTitle = computed(() =>
+  sortOrder.value === 'desc'
+    ? '当前：最新优先，点击改为最早优先'
+    : '当前：最早优先，点击改为最新优先',
 )
+
+function toggleSort() {
+  sortOrder.value = sortOrder.value === 'desc' ? 'asc' : 'desc'
+}
 
 /**
- * 「进度」的候选项：**固定三档**，不从当前数据里派生。
- *
- * 与旁边的主MODEL 刻意不同 —— 型号是开放集合（没出现过的型号选不到也合理），
- * 而进度是三档枚举：哪怕此刻一张滞留的单都没有，「滞留」也该出现在下拉里，
- * 否则用户会以为这个功能不存在，而不是"现在没有这种单"。
- * 文案与顺序取自 APPROVAL_PROGRESS_LIST / _META（表格里的 chip 用的就是它们），别在本页重抄。
+ * 建单日期筛选（v-date-input 的 range 模型：Date 或 'YYYY-MM-DD…' 都可能给）。
+ * 与历史表格那边的日期筛选（utils/approvalFilters 的 applyApprovalFilters）**同一口径**：
+ * 取 created 的**前 10 位**（日期）比字典序 —— 解析成 Date 再比会被时区把"当天"算到前一天；
+ * 只选了一个端点时视为"那一天"。
  */
-const progressOptions = APPROVAL_PROGRESS_LIST.map(v => APPROVAL_PROGRESS_META[v].text)
+const dateRange = ref<(Date | string)[]>([])
 
-function isoDay(v: Date | string) {
-  return typeof v === 'string' ? v.slice(0, 10) : `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
-}
+const dayRange = computed(() => {
+  const first = dateRange.value[0]
+  const last = dateRange.value.at(-1)
+  const from = first ? isoDay(first) : ''
+  const to = last ? isoDay(last) : from
+  return { from, to }
+})
 
-const filteredRows = computed(() =>
-  pendingRows.value.filter(r => {
-    // 与表格里显示的状态同源（见 toRow）：按**展示文案**比，避免"表格显示待定、筛选按通过"这种错位
-    if (typeFilter.value && r.statusText !== typeFilter.value) return false
-    if (modelFilter.value && r.主MODEL !== modelFilter.value) return false
-    // 与「进度」列显示的是同一个值（processText 来自 APPROVAL_PROGRESS_META），按文案比
-    if (progressFilter.value && r.processText !== progressFilter.value) return false
-    if (dateRange.value.length > 0) {
-      // created 是 '2026-09-17 02:05:41.542Z'，前 10 位就是日期，可直接按字典序比
-      const day = r.created.slice(0, 10)
-      // .at(-1) 返回 string | Date | undefined（eslint 的 prefer-at 自动改的），先收窄再用
-      const first = dateRange.value[0]
-      const last = dateRange.value.at(-1)
-      if (!first || !last) return false
-      const from = isoDay(first)
-      const to = isoDay(last)
-      if (!day || day < from || day > to) return false
+/** 当前 tab 对应的完整行集（还未叠搜索 / 时间条件） */
+const baseRows = computed(() => {
+  if (tab.value === 'cc') {
+    return ccRows.value
+  }
+  if (tab.value === 'created') {
+    return createdRows.value
+  }
+  return pendingRows.value
+})
+
+/**
+ * 中栏卡片列表：按当前 tab 取行 → 叠搜索 / 时间条件 → 按创建时间排序。
+ * 排序在筛选之后做（先筛后排，`n/m` 与上/下一条才和眼前看到的顺序一致）。
+ */
+const cardRows = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  const { from, to } = dayRange.value
+
+  const list = baseRows.value.filter(r => {
+    // created 前 10 位就是日期，直接与区间端点比字典序（见 dayRange 的说明）
+    const day = String(r.created).slice(0, 10)
+    if (from && day < from) {
+      return false
     }
-    const kw = search.value.trim().toLowerCase()
-    if (kw && !`${r.order_no} ${r.sku} ${r.主MODEL} ${r.部门}`.toLowerCase().includes(kw)) return false
-    return true
-  }),
+    if (to && day > to) {
+      return false
+    }
+    if (!kw) {
+      return true
+    }
+    return `${r.order_no} ${r.title} ${r.sku} ${r.主MODEL} ${r.部门} ${r.approver}`.toLowerCase().includes(kw)
+  })
+
+  // ISO 时间串按字典序即时间序；复制一份再排，别就地改 baseRows 的数组
+  return [...list].sort((a, b) => (sortOrder.value === 'asc'
+    ? String(a.created).localeCompare(String(b.created))
+    : String(b.created).localeCompare(String(a.created))))
+})
+
+/** 当前在看的列表（上/下一条、自动选中都按它算）：卡片模式是卡片行，历史模式是表格行 */
+const activeRows = computed(() =>
+  tab.value === 'history' ? historyFilteredRows.value : cardRows.value,
 )
-function resetFilters() {
-  search.value = ''
-  typeFilter.value = null
-  modelFilter.value = null
-  progressFilter.value = null
-  dateRange.value = []
+
+/* ==================== 选中 / 上一条 / 下一条 ==================== */
+
+/** 选中的那一行（右栏显示的就是它的流程） */
+const selectedNode = ref<ApprovalRow | null>(null)
+
+/** 选中行对应的原始单据（时间线要用它重算链路） */
+const selectedOrder = computed(() => orders.value.find(o => o.id === selectedNode.value?.id) ?? null)
+
+/** 历史模式必须有选中才显示右栏；卡片模式常驻（没有选中时显示空态） */
+const showDetail = computed(() => tab.value !== 'history' || !!selectedNode.value)
+
+const selectedIndex = computed(() =>
+  selectedNode.value ? activeRows.value.findIndex(r => r.id === selectedNode.value?.id) : -1,
+)
+const hasPrevStep = computed(() => selectedIndex.value > 0)
+const hasNextStep = computed(() =>
+  selectedIndex.value >= 0 && selectedIndex.value < activeRows.value.length - 1,
+)
+
+function switchTab(value: MineTab) {
+  tab.value = value
 }
 
-/** 分页器按筛过的行数算页数（否则筛完还停在不存在的页上） */
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / itemsPerPage.value)))
+function selectRow(row: ApprovalRow) {
+  selectedNode.value = row
+}
+
+function closeDetail() {
+  selectedNode.value = null
+}
+
+function backStep() {
+  if (hasPrevStep.value) {
+    selectedNode.value = activeRows.value[selectedIndex.value - 1] ?? null
+  }
+}
+
+function nextStep() {
+  if (hasNextStep.value) {
+    selectedNode.value = activeRows.value[selectedIndex.value + 1] ?? null
+  }
+}
+
+/** 历史表格点行：打开右栏（表格仍然在左边） */
+function handleRowClick(_event: Event, { item }: { item: ApprovalRow }) {
+  selectedNode.value = item
+}
+
+function goApproval(row?: ApprovalRow | null) {
+  const no = row?.order_no ?? selectedNode.value?.order_no
+  router.push({ path: '/approvalPage', query: no ? { order_no: no } : {} })
+}
+
+/** 姓名首字：卡片头像没有图时用它（中文取第一个字，英文取首字母） */
+function initialOf(name?: string) {
+  const n = String(name ?? '').trim()
+  return n ? n.slice(0, 1).toUpperCase() : '?'
+}
 
 /*
- * 当前表的列：**不摆「审批结论」**（单还没办结，整列都是 '—'）也**不摆「当前审批人」**
- * （这一页的当前单本就都压在我手上，那一列每行都是同一个名字）。
- * 历史表才摆它们（见 historyHeaders）。
+ * 卡片上的头像：按 open_id / email 到**头像目录**里现查（快照里不存头像，见 stores/avatarDirectory）。
+ * 两处兜底与时间线里的成员头像同一口径（components/ApprovalNode 的 memberAvatar）：
+ *   · 查不到 → 返回空串，模板退回首字；
+ *   · 图加载失败 → 记下这个地址，之后不再反复试（飞书头像 URL 带签名，会过期，留着就是一排空圈）。
  */
-const headers = ref([
-  { title: '审批单号', key: 'order_no', align: 'start' },
-  { title: 'SKU', key: 'sku' },
-  { title: '主MODEL', key: '主MODEL' },
-  // 「部门」按需求整套去掉：列不显示、也不再有部门筛选下拉（仅在关键字搜索里还能命中它）
-  { title: '状态', key: 'status', align: 'center' },
-  { title: '进度', key: 'process', align: 'center' },
-  { title: '创建时间', key: 'created' },
-  { title: '审批时长', key: 'duration' },
-  { title: '操作', key: 'actions', align: 'center', sortable: false },
-] as const)
+const avatarDir = useAvatarDirectory()
+const failedAvatars = ref<Record<string, true>>({})
+function avatarOf(row: ApprovalRow) {
+  // 老单成员自带 avatar 直显；新单按 open_id / email 现查
+  const url = row.owner?.avatar || avatarDir.avatarOf(row.owner)
+  return url && !failedAvatars.value[url] ? url : ''
+}
+function onAvatarError(row: ApprovalRow) {
+  const url = row.owner?.avatar || avatarDir.avatarOf(row.owner)
+  if (url) {
+    failedAvatars.value[url] = true
+  }
+}
 
-/* ==================== 历史审批（下方板块） ==================== */
+/* ==================== 历史审批单（表格 + 筛选） ==================== */
 
 const historyPage = ref(1)
 const historyPerPage = ref(8)
@@ -547,29 +602,42 @@ function resetHistoryFilters() {
   resetApprovalFilters(historyApplied)
   historyPage.value = 1
 }
+
 const historyPageCount = computed(() =>
   Math.max(1, Math.ceil(historyFilteredRows.value.length / historyPerPage.value)),
 )
 
+/*
+ * 当前表的列：**不摆「审批结论」**（单还没办结，整列都是 '—'）也**不摆「当前审批人」**
+ * （这一页的当前单本就都压在我手上，那一列每行都是同一个名字）。
+ * 历史表才摆它们（见 historyHeaders）。
+ */
+const headers = ref([
+  { title: '审批单号', key: 'order_no', align: 'start' },
+  { title: 'SKU', key: 'sku' },
+  { title: '主MODEL', key: '主MODEL' },
+  // 「部门」按需求整套去掉：列不显示、也不再有部门筛选下拉（仅在关键字搜索里还能命中它）
+  { title: '状态', key: 'status', align: 'center' },
+  { title: '进度', key: 'process', align: 'center' },
+  { title: '创建时间', key: 'created' },
+  { title: '审批时长', key: 'duration' },
+  { title: '操作', key: 'actions', align: 'center', sortable: false },
+] as const)
+
 /**
  * 历史板块的表头：由当前表的列**派生**（列顺序只写一处），比它多两列 ——
- *   · 「最后办理人」（插在「主MODEL」之后）：已办结的单没有"当前审批人"，那一列显示的是最后办理的人（见 toRow）；
- *   · 「审批结论」（插在「状态」之后）：当前表不摆它（整列都是 '—'），而历史表里它正是最先要看的一列
- *     （单元格悬浮还能看办理人 / 意见 / 时间）。
- *
- * 为什么用「先切一段 + 插一列 + 再接上」而不是 splice：`headers` 是 `as const` 的字面量数组，
- * 往一个元素类型很窄的数组里 splice 一个新对象会类型不匹配；写成新的数组字面量则元素类型自然成并集。
- * 找不到锚点列时（有人改了列名）插到最前面，不会整列消失。
+ *   · 「最后办理人」（插在「主MODEL」之后）；
+ *   · 「审批结论」（插在「状态」之后）。
  */
 const historyHeaders = computed(() => {
   // 「进度」讲的是"这一环压在我手上多久" —— 已办结的单没有这一说，先剔掉再补历史表自己的两列
   const list = headers.value.filter(h => h.key !== 'process').map(h => ({ ...h }))
   const atModel = list.findIndex(h => h.key === '主MODEL')
-  const withApprover = atModel < 0
+  const withApprover = atModel === -1
     ? [{ title: '最后办理人', key: 'approver' }, ...list]
     : [...list.slice(0, atModel + 1), { title: '最后办理人', key: 'approver' }, ...list.slice(atModel + 1)]
   const atStatus = withApprover.findIndex(h => h.key === 'status')
-  return atStatus < 0
+  return atStatus === -1
     ? [...withApprover, { title: '审批结论', key: 'conclusion' }]
     : [
       ...withApprover.slice(0, atStatus + 1),
@@ -578,135 +646,78 @@ const historyHeaders = computed(() => {
     ]
 })
 
-/** 右侧抽屉里展开的那一单 */
-const selectedNode = ref<ApprovalRow | null>(null)
-const selectedOrder = computed(() => orders.value.find(o => o.id === selectedNode.value?.id) ?? null)
 /**
- * 抽屉里那一单产品的「总库存数量」/「总库存金额」→ 下发给办理弹窗。
- * 前者：选中**全部接收**时接收数量就是它（不可修改），也是接收/回收数量的上限；
- * 后者：回收金额的上界（必须小于，见 ApprovalNode 的 lessThan）。
+ * 卡片模式下自动选中第一张 —— 进页面（或切 tab）时右栏就有内容，不用先点一下。
+ *
+ * 数据刷新后也走这里：选中行还在就换成**新的行对象**（否则右栏读的仍是旧快照），
+ * 不在了（被筛掉 / 被删）才退回第一张。
  */
-/**
- * 接收数量的账：总库存数量 / 已接收 / 剩余（口径与流程引擎共用，见 types/approval 的 receivedQuantities）。
- * 总库存数量优先取**建单快照**（与条件取值同源），快照里没有才退回关联产品。
- */
-const selectedQtyLedger = computed(() =>
-  receivedQuantities(selectedOrder.value?.chain?.decisions ?? [], flowContextOfOrder(selectedOrder.value)),
-)
-const selectedStockQty = computed(() =>
-  String(selectedQtyLedger.value.total ?? toProductView(selectedOrder.value?.expand?.relation)['总库存数量'] ?? ''),
-)
-/** 本环节还能接多少件（剩余）；算不出来就留空，办理端退回按总库存数量 */
-const selectedRemainingQty = computed(() =>
-  (selectedQtyLedger.value.remaining === undefined ? '' : selectedQtyLedger.value.remaining),
-)
-const selectedStockAmount = computed(() =>
-  String(toProductView(selectedOrder.value?.expand?.relation)['总库存金额'] ?? ''),
-)
-/**
- * 本单所属团队（按快照里的「组别」反查团队表）：
- * 「选择接收组别」的候选限定在它之内（业务口径：不涉及其他团队）。
- */
-const selectedReceiverTeam = computed(() => receiverTeamOf(selectedOrder.value))
-const selectedChain = computed<ApprovalChainItem[][]>(() => {
-  const order = selectedOrder.value
-  return order ? runtimeOf(order).chain : []
+watch(activeRows, list => {
+  if (tab.value === 'history') {
+    return
+  }
+  const current = selectedNode.value
+  const next = current ? list.find(r => r.id === current.id) : undefined
+  if (next) {
+    if (next !== current) {
+      selectedNode.value = next
+    }
+    return
+  }
+  selectedNode.value = list[0] ?? null
+}, { immediate: true })
+
+/** 切 tab：历史默认不选中（保持全宽表格）；其它三档选中第一张 */
+watch(tab, value => {
+  if (value === 'history') {
+    selectedNode.value = null
+    return
+  }
+  selectedNode.value = activeRows.value[0] ?? null
 })
-const selectedStepIds = computed(() => {
-  const order = selectedOrder.value
-  return order ? runtimeOf(order).stepIds : []
-})
-const selectedStartTimes = computed(() =>
-  selectedOrder.value ? stepStartTimesOf(selectedOrder.value, selectedChain.value) : [],
-)
-/** 各环节可选的审批结论（取模板里该环节后面分支绑定的 result） */
-const selectedResultOptions = computed(() => {
-  const flow = selectedOrder.value?.chain?.flow
-  return flow?.length ? collectStepResultOptions(flow) : {}
-})
-/** 各环节的**选项数组**：模板里在审批节点上配的 options，办理下拉框直接用它渲染 */
-const selectedOptionItems = computed(() => {
-  const flow = selectedOrder.value?.chain?.flow
-  return flow?.length ? collectStepOptionItems(flow) : {}
-})
-/** 当前待办环节的下标（-1 = 流程已走完）。只有这一环允许在抽屉里办理 */
-const selectedCurrentStep = computed(() =>
-  selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1,
-)
-/** 流转**为什么**停下（办完 / 走到结束节点 / 命中终结结论 / 卡住）：时间线最后一条展示它 */
-const selectedFlowEnd = computed(() =>
-  selectedOrder.value ? runtimeOf(selectedOrder.value).end : undefined,
-)
-/**
- * 时间线上的节点：同一审批人**连续**办理的相邻环节合成一条（见 utils/approvalRuntime）。
- * 与审批页 / 首页同一口径 —— 两处不一致时，同一条单在不同页面看到的节点数会不一样。
- */
-const selectedStepGroups = computed(() =>
-  groupApproverSteps(selectedChain.value, selectedStepIds.value, selectedStartTimes.value),
-)
 
-/**
- * 弃置审批段的标注（与 chain 下标一一对应）。
- * 与审批页同一口径，判定集中在 utils/approvalRuntime 的 discardMarksOf（别在本页另写一套）——
- * 它按**节点**认、不是"起点往后全算"，所以「回退上一级」重新走过的环节不会被误标成弃置。
- */
-const selectedDiscardMarks = computed(() => discardMarksOf({
-  chain: selectedChain.value,
-  stepIds: selectedStepIds.value,
-  flow: selectedOrder.value?.chain?.flow,
-}))
-
-// 上/下一条按**筛过之后**的顺序走 —— 与表格里看到的一致（否则会跳到一个被筛掉的行上）
-const selectedIndex = computed(() =>
-  selectedNode.value ? filteredRows.value.findIndex(r => r.id === selectedNode.value?.id) : -1,
-)
-const hasPrevStep = computed(() => selectedIndex.value > 0)
-const hasNextStep = computed(() =>
-  selectedIndex.value >= 0 && selectedIndex.value < filteredRows.value.length - 1,
-)
-
-function selectStep(index: number) {
-  const row = filteredRows.value[index]
-  if (!row) return
-  selectedNode.value = row
-  open.value = true
-  drawerSet.value = false
-  const p = Math.floor(index / itemsPerPage.value) + 1
-  if (p !== page.value) page.value = p
-}
-
-function backStep() {
-  if (hasPrevStep.value) selectStep(selectedIndex.value - 1)
-}
-
-function nextStep() {
-  if (hasNextStep.value) selectStep(selectedIndex.value + 1)
-}
-function handleRowClick(_event: Event, { item }: { item: ApprovalRow }) {
-  if (!selectedNode.value?.id) drawerSet.value = false
-  selectedNode.value = item
-  open.value = true
-}
-function setClose() {
-  selectedNode.value = null
-  open.value = false
-  drawerSet.value = true
-}
-function goApproval(row?: ApprovalRow | null) {
-  const no = row?.order_no ?? selectedNode.value?.order_no
-  router.push({ path: '/approvalPage', query: no ? { order_no: no } : {} })
-}
+/* ==================== 提交 / 抄送转办 / 删除 ==================== */
 
 const snackbar = ref<{ show: boolean, text: string, color: string }>({ show: false, text: '', color: 'success' })
 function showMsg(text: string, color: 'success' | 'error' | 'warning' = 'success') {
   snackbar.value = { show: true, text, color }
 }
 
+/** 提交 / 抄送后的回填：更新列表里那条，并把选中的行换成新的快照（右栏时间线才会跟着变） */
+function onOrderUpdated(updated: ApprovalOrder) {
+  orders.value = orders.value.map(o => (o.id === updated.id ? { ...o, ...updated } : o))
+  const row = orders.value.find(o => o.id === updated.id)
+  if (row && selectedNode.value?.id === updated.id) {
+    selectedNode.value = toRow(row)
+  }
+}
+
+const { submitNode } = useNodeSubmit({
+  order: selectedOrder,
+  onMessage: showMsg,
+  onUpdated: onOrderUpdated,
+})
+
+/**
+ * 抄送 / 转办：落库逻辑在 composables/useApprovalSelect.ts（与审批页同一份）。
+ * 回填口径与提交一致 —— 必须更新**列表里那条**，右栏的时间线才会跟着变。
+ */
+const { handleSelect } = useApprovalSelect({
+  order: selectedOrder,
+  chain: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).chain : [])),
+  stepIds: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).stepIds : [])),
+  currentStep: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1)),
+  onMessage: showMsg,
+  onUpdated: onOrderUpdated,
+})
+
+function onDrawerSubmit(payload: NodeSubmitPayload) {
+  void submitNode(payload)
+}
+
 async function onOrderDeleted(summary: DeleteOrderSummary) {
   if (selectedNode.value?.id === summary.id) {
     selectedNode.value = null
-    // 关抽屉要动 open（setOpen 是 computed，写它会报"只读"）
-    open.value = false
   }
   await getDatas()
   // deleted = false 表示它之前就已经不在了（服务端按幂等处理）——提示如实说
@@ -718,75 +729,192 @@ function onDeleteFailed(message: string) {
   showMsg(message, 'error')
 }
 
-const { submitNode } = useNodeSubmit({
-  order: selectedOrder,
-  onMessage: showMsg,
-  onUpdated: updated => {
-    orders.value = orders.value.map(o => (o.id === updated.id ? { ...o, ...updated } : o))
-    // 表头的「审批状态 / 当前审批人 / 耗时」读的是行快照，一并刷新
-    const row = orders.value.find(o => o.id === updated.id)
-    if (row) selectedNode.value = toRow(row)
-  },
-})
-
-/**
- * 抄送 / 转办：落库逻辑在 composables/useApprovalSelect.ts（与审批页同一份）。
- * 回填口径与提交一致 —— 必须更新**列表里那条**，抽屉的时间线才会跟着变。
- */
-const { handleSelect } = useApprovalSelect({
-  order: selectedOrder,
-  chain: selectedChain,
-  stepIds: selectedStepIds,
-  currentStep: selectedCurrentStep,
-  onMessage: showMsg,
-  onUpdated: updated => {
-    orders.value = orders.value.map(o => (o.id === updated.id ? { ...o, ...updated } : o))
-    const row = orders.value.find(o => o.id === updated.id)
-    if (row) selectedNode.value = toRow(row)
-  },
-})
-
-function onDrawerSubmit(payload: NodeSubmitPayload) {
-  void submitNode(payload)
-}
-
 async function getDatas() {
   orders.value = await getApprovalOrder()
-  console.log(orders.value)
 }
 
 onMounted(() => {
   getDatas()
   // 进度列的「超时阈值」来自提醒设置：拉一次（失败回落默认规则，不影响列表）
   void loadProgressRules()
+  // 卡片头像：拉一次通讯录缓存（幂等；失败只告警，头像退回首字，不影响列表）
+  void avatarDir.ensure()
 })
 </script>
 
 <style lang="scss" scoped>
-/*
- * 抽屉底部的办理面板：挂在 v-navigation-drawer 的 #append 区（滚动之外，天然贴底）。
- * 底色必须不透明 —— 内容从它上面滚过去时，否则文字会透出来糊成一片。
- */
-.drawer-dock {
-  background: rgb(var(--v-theme-surface));
-  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+/* 整页高度锁死：三栏各自滚动，页面本身不滚（与首页 h-[calc(100vh-80px)] 同一口径） */
+.mine-rail {
+  flex: 0 0 300px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.mine-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 卡片模式：中栏定宽，右栏吃掉剩下空间 */
+.mine-card-col {
+  flex: 0 0 380px;
+  min-width: 0;
+}
+
+/* 历史模式：表格吃掉剩下空间；右栏出现时单独定宽，不去挤表格的可读宽度 */
+.mine-table-col {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mine-detail {
+  flex: 1 1 0;
+  min-width: 320px;
+  /* 圆角裁切 + 内容滚动交给内部（见 ApprovalDetailView 的 .detail-body） */
+  overflow: hidden;
 }
 
 /*
- * Vuetify 的 drawer 内容区是 `flex: 0 1 auto`（不拉伸），append 区 `flex: none`——
- * 内容不足一屏时面板会紧贴内容而不是抽屉底部。让内容区吃掉剩余空间，面板才会被压到底。
+ * 历史板块点开的详情比卡片模式更宽：里面要放单号 / 时间线 / 办理栏，
+ * 440px 时时间线上的姓名 + 意见 + 时间挤成一条，所以按容器宽度取一档更宽的基准。
+ * clamp 而不是固定值：宽屏（≥1600）拿到 620px 上限，窄屏（≤1150）仍保底 440px，
+ * 中间按 38% 平滑过渡，不会把左边的表格压得只剩几列。
  */
-:deep(.v-navigation-drawer__content) {
+.mine-detail--fixed {
+  flex: 0 0 clamp(440px, 38%, 620px);
+}
+
+/* 窄一点的窗口（笔记本外接小屏）把中间那一栏收一点，别把右栏挤没 */
+@media (max-width: 1500px) {
+  .mine-card-col {
+    flex-basis: 340px;
+  }
+}
+
+.mine-tab {
+  min-height: 34px;
+}
+
+.rail-count {
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+
+/*
+ * 卡片列表：吃掉「中栏高度 − 页头」剩下的部分自己滚。
+ * flex 必须写在 CSS 里 —— 模板上的 flex-1-1-auto 不是有效的 UnoCSS 类名（只认 flex-1 / flex-auto），
+ * 之前等于没设，列表不滚，超出部分直接被外层的 overflow-hidden 裁掉。
+ */
+.order-list {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.mine-block {
+/*
+ * 圆角交给 v-card 的 rounded="lg"；内边距统一放在卡片上，
+ * 标题 / 正文 / 页脚三块都清零（v-card-title 默认 .5rem 1rem、v-card-text 默认 1rem），
+ * 这样三段的左右边界一定对齐 —— 靠工具类覆盖会跟 UnoCSS 的优先级打架。
+ */
+.order-card {
+  /*
+   * 常驻 1px 透明描边：hover 时只换颜色，卡片不会因为"凭空多出一条边框"而抖动；
+   * 底色交给 v-card（variant="flat"），这里不重复设 background。
+   */
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.order-card+.order-card {
+  margin-top: 8px;
+}
+
+/*
+ * hover 的蓝色边缘：1px 描边 + 一圈同色外发光。
+ * 只改 border-color 在浅底上太细，看不出"边缘蓝"；外发光把轮廓加粗到 2px 的观感，
+ * 又不会像真加粗边框那样挤压内容。颜色取主题主色，深色模式下自动跟着变。
+ */
+.order-card:hover {
+  border-color: rgb(var(--v-theme-primary), 0.05);
+  box-shadow: 0 0 0 1px rgb(var(--v-theme-primary), 0.5), 0 2px 10px rgba(var(--v-theme-primary), 0.18);
+}
+
+/*
+ * 选中态：左侧一条主色 + 同色描边，与右栏"正在看哪一张"对上。
+ * 同时写上 :hover 版本 —— 否则选中卡片被 hover 时的规则覆盖，蓝边会闪回默认色。
+ */
+.order-card--active,
+.order-card--active:hover {
+  border-color: rgb(var(--v-theme-primary), 0.8);
+  box-shadow: inset 3px 0 0 rgb(var(--v-theme-primary), 0.8), 0 0 0 1px rgb(var(--v-theme-primary), 0.8);
+}
+
+/*
+ * v-card-title 默认是 white-space: nowrap + text-overflow: ellipsis（只能单行，且会被裁掉），
+ * 而这里要「标题最多两行、右侧状态始终正常显示」，三条缺一不可：
+ *   ① 容器复位 white-space / overflow —— 否则 nowrap 被标题继承，永远只有一行；
+ *   ② 标题 flex: 1 + min-width: 0 —— flex 子项默认 min-width:auto，不归零就压不窄，line-clamp 不生效；
+ *   ③ 状态 flex: 0 0 auto —— 不参与压缩，标题换行时仍贴住右上角。
+ */
+.order-card__head {
+  /* 复位 v-card-title 自带的标题字号 / 行高 / 内边距：这里只当布局容器用 */
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* v-card-text 默认 padding: 1rem —— 清掉，卡片自己的内边距已经够了 */
+.order-card__body {
+  /* 默认 0.875rem 字号会被下面各行的 text-[12px] 覆盖，这里只保证不额外缩进 */
+  font-size: inherit;
+  padding-bottom: 0;
+}
+
+.order-card__title {
   flex: 1 1 auto;
-  /* 最小高度：内容少也不会缩成一条（约 8 行 + 表头） */
-  min-height: 340px;
-  /* 最大高度：超过就交给整页滚动（想再高/再矮，改这两个值即可） */
-  max-height: 62vh;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  /* 两行以内：标题过长时截断，卡片高度才整齐 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* 长型号 / 无空格英文也能断行，否则截不出第二行 */
+  overflow-wrap: anywhere;
+}
+
+.order-card__status {
+  flex: 0 0 auto;
+  /* 标题两行时状态仍与第一行对齐 */
+  margin-top: 1px;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-hint {
+  height: 100%;
+  min-height: 180px;
+}
+
+/* 日历区间选择器吃掉整行，排序按钮固定宽 */
+.date-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sort-btn {
+  flex: 0 0 auto;
 }
 
 .mine-table {
@@ -794,20 +922,7 @@ onMounted(() => {
   min-height: 0;
 }
 
-/*
- * 表格页脚（就是那条分页）压扁：默认上下留白不小，
- * 而这块总共也就半屏高，页脚每高 20px 就等于少一条表体。
- */
 .mine-table :deep(.v-data-table-footer) {
   padding-block: 2px;
-}
-
-.tabs-shadow {
-  transition: box-shadow 0.2s ease;
-  box-shadow: 0 0 0 rgba(15, 23, 42, 0);
-}
-
-.tabs-shadow.tabs-scrolled {
-  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.15);
 }
 </style>

@@ -66,6 +66,10 @@ const router = createRouter({
       component: () => import('@/pages/approvalModel.vue'),
     },
     {
+      path: '/sandbox',
+      component: () => import('@/pages/sandbox.vue'),
+    },
+    {
       path: '/mine',
       component: () => import('@/pages/mine.vue'),
     },

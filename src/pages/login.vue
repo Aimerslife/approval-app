@@ -1,79 +1,85 @@
 <template>
-  <v-container class="pa-0" fluid>
-    <v-row class="h-100vh" no-gutters>
-      <v-col class="relative" cols="8" no-gutters>
-        <v-img class="h-100" cover gradient="to top right, rgba(100,115,201,.33), rgba(25,32,72,.7)"
-          :src="background" />
-        <div class="word-badge absolute bottom-10 left-15">
-          <v-rating active-color="#B6284E" empty-icon="mdi-heart-outline" half-icon="mdi-heart-half-full" hover
-            :length="5" full-icon="mdi-heart" :model-value="4" :size="40" />
+  <!--
+    登录页铺满整个视口，四周不留白。
 
-          <v-sheet class="word-card" color="#3546C9" rounded="10">
-            <div class="d-flex align-center gap-2">
-              <v-avatar :image="title" size="35" />
-              <div class="word-card__title">今日鸡汤</div>
-            </div>
-            <div class="word-card__text p-2">{{ word }}</div>
-          </v-sheet>
-        </div>
-      </v-col>
+    · 根节点用 position: fixed 是**故意的**：v-main 有 --v-layout-* 的 padding、
+      v-container 自带 16px padding，只要中间还有一层 padding，四边就会露出白底、
+      背景图也到不了边。fixed 相对**视口**定位，绕开所有祖先的 padding 与 margin
+      （与其它页 screen-full 的思路一致）。
+    · 背景图自己铺满整页，右侧表单是一块**不透明面板**压在它上面 ——
+      即使某一侧尺寸算偏了，露出来的也是图，不会是白底。
+  -->
+  <div class="login-page">
+    <v-img class="login-page__bg" cover gradient="to top right, rgba(100,115,201,.33), rgba(25,32,72,.7)"
+      :src="background" />
 
-      <v-col cols="4" no-gutters>
-        <v-sheet class="d-flex  flex-col gap-2 p-20 h-100  justify-center">
-          <v-img max-height="50px" :src="logo" />
+    <div class="login-visual">
+      <div class="word-badge absolute bottom-10 left-15">
+        <v-rating active-color="#B6284E" empty-icon="mdi-heart-outline" half-icon="mdi-heart-half-full" hover
+          :length="5" full-icon="mdi-heart" :model-value="4" :size="40" />
 
-          <div class="d-flex flex-col gap-3 mb-10">
-            <strong class="text-[20px]">欢迎回来</strong>
-            <span class="text-[14px] text-[#8B8B8B]">登录你的账号后开启流程</span>
+        <v-sheet class="word-card" color="#3546C9" rounded="10">
+          <div class="d-flex align-center gap-2">
+            <v-avatar :image="title" size="35" />
+            <div class="word-card__title">今日鸡汤</div>
           </div>
-
-          <v-form fast-fail @submit.prevent="submit">
-            <v-text-field v-model="email" class="mb-4" label="邮箱" placeholder="请输入邮箱" rounded="15px" :rules="emailRules"
-              variant="outlined">
-              <template #prepend-inner>
-                <v-icon size="20">mdi-email-outline</v-icon>
-              </template>
-            </v-text-field>
-
-            <v-text-field :append-inner-icon="visible ? 'mdi-eye-off' : 'mdi-eye'" label="密码" v-model="password"
-              placeholder="密码" rounded="15px" :rules="passwordRules" :type="visible ? 'text' : 'password'"
-              variant="outlined" @click:append-inner="visible = !visible">
-              <template #prepend-inner>
-                <v-icon size="20">mdi-lock-outline</v-icon>
-              </template>
-            </v-text-field>
-
-            <div class="d-flex justify-between mb-4">
-              <span />
-
-              <span class="text-body-small text-decoration-none text-blue cursor-pointer hover:underline"
-                @click="goResetPassword">忘记密码?</span>
-            </div>
-
-            <v-btn block class="mt-2" color="#3378FF" rounded="30px" size="large" type="submit"
-              variant="flat">登录</v-btn>
-          </v-form>
-
-          <div class="mt-10">
-            <v-divider content-offset="0.5rem">
-              <span class="text-[13px] text-[#8B8B8B]">或者</span>
-            </v-divider>
-          </div>
-
-          <div class="d-flex justify-center text-[13px] text-[#8B8B8B] mt-15 align-center">
-            <v-btn class="mr-4" icon size="32" @click="loginWithLarks">
-              <v-avatar :image="feishu" size="18" />
-            </v-btn>
-
-            <!-- <span>没有账号？</span>
-
-          <span class="no-underline hover:underline text-[#3378FF] cursor-pointer hover:text-[12px]"
-            @click="goRegister">去注册</span> -->
-          </div>
+          <div class="word-card__text p-2">{{ word }}</div>
         </v-sheet>
-      </v-col>
-    </v-row>
-  </v-container>
+      </div>
+    </div>
+
+    <v-sheet class="login-panel d-flex flex-col gap-2 p-20 justify-center">
+      <v-img max-height="50px" :src="logo" />
+
+      <div class="d-flex flex-col gap-3 mb-10">
+        <strong class="text-[20px]">欢迎回来</strong>
+        <span class="text-[14px] text-[#8B8B8B]">登录你的账号后开启流程</span>
+      </div>
+
+      <v-form fast-fail @submit.prevent="submit">
+        <v-text-field v-model="email" class="mb-4" label="邮箱" placeholder="请输入邮箱" rounded="15px" :rules="emailRules"
+          variant="outlined">
+          <template #prepend-inner>
+            <v-icon size="20">mdi-email-outline</v-icon>
+          </template>
+        </v-text-field>
+
+        <v-text-field :append-inner-icon="visible ? 'mdi-eye-off' : 'mdi-eye'" label="密码" v-model="password"
+          placeholder="密码" rounded="15px" :rules="passwordRules" :type="visible ? 'text' : 'password'"
+          variant="outlined" @click:append-inner="visible = !visible">
+          <template #prepend-inner>
+            <v-icon size="20">mdi-lock-outline</v-icon>
+          </template>
+        </v-text-field>
+
+        <div class="d-flex justify-between mb-4">
+          <span />
+
+          <span class="text-body-small text-decoration-none text-blue cursor-pointer hover:underline"
+            @click="goResetPassword">忘记密码?</span>
+        </div>
+
+        <v-btn block class="mt-2" color="#3378FF" rounded="30px" size="large" type="submit" variant="flat">登录</v-btn>
+      </v-form>
+
+      <div class="mt-10">
+        <v-divider content-offset="0.5rem">
+          <span class="text-[13px] text-[#8B8B8B]">或者</span>
+        </v-divider>
+      </div>
+
+      <div class="d-flex justify-center text-[13px] text-[#8B8B8B] mt-15 align-center">
+        <v-btn class="mr-4" icon size="32" @click="loginWithLarks">
+          <v-avatar :image="feishu" size="18" />
+        </v-btn>
+
+        <!-- <span>没有账号？</span>
+
+        <span class="no-underline hover:underline text-[#3378FF] cursor-pointer hover:text-[12px]"
+          @click="goRegister">去注册</span> -->
+      </div>
+    </v-sheet>
+  </div>
 
   <!-- 登录失败提示：企业不匹配 / 组织信息获取失败 / 账号密码错误等 -->
   <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="4000" variant="tonal">
@@ -214,6 +220,60 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/*
+ * 铺满视口的根容器。
+ * 用 fixed 而不是 height: 100vh 的理由：
+ *   ① 100vh 只是"内容高度"，页面被祖先 padding 顶下去时会整体溢出、底部露白；
+ *   ② fixed 绕开 v-main 的 --v-layout-* padding 与 v-container 自带的 16px padding，
+ *      四边一定贴到视口边缘（不需要再去猜是哪一层留下的白边）。
+ */
+.login-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 整页背景图：铺满视口。右侧表单面板不透明，会盖住自己那一块 */
+.login-page__bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 左半区：透明，只承载"今日鸡汤"角标 */
+.login-visual {
+  position: relative;
+  /* 背景图是绝对定位的，同层里绝对定位元素会盖住普通块 —— 抬一层角标才看得见 */
+  z-index: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 右半区：不透明的表单面板，压在背景图之上 */
+.login-panel {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 33.3333%;
+  min-width: 380px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* 窄屏：图退成背景，表单占满整屏（8/4 分栏在手机上没法用） */
+@media (width <= 960px) {
+  .login-visual {
+    display: none;
+  }
+
+  .login-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 24px;
+  }
+}
+
 .word-badge {
   display: flex;
   flex-direction: column;

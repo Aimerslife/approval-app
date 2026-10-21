@@ -24,6 +24,35 @@ export interface NotifySendResult {
 }
 
 /**
+ * 一条**计划中**的到达通知（还没发）—— 沙盒预演 / 排查用。
+ *
+ * 与 NotifySendResult 的区别：那个是"发完之后的结果统计"，这个是"发之前算出来的清单"，
+ * 所以能回答沙盒最关心的问题：这一推进**会发给谁、文案是什么、哪几条被跳过**。
+ */
+export interface NotifyPlanItem {
+  stepId: string
+  /** notify = 飞书提醒环；approval = 审批环节的「待审批」 */
+  kind: 'notify' | 'approval'
+  /** 消息标题（提醒环 = 环节名，审批环节 = 环节名） */
+  title: string
+  /** 消息正文（提醒环 = 模板里那段文案；审批环节 = 单号 + 上一轮审批信息） */
+  text: string
+  /** 这一条最终该发给的人（已按"同一个人本轮只收一条提醒环消息"过滤；白名单与测试闸门在发送时才过） */
+  targets: NotifyTarget[]
+  /** 有值 = 这一条**不发**，值是原因（已在链上到达过 / 本轮同人已收到） */
+  skip?: string
+}
+
+/** 一轮到达通知的完整计划 */
+export interface NotifyPlan {
+  /** 新到达从 after 的第几个开始（公共前缀，见 utils/arrivalNotice 的 arrivedFrom） */
+  from: number
+  /** 这一轮新到达的环节 id（= after.slice(from)） */
+  newSteps: string[]
+  items: NotifyPlanItem[]
+}
+
+/**
  * 给「刚推进到」的飞书提醒环发通知。
  *
  * ## 为什么用 stepIds 差分定位、而不是别的方式
@@ -84,38 +113,13 @@ export async function sendArrivedNotifies (opts: {
   context?: Record<string, unknown>
 }): Promise<NotifySendResult> {
   const out: NotifySendResult = { sent: [], failed: [], skipped: [], messages: 0 }
-  const notifySteps = collectNotifySteps(opts.flow)
-  const approvalSteps = collectApprovalSteps(opts.flow)
-  // 同一个环节 id 一轮只发一次（驳回重审的链路里同一个 id 可能出现多次）
-  const arrived = new Set<string>()
   /*
-   * 新到达的环节从第几个开始：与推进前的链路取**公共前缀**（见 utils/arrivalNotice 的 arrivedFrom）。
-   * 用集合差是错的 —— 驳回回到走过的环节时，那个 id 早在 before 里，集合差看不见它。
+   * "这一轮该发什么"全部在纯函数里算完（见下方 planArrivedNotifies）——
+   * 本函数只负责**把它发出去**：白名单 / 测试闸门 / 逐个发送 / 失败收集。
+   * 拆开的好处：沙盒（pages/sandbox）能拿同一份计划做预演，
+   * 不必复制一套"谁会收到"的判断，两处也就不会算出不同结果。
    */
-  const from = arrivedFrom(opts.before, opts.after)
-  const ctx = opts.context ?? {}
-
-  /*
-   * 推进前**已经到达过**的环节 id（文件头第 1 条口径「已在链上不重发」的落点）。
-   *
-   * ⚠️ 为什么只靠 `from`（公共前缀）不够：「飞书提醒」环是**到达即穿过**的，
-   * 回退重审 / 上一级回退 / 跳出轮询后又绕回同一条提醒线，都会让它出现在 after 的
-   * **新那一段**里 —— 位置是新的，但它并不是"新到达的环节"，而是老路又走了一遍。
-   * 只按位置判断，同一个提醒环就会每绕一圈发一条（实测单号 1792496009092：回退重审后
-   * 又走回同一个提醒环，同一个人连收两条）。
-   *
-   * 审批环节**不用**这条：驳回回来的人确实又需要办一次，待审批通知必须照发。
-   */
-  const reachedBefore = new Set(opts.before)
-
-  /*
-   * 本轮**已经收到过提醒环消息**的人（按 `receive_id`：open_id 优先，缺了才用邮箱）。
-   *
-   * 一次推进里连着穿过几个提醒环时，它们属于同一个到达事件 —— 第一个人已经在第一环
-   * 收到消息了，后面几环再发给他就是"只办了一次却收到好几条"（见文件头那段说明）。
-   * 只记**提醒环**的收件人：审批环节的「待审批」另算，不去重。
-   */
-  const ringSentInRound = new Set<string>()
+  const plan = planArrivedNotifies(opts)
 
   /*
    * 排查用：把这一轮"推进前 / 推进后"的环节序列与真正要发的那一段打出来。
@@ -124,16 +128,16 @@ export async function sendArrivedNotifies (opts: {
    * `newSteps` 有多条只可能是这几种情况 ——
    *   · 连排的几个「飞书提醒」环（提醒环到达即穿过，`newSteps` 里会连着好几环）。
    *     它们属于同一次到达：**同一个人本轮只在第一环收到一条**，后面几环跳过
-   *     （见 ringSentInRound / deliver 的 dedupe，日志会打"本轮已收到过提醒"）；
+   *     （见 planArrivedNotifies 的 ringSentInRound，日志会打"本轮已收到过提醒"）；
    *   · 该环节有多个办理人 / 提醒对象（`deliver` 按人逐个发，`messages` 会大于 `sent.length`）；
    *   · `before` 用的是**过期的单据快照**（首页抽屉 / 列表里那份），公共前缀被提前截断，
    *     于是"已经到过的环节"又被当成新到达重发一遍。
    */
   console.info('[notifySteps] 本轮到达', {
-    from,
+    from: plan.from,
     before: opts.before,
     after: opts.after,
-    newSteps: opts.after.slice(from),
+    newSteps: plan.newSteps,
   })
 
   /*
@@ -147,41 +151,21 @@ export async function sendArrivedNotifies (opts: {
   }
 
   /**
-   * 把一条消息发出去：本轮去重 → 白名单 → 测试闸门 → 逐个发送。
+   * 把一条消息发出去：白名单 → 测试闸门 → 逐个发送。
    *
    * 抽出来是因为**两种到达（提醒环 / 审批环节）用的口径完全一样**，
    * 各写一遍迟早漂（一处改了白名单、另一处忘了改，表现是"有的人收到有的人收不到"）。
    *
-   * @param dedupe 这一条是不是「飞书提醒」环：是就套"同一个人本轮只收一条"（见文件头）。
-   *               审批环节的「待审批」不套 —— 与「提醒」是两件事，同一个人两条都该收到。
+   * @param receivers **最终该收的人**：本轮去重已在 planArrivedNotifies 里算完
+   *                  （「同一个人本轮只收一条提醒环消息」也在那儿），这里不再二次过滤。
    */
-  async function deliver (title: string, targets: NotifyTarget[], text: string, dedupe = false) {
+  async function deliver (title: string, receivers: NotifyTarget[], text: string) {
     /*
-     * 同一个人本轮只收一条提醒环消息：连着穿过的几个提醒环是**同一次到达**，
-     * 第一环发给他之后再发就是刷屏（实测单号 1792493682581 连收三条）。
-     *
-     * 去重按**本环原本的收件人**算，且在测试闸门**之前**：
-     * 闸门会把每条消息都改发给同一个人，若按改发后的收件人去重，
-     * "本该发给别人"的那几条也会被吞掉，测试期就看不出真实效果了
+     * ⚠️ 「同一个人本轮只收一条提醒环消息」在 planArrivedNotifies 里按**本环原本的收件人**
+     * 算，且必须在测试闸门**之前**：闸门会把每条消息都改发给同一个人，
+     * 若按改发后的收件人去重，"本该发给别人"的那几条也会被吞掉
      * （口径见 utils/notifyGate："测试期能看见每一条消息"）。
      */
-    const receivers = dedupe ? targets.filter(t => !ringSentInRound.has(t.receive_id)) : targets
-    /*
-     * 只有"本来有收件人、但本轮都已经收过"才在这里收口；
-     * `targets` 为空（这一环没配提醒对象 / 认不出人）不能走到这里 ——
-     * 否则会以"已收到过提醒"的名义静默跳过，真实的"没配人"就查不出来了
-     * （下面那段"没有可发送的对象"才是它该报的话；测试期也才轮得到闸门改发）。
-     */
-    if (dedupe && targets.length > 0) {
-      if (receivers.length === 0) {
-        // 不静默：模板里连排了几个提醒环时，日志要能看出"为什么某某只收到一条"
-        console.info(`[notifySteps] 「${title}」的提醒对象本轮已收到过提醒，这一环不再发`)
-        return
-      }
-      for (const t of receivers) {
-        ringSentInRound.add(t.receive_id)
-      }
-    }
 
     /*
      * ⚠️ 测试期（NOTIFY-TEST-GATE）：**改发**给指定的人，不管这一环本来该谁办 ——
@@ -262,52 +246,17 @@ export async function sendArrivedNotifies (opts: {
     }
   }
 
-  for (let i = from; i < opts.after.length; i++) {
-    const stepId = opts.after[i]
-    if (arrived.has(stepId)) {
+  /*
+   * 计划 → 发送。计划里已经定好"发给谁、文案、哪几条不发（skip）"，
+   * 这里只把不发的原因记进 skipped（不静默：排查时要能看出"为什么某某没收到"）。
+   */
+  for (const item of plan.items) {
+    if (item.skip) {
+      out.skipped.push(item.skip)
+      console.info(`[notifySteps] ${item.skip}`)
       continue
     }
-    arrived.add(stepId)
-
-    /* ① 「飞书提醒」环：文案是模板里配的那一段 */
-    const info = notifySteps[stepId]
-    if (info) {
-      /*
-       * 这一环在**推进前**就已经到达过 → 本次是"绕回来又走一遍"，不是新到达（见 reachedBefore）。
-       * 只记一条 skipped 并跳过：用户要的是"这个提醒环节只提醒一次"，
-       * 而不是"每被流程经过一次就提醒一次"。
-       */
-      if (reachedBefore.has(stepId)) {
-        const name = renderNotifyText(info.name || '飞书提醒', ctx)
-        out.skipped.push(`「${name}」这一环在本单里已经到达过，本次不再重复提醒`)
-        console.info(`[notifySteps] 「${name}」在推进前的链路里已经出现过（回退 / 绕回），本次不重发`)
-        continue
-      }
-      // 环节名与文案都支持 {{字段}} 插值。注意：时间线上显示的仍是**原始**环节名，
-      // 这里只影响发出去的消息 —— 时间线是静态快照，不该随业务数据变。
-      const title = renderNotifyText(info.name || '飞书提醒', ctx)
-      const body = renderNotifyText(info.content || '', ctx)
-      const text = [
-        `【审批提醒】${title}`,
-        opts.orderNo ? `单号：${opts.orderNo}` : '',
-        body,
-      ].filter(Boolean).join('\n')
-      // dedupe：连排的提醒环是**同一次到达**，同一个人只在第一环收到一条（见文件头）
-      await deliver(title, notifyTargets(info.members), text, true)
-      continue
-    }
-
-    /* ② 审批环节：通知这一环的办理人，正文含**单号 + 上一轮审批信息** */
-    const step = approvalSteps[stepId]
-    if (!step) {
-      continue
-    }
-    const text = buildArrivalText({
-      title: step.name,
-      orderNo: opts.orderNo,
-      previous: opts.afterChain ? previousApprovalText(opts.afterChain, i) : '',
-    })
-    await deliver(step.name || '审批环节', notifyTargets(step.members), text)
+    await deliver(item.title, item.targets, item.text)
   }
   // `messages` 是**实际发出的条数**（按人计），`sent` 是按环节计 —— 两者差得多就是"一环多人"
   console.info('[notifySteps] 发送结果', {
@@ -319,8 +268,134 @@ export async function sendArrivedNotifies (opts: {
   return out
 }
 
+/**
+ * 算一轮「到达通知」该发什么 —— **纯函数，不发任何消息**。
+ *
+ * 口径与注意事项见上面 sendArrivedNotifies 的文件头（发送侧只是把这份计划执行一遍）。
+ * 沙盒（pages/sandbox）拿它做预演："这一次推进本来会发给谁、文案长什么样、哪几条被跳过"。
+ */
+export function planArrivedNotifies (opts: {
+  flow: ApprovalFlow
+  before: string[]
+  after: string[]
+  /** 推进后的链路（与 after 同序，由 rebuildChain 产出） */
+  afterChain?: ApprovalChain
+  orderNo?: string
+  context?: Record<string, unknown>
+}): NotifyPlan {
+  const notifySteps = collectNotifySteps(opts.flow)
+  const approvalSteps = collectApprovalSteps(opts.flow)
+  // 同一个环节 id 一轮只发一次（驳回重审的链路里同一个 id 可能出现多次）
+  const arrived = new Set<string>()
+  /*
+   * 新到达的环节从第几个开始：与推进前的链路取**公共前缀**（见 utils/arrivalNotice 的 arrivedFrom）。
+   * 用集合差是错的 —— 驳回回到走过的环节时，那个 id 早在 before 里，集合差看不见它。
+   */
+  const from = arrivedFrom(opts.before, opts.after)
+  const ctx = opts.context ?? {}
+  /*
+   * 推进前**已经到达过**的环节 id（文件头第 1 条口径「已在链上不重发」的落点）。
+   *
+   * ⚠️ 为什么只靠 `from`（公共前缀）不够：「飞书提醒」环是**到达即穿过**的，
+   * 回退重审 / 上一级回退 / 跳出轮询后又绕回同一条提醒线，都会让它出现在 after 的
+   * **新那一段**里 —— 位置是新的，但它并不是"新到达的环节"，而是老路又走了一遍。
+   * 只按位置判断，同一个提醒环就会每绕一圈发一条（实测单号 1792496009092：回退重审后
+   * 又走回同一个提醒环，同一个人连收两条）。
+   *
+   * 审批环节**不用**这条：驳回回来的人确实又需要办一次，待审批通知必须照发。
+   */
+  const reachedBefore = new Set(opts.before)
+  /*
+   * 本轮**已经收到过提醒环消息**的人（按 `receive_id`：open_id 优先，缺了才用邮箱）。
+   *
+   * 一次推进里连着穿过几个提醒环时，它们属于同一个到达事件 —— 第一个人已经在第一环
+   * 收到消息了，后面几环再发给他就是"只办了一次却收到好几条"（见文件头那段说明）。
+   * 只记**提醒环**的收件人：审批环节的「待审批」另算，不去重。
+   */
+  const ringSentInRound = new Set<string>()
+  const items: NotifyPlanItem[] = []
+
+  for (let i = from; i < opts.after.length; i++) {
+    const stepId = opts.after[i]
+    if (arrived.has(stepId)) {
+      continue
+    }
+    arrived.add(stepId)
+
+    /* ① 「飞书提醒」环：文案是模板里配的那一段 */
+    const info = notifySteps[stepId]
+    if (info) {
+      // 环节名与文案都支持 {{字段}} 插值。注意：时间线上显示的仍是**原始**环节名，
+      // 这里只影响发出去的消息 —— 时间线是静态快照，不该随业务数据变。
+      const title = renderNotifyText(info.name || '飞书提醒', ctx)
+      const body = renderNotifyText(info.content || '', ctx)
+      const text = [
+        `【审批提醒】${title}`,
+        opts.orderNo ? `单号：${opts.orderNo}` : '',
+        body,
+      ].filter(Boolean).join('\n')
+      const targets = notifyTargets(info.members)
+      /*
+       * 这一环在**推进前**就已经到达过 → 本次是"绕回来又走一遍"，不是新到达（见 reachedBefore）。
+       * 记一条 skip 而不是静默丢弃：用户要的是"这个提醒环节只提醒一次"，
+       * 而不是"每被流程经过一次就提醒一次"。
+       */
+      if (reachedBefore.has(stepId)) {
+        items.push({
+          stepId,
+          kind: 'notify',
+          title,
+          text,
+          targets: [],
+          skip: `「${title}」这一环在本单里已经到达过，本次不再重复提醒`,
+        })
+        continue
+      }
+      /*
+       * 连排的提醒环是**同一次到达**：同一个人只在第一环收到一条（见 ringSentInRound）。
+       * 收件人为空（没配提醒对象 / 认不出人）时不走这条 —— 那是"没配人"，
+       * 要留给发送侧报"没有可发送的对象"，不能被"本轮已收到过"掩盖掉。
+       */
+      const receivers = targets.length > 0
+        ? targets.filter(t => !ringSentInRound.has(t.receive_id))
+        : targets
+      if (targets.length > 0 && receivers.length === 0) {
+        items.push({
+          stepId,
+          kind: 'notify',
+          title,
+          text,
+          targets: [],
+          skip: `「${title}」的提醒对象本轮已收到过提醒，这一环不再发`,
+        })
+        continue
+      }
+      for (const t of receivers) {
+        ringSentInRound.add(t.receive_id)
+      }
+      items.push({ stepId, kind: 'notify', title, text, targets: receivers })
+      continue
+    }
+
+    /* ② 审批环节：通知这一环的办理人，正文含**单号 + 上一轮审批信息** */
+    const step = approvalSteps[stepId]
+    if (!step) {
+      continue
+    }
+    const title = step.name || '审批环节'
+    const text = buildArrivalText({
+      title: step.name,
+      orderNo: opts.orderNo,
+      previous: opts.afterChain ? previousApprovalText(opts.afterChain, i) : '',
+    })
+    items.push({ stepId, kind: 'approval', title, text, targets: notifyTargets(step.members) })
+  }
+
+  return { from, newSteps: opts.after.slice(from), items }
+}
+
 /** 一条消息的收件人：成员本身 + 发消息要用的飞书 id */
-interface NotifyTarget {
+export interface NotifyTarget {
   member: ApprovalChainItem
   receive_id: string
   receive_id_type: 'open_id' | 'email'

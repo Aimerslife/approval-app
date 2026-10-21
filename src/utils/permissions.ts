@@ -65,6 +65,14 @@ const ROUTE_ROLES: Record<string, AppRole[]> = {
   '/editRule': ADMIN_UP,
   // 「审批类型」设置页（审批模板页的按钮进去）：只有管理员以上能看能编辑
   '/approvalTypeSetting': ADMIN_UP,
+  /*
+   * 「流程沙盒」：只给管理员及以上。
+   *
+   * 它是**只读**的模拟器（不写库、不发通知、不占编号），但会把整张模板的编排逻辑、
+   * 各组审批人、分流条件全部摊开给人看 —— 属于"编排/排查工具"，
+   * 与审批模板页同一档，不摆给一般员工。
+   */
+  '/sandbox': ADMIN_UP,
 
   // 三档都能进
   '/': ALL_ROLES,

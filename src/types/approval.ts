@@ -1,3 +1,10 @@
+/*
+ * 审批类型模板（`code → 选中这个结论后要填什么`）由 utils/approvalTypes 定义。
+ * 这里只用它的**类型**：运行期读值一律经 typesFromSnapshot / typeTemplateFromSnapshot，
+ * 不直接碰解析逻辑（那是建单期的事，见文件头「运行期不查这张表」）。
+ */
+import type { ApprovalTypeTemplate } from '@/utils/approvalTypes'
+
 /**
  * 审批环节（ApprovalNode）提交上来的办理数据。
  * 由父组件负责上传附件并写回 approval_chain.chain。
@@ -1221,6 +1228,14 @@ export function branchConditions (b: ApprovalBranch): ConditionExpr[] {
  * 与"整条分支没有任何条件 = 兜底分支"保持一致的直觉。
  */
 export function evalConditionExpr (expr: ConditionExpr, form: Record<string, unknown>): boolean {
+  /*
+   * 脏数据兜底：组里的 items 混进 null / undefined 时（历史模板、手改过的 JSON），
+   * 往下走会在 `form[expr.field]` 上抛 TypeError —— 整条分支的求值直接崩掉，
+   * 与本文件「取不到值就不命中」的口径相反。这里按不命中处理。
+   */
+  if (!expr) {
+    return false
+  }
   if (isConditionGroup(expr)) {
     if (!expr.items?.length) {
       return true
@@ -1377,6 +1392,14 @@ function evalCondition (c: BranchCondition, raw: unknown, form: Record<string, u
     if (expect === undefined || expect === null || expect === '') {
       return false
     }
+  } else if (expect === undefined || expect === null || expect === '') {
+    /*
+     * 常量侧同样不能为空：`Number('') === 0`，于是「金额 > ''」会变成「> 0」、
+     * 「金额 = ''」会命中金额 0 —— 一个没填完的条件反而更容易命中。
+     * 左边取不到值（上面那道）与引用取不到都按不命中处理，这里补齐同一口径。
+     * ⚠️ 数组（contains 的多值）不在此列：它走 containsHit，自己按「命中任一」判空。
+     */
+    return false
   }
   const a = Number(typeof raw === 'string' ? raw.replace(/,/g, '').trim() : raw)
   const b = Number(typeof expect === 'string' ? expect.replace(/,/g, '').trim() : expect)
@@ -1396,6 +1419,10 @@ function evalCondition (c: BranchCondition, raw: unknown, form: Record<string, u
     }
     // 「包含」支持一组值（命中任一即满足）；单值走同一条路径，行为与改动前一致
     case 'contains': { return containsHit(String(raw), c, form)
+    }
+    // 脏数据里的非法 op（如旧模板手写的 '='）：明确判不命中，
+    // 而不是让函数末尾隐式返回 undefined（签名声明的是 boolean）
+    default: { return false
     }
   }
 }
@@ -3071,6 +3098,14 @@ export interface ApprovalOrder {
      *  单值：该字段 maxSelect = 0，按 PB 约定等价于 single，值就是字符串。
      *  见 pocketbase/pb_migrations/1789548325_updated_approval_chain.js */
   relation?: string
+  /**
+   * 建单人（`users` 记录 id）。
+   *
+   * 只有**加这个字段之后**建的单才有（见 pb_migrations/1789800000_updated_approval_chain_creator.js）；
+   * 历史单为空 —— 读取侧按「不是我的」处理（fail-closed），不会把它错算给别人。
+   * 「我的审批单」页的「我发起的」用它区分，见 utils/approvalRuntime 的 orderCreatedBy。
+   */
+  creator?: string
   /** 关联行的业务键兜底（= `bi_rows.sync_key`，SKU|店铺|仓位|组别|是否属于呆滞库存）。
      *  bi_rows 每次同步都会重写，行被 prune 后重新出现会换新 id，relation 就指空了；
      *  这一列由业务字段拼成、不受重写影响，用来把单重新对回数据。
@@ -3108,6 +3143,15 @@ export interface ApprovalOrder {
     /** 建单时冻结的**业务数据快照**：分支条件里的业务字段从这里取（见 FlowContext）。
          *  必须冻结：bi_rows 每次同步都会重写，读实时数据会让历史单的链路回放性变化。 */
     context?: FlowContext
+    /**
+     * 建单期冻结的**审批类型**（`结论码 → 选中这个结论后要填什么`，见 utils/approvalTypes）。
+     *
+     * 与 flow / branchTerminal 同一个时机、同一个承诺：**模板之后怎么改都不影响已建的单**。
+     * 办理页只读这一份（经 typesFromSnapshot / typeTemplateFromSnapshot），
+     * 老单没有这一项时回落到内置默认（= 改造前的硬编码行为）。
+     * 只存"非空壳"的行（写法见 slimTypeTemplates）。
+     */
+    types?: Record<string, ApprovalTypeTemplate>
   }
   created?: string
   updated?: string

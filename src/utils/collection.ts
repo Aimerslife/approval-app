@@ -225,6 +225,11 @@ export async function createApprocalModel (
   opts: { relation?: string, syncKey?: string } = {},
 ) {
   const order_no = `${Date.now()}`
+  /*
+   * 建单人：「我的审批单」页「我发起的」那一栏靠它区分（见 utils/approvalRuntime 的 orderCreatedBy）。
+   * 取登录者自己的 id，没登录（脚本 / 演示建单）就不写 —— 那时这张单不属于任何人，符合预期。
+   */
+  const creator = pb.authStore.record?.id
   try {
     const res = await pb.collection('approval_chain').create<ApprovalOrder>({
       order_no,
@@ -233,11 +238,18 @@ export async function createApprocalModel (
       chain: data,
       ...(opts.relation ? { relation: opts.relation } : {}),
       ...(opts.syncKey ? { sync_key: opts.syncKey } : {}),
+      ...(creator ? { creator } : {}),
     })
     if (opts.syncKey && !res.sync_key) {
       console.warn(
         '[createApprocalModel] sync_key 没有落库：多半是 PB 还没应用 1789660200 迁移'
         + '（加 sync_key 那一版），重启 PB 后新建的单才会带上兜底键。',
+      )
+    }
+    if (creator && !res.creator) {
+      console.warn(
+        '[createApprocalModel] creator 没有落库：多半是 PB 还没应用 1789800000 迁移'
+        + '（加 creator 那一版），重启 PB 后新建的单才能进「我发起的」。',
       )
     }
     await notifyOnCreate(data, res)
