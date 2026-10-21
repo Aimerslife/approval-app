@@ -422,6 +422,20 @@ import { canAccess } from '@/utils/permissions'
  */
 const userStore = useUserStore()
 
+/**
+ * 从「审批模板」页的「审批类型」表格点「编辑」过来时带的两项参数：
+ *   · `code`  —— 要编哪一类结论（为空 = 沿用"第一个真的要填东西的结论"那套默认落点）
+ *   · `scope` —— 作用域（模板 id；为空 = 全局默认）
+ *
+ * 不认这两项时页面行为与以前**完全一致**（直接从菜单/旧入口打开的人不受影响）。
+ * ⚠️ 先在这一层收敛成"合不合法"，后面 buildDraft / reload 都只看收敛后的结果 ——
+ * 否则一个被删掉的模板 id 会让下拉显示空白，改半天写到一层看不见的覆盖上。
+ */
+const route = useRoute()
+const initialCode = String(route.query.code ?? '').trim()
+const initialCodeValid = DEFAULT_TYPE_TEMPLATES.some(t => t.code === initialCode)
+const initialScope = String(route.query.scope ?? '').trim()
+
 /** 页面权限与路由守卫用同一份口径（'/'approvalTypeSetting' 在 utils/permissions 里登记为管理员及以上） */
 const canEdit = computed(() => canAccess(userStore.appRole, '/approvalTypeSetting'))
 
@@ -444,7 +458,8 @@ function showHint(text: string, color: 'success' | 'error' | 'warning' = 'warnin
 
 /** 审批模板列表（全量；`getApprovalOptions` 就是"取全部模板精简列表"那个函数） */
 const templates = ref<{ id: string, name: string }[]>([])
-const scopeKey = ref('global')
+/** 作用域初值：带过来的模板 id（见 initialScope），没带就是全局 */
+const scopeKey = ref(initialScope || 'global')
 
 const scopeItems = computed(() => [
   { value: 'global', title: '默认（所有审批模板）' },
@@ -468,7 +483,8 @@ const custom = ref(false)
 const draft = ref<ApprovalTypeOverrideMap>({})
 const dirty = ref<Record<string, boolean>>({})
 
-const selectedCode = ref(DEFAULT_TYPE_TEMPLATES[0]?.code ?? '')
+/** 当前在编的结论码：带过来的 code 优先（见 initialCodeValid），否则落在第一条 */
+const selectedCode = ref(initialCodeValid ? initialCode : DEFAULT_TYPE_TEMPLATES[0]?.code ?? '')
 
 const typeRows = computed(() => DEFAULT_TYPE_TEMPLATES.map(t => {
   const d = draft.value[t.code]
@@ -556,7 +572,8 @@ function buildDraft() {
   dirty.value = {}
   // 首次进来落在"第一个真的要让办的人填东西"的结论上，比停在「通过」更有信息量
   // （`fields` 在覆盖类型里是可选的，用 `?.length ?? 0` 取，别直接 `.length`）
-  if ((next[selectedCode.value]?.fields?.length ?? 0) === 0) {
+  // ⚠️ 从表格里点名某一类过来时（initialCodeValid）**不许**改落点 —— 用户点的就是那一条
+  if (!initialCodeValid && (next[selectedCode.value]?.fields?.length ?? 0) === 0) {
     const withFields = DEFAULT_TYPE_TEMPLATES.find(t => (next[t.code]?.fields?.length ?? 0) > 0)
     if (withFields) {
       selectedCode.value = withFields.code
@@ -569,6 +586,15 @@ async function reload() {
   loading.value = true
   try {
     templates.value = await getApprovalOptions()
+    /*
+     * 带过来的 scope 可能指向一张**已经被删掉**的模板（从表格点「编辑」时那张刚好被删）：
+     * 当场落回全局，否则下拉显示空白、改出来的覆盖落在谁都不看的一层上。
+     * 改完 `scopeKey` 会触发下面的 watch 再读一遍，这里直接结束这一轮即可。
+     */
+    if (scopeKey.value !== 'global' && !templates.value.some(t => t.id === scopeKey.value)) {
+      scopeKey.value = 'global'
+      return
+    }
     globalOverrides.value = (await loadApprovalTypeOverrides({ kind: 'global' })).overrides
     const row = await loadApprovalTypeOverrides(scope.value)
     overrides.value = row.overrides

@@ -1065,7 +1065,27 @@ export interface ApprovalFlowRefNode {
   branches?: ApprovalBranch[]
 }
 
-export type ApprovalFlowNode = ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode | ApprovalFlowRefNode
+export type ApprovalFlowNode = (ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode | ApprovalFlowRefNode) & {
+  /**
+   * 这一环是**一条「脱线支路」的起点**（由 utils/approvalFlow 的 graphToFlowFrom 在
+   * 「结束」节点处按支路分段时写入）。
+   *
+   * ## 为什么需要它
+   *
+   * 「提前跳出 / 跳出循环 / 轮完走向」的落点通常画在画布旁边，是**独立的一条支路**
+   * （最常见的接法就是"跳出轮询 → 发个飞书提醒 → 结束"）。可 flow 是一个**扁平数组**，
+   * `graphToFlowFrom` 为了运行期按 id 找得到落点，会把这些支路**首尾相接地铺在 flow 末尾**
+   * —— 两条支路之间没有任何标记。
+   *
+   * 于是运行时顺序推进时，"提醒14" 走完会自然滑进 "提醒15"、"提醒3"（那是**别的**
+   * 跳出线各自的支路），把它们也执行一遍：一次跳出，连发三条提醒（实测单号 1792496009092 /
+   * 1792547162214，模板里三条跳出线各接了一个提醒环，链路把三条全走了）。
+   *
+   * 有了这个标记：顺序推进到"另一条支路的起点"就停（见 rebuildChain 的 walkFlow）；
+   * 而**跳转**落到它是正常的（`exitTo` 就是"从支路自己的开头开始走"），不受影响。
+   */
+  branchStart?: boolean
+}
 
 /** 完整审批流：顺序节点，支持分支 */
 export type ApprovalFlow = ApprovalFlowNode[]
@@ -2669,6 +2689,25 @@ export function rebuildChain (
         return false
       }
       const node = flow[i]
+      /*
+       * 顺序推进到了**另一条脱线支路的起点** → 说明上一条支路已经走到画布上的「结束」了。
+       *
+       * 必须停：flow 里几条支路是**首尾相接**铺在末尾的（见 ApprovalFlowNode.branchStart），
+       * 继续往下就是别人的跳出线 —— 表现是"某组提前跳出轮询"，却把另外几条跳出线
+       * 各自接的提醒环 / 审批环节也执行了一遍（实测单号 1792496009092：一个提醒连发三条）。
+       *
+       * `i === start` 不算：那是**跳转**落到了这条支路的开头（exitTo / loopBackTo），
+       * 正是要从这里往下走。
+       */
+      if (i > start && node.branchStart) {
+        done = true
+        markEnd(
+          'finished',
+          '按「提前跳出」的支路走到结束节点，流程结束',
+          '这一段在画布上是接到「结束」的；后面几条支路属于别的跳出线，不参与本次流转',
+        )
+        return true
+      }
       /*
        * 「数据查询」节点必须在**建单期**展开掉（见 utils/approvalProbe 的 expandProbes）。
        * 走到这里说明单据数据不完整 —— 直接抛错。

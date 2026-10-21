@@ -33,9 +33,11 @@ export interface NotifySendResult {
  * 出现在 after 里、又不在 before 里的提醒环，就是这一轮刚到达的。
  *
  * ## 两条刻意的口径
- *  1. **已在链上不重发**：驳回重审再次走回同一个提醒环时不会重发。
- *     靠 `before` 集合天然实现（第一次到达时就进 before 了）。
- *     这是"不骚扰"优先的选择；若业务要求"每次到达都提醒"，把这条判断去掉即可。
+ *  1. **已在链上不重发**：驳回重审、上一级回退、跳出轮询后又绕回同一条提醒线时，
+ *     同一个提醒环不会重发（见 reachedBefore）—— 一个提醒环节只提醒一次。
+ *     ⚠️ 这条**不能**只看 arrivedFrom 的公共前缀：那种"绕回来"的环节位置是新的，
+ *     按位置会被当成新到达，同一个提醒环于是每绕一圈发一条（实测单号 1792496009092）。
+ *     这是"不骚扰"优先的选择；若业务要求"每次到达都提醒"，把 reachedBefore 那道判断去掉即可。
  *  2. **发送失败只收集、不抛**：调用方是在审批**已经写库之后**才发通知的，
  *     一条消息发不出去绝不能把审批回滚 —— 那会让用户以为没提交成功而重复提交。
  *
@@ -55,14 +57,19 @@ export interface NotifySendResult {
  * 两条都走同一套"认收件人 → 过白名单 → 发"的口径（见下面的 deliver）；
  * 测试期则由 NOTIFY-TEST-GATE 统一**改发**给指定的人（见 utils/notifyGate）。
  *
- * **连排的提醒环只算一次到达（本轮的核心口径）**：
- * 「飞书提醒」环是"到达即穿过"的（见 types/approval 的 pushNotify），一次推进里链路会把
- * **连着的几个提醒环**从头穿到尾 —— 模板里很常见（实测单号 1792493682581：审批办完后
- * 链路里一次多出「提醒14 / 提醒15 / 提醒3」三环，同一个人连收三条）。
- * 这三环并不是三次到达，而是**同一个事件的三个环**，所以：
+ * **连排的提醒环只算一次到达（安全网）**：
+ * 「飞书提醒」环是"到达即穿过"的（见 types/approval 的 pushNotify），
+ * 模板里确实会连排几个提醒环（"先提醒 A 再提醒 B"），一次推进会把它们从头穿到尾。所以：
  *   · **同一个人本轮只收一条提醒环消息**（见 deliver 的 `dedupe`）：第一环发给他之后，
  *     后面几环只要还是发给同一个人，就直接跳过（不静默：`console.info` 会打出来）；
  *   · 换个人**不合并** —— 提醒对象各不相同的那几条，该谁收还是谁收。
+ *
+ * ⚠️ 但这只是**安全网**，不是"多个提醒环"的根因解释：实测单号 1792496009092 / 1792547162214
+ * 里连着的「提醒14 / 提醒15 / 提醒3」并不是主路径上排着的三环，而是**三条「提前跳出」支路
+ * 各自的终点**（画布上三条跳出线分别接到三个提醒节点）。它们之所以被连着执行，是因为
+ * graphToFlowFrom 把几条支路首尾相接地铺在 flow 末尾、运行期顺着数组走了过去 ——
+ * 真正的修法在 types/approval 的 `branchStart`（支路分段，顺序推进到下一段就停），
+ * 那之后这里的三环不会再"连排出现"。去重留着兜底：万一模板真的连排了两个提醒环。
  *
  * 提醒环与审批环节的通知**不互相去重**：「提醒」和「待审批」是两件事，
  * 同一个人既被提醒又被要求办理时，两条都该收到。
@@ -87,6 +94,19 @@ export async function sendArrivedNotifies (opts: {
    */
   const from = arrivedFrom(opts.before, opts.after)
   const ctx = opts.context ?? {}
+
+  /*
+   * 推进前**已经到达过**的环节 id（文件头第 1 条口径「已在链上不重发」的落点）。
+   *
+   * ⚠️ 为什么只靠 `from`（公共前缀）不够：「飞书提醒」环是**到达即穿过**的，
+   * 回退重审 / 上一级回退 / 跳出轮询后又绕回同一条提醒线，都会让它出现在 after 的
+   * **新那一段**里 —— 位置是新的，但它并不是"新到达的环节"，而是老路又走了一遍。
+   * 只按位置判断，同一个提醒环就会每绕一圈发一条（实测单号 1792496009092：回退重审后
+   * 又走回同一个提醒环，同一个人连收两条）。
+   *
+   * 审批环节**不用**这条：驳回回来的人确实又需要办一次，待审批通知必须照发。
+   */
+  const reachedBefore = new Set(opts.before)
 
   /*
    * 本轮**已经收到过提醒环消息**的人（按 `receive_id`：open_id 优先，缺了才用邮箱）。
@@ -146,7 +166,13 @@ export async function sendArrivedNotifies (opts: {
      * （口径见 utils/notifyGate："测试期能看见每一条消息"）。
      */
     const receivers = dedupe ? targets.filter(t => !ringSentInRound.has(t.receive_id)) : targets
-    if (dedupe) {
+    /*
+     * 只有"本来有收件人、但本轮都已经收过"才在这里收口；
+     * `targets` 为空（这一环没配提醒对象 / 认不出人）不能走到这里 ——
+     * 否则会以"已收到过提醒"的名义静默跳过，真实的"没配人"就查不出来了
+     * （下面那段"没有可发送的对象"才是它该报的话；测试期也才轮得到闸门改发）。
+     */
+    if (dedupe && targets.length > 0) {
       if (receivers.length === 0) {
         // 不静默：模板里连排了几个提醒环时，日志要能看出"为什么某某只收到一条"
         console.info(`[notifySteps] 「${title}」的提醒对象本轮已收到过提醒，这一环不再发`)
@@ -246,6 +272,17 @@ export async function sendArrivedNotifies (opts: {
     /* ① 「飞书提醒」环：文案是模板里配的那一段 */
     const info = notifySteps[stepId]
     if (info) {
+      /*
+       * 这一环在**推进前**就已经到达过 → 本次是"绕回来又走一遍"，不是新到达（见 reachedBefore）。
+       * 只记一条 skipped 并跳过：用户要的是"这个提醒环节只提醒一次"，
+       * 而不是"每被流程经过一次就提醒一次"。
+       */
+      if (reachedBefore.has(stepId)) {
+        const name = renderNotifyText(info.name || '飞书提醒', ctx)
+        out.skipped.push(`「${name}」这一环在本单里已经到达过，本次不再重复提醒`)
+        console.info(`[notifySteps] 「${name}」在推进前的链路里已经出现过（回退 / 绕回），本次不重发`)
+        continue
+      }
       // 环节名与文案都支持 {{字段}} 插值。注意：时间线上显示的仍是**原始**环节名，
       // 这里只影响发出去的消息 —— 时间线是静态快照，不该随业务数据变。
       const title = renderNotifyText(info.name || '飞书提醒', ctx)
@@ -299,19 +336,44 @@ interface NotifyTarget {
  * 老单据的成员（那时快照里没存 open_id）才退回用邮箱。
  *
  * 两种都没有的人才发不出去，会被记进 `failed`（不静默丢掉）。
+ *
+ * ⚠️ **同一个人只留一条**：模板里的「提醒对象」可以多选，动态负责人也可能解析出
+ * 多位负责人，同一个人因此很容易在成员列表里出现好几次（比如几个组共用一个负责人）。
+ * 不去重的话，一个提醒环节就会给他连发好几条一模一样的消息 ——
+ * 现象正是"只接了一个飞书提醒环节，却收到了三次提醒"（实测单号 1792496009092）。
+ * 去重按 open_id（缺了按邮箱）算，与本文件上方"一个人本轮只收一条"的口径一致。
  */
 function notifyTargets (members?: ApprovalChainItem[]): NotifyTarget[] {
   const out: NotifyTarget[] = []
+  const seen = new Set<string>()
   for (const m of members ?? []) {
     const openId = String(m.open_id ?? '').trim()
-    if (openId) {
-      out.push({ member: m, receive_id: openId, receive_id_type: 'open_id' })
+    const email = String(m.email ?? '').trim().toLowerCase()
+    const receive_id = openId || email
+    // 两种 id 都没有的人才发不出去，交给上层记 failed
+    if (!receive_id) {
       continue
     }
-    const email = String(m.email ?? '').trim()
-    if (email) {
-      out.push({ member: m, receive_id: email, receive_id_type: 'email' })
+    /*
+     * 键取"人"而不是"本次用的 id"：同一个人在快照里可能一条带 open_id、一条只有邮箱，
+     * 只按发消息用的 id 去重会漏掉这种重复（两条 id 长得不一样，但收件人是同一个人）。
+     * 所以 open_id 与邮箱**各记一个键**，命中任意一个都算同一个人。
+     */
+    const personKeys = [
+      openId ? `open:${openId}` : '',
+      email ? `mail:${email}` : '',
+    ].filter(Boolean)
+    if (personKeys.some(k => seen.has(k))) {
+      continue
     }
+    for (const k of personKeys) {
+      seen.add(k)
+    }
+    out.push({
+      member: m,
+      receive_id,
+      receive_id_type: openId ? 'open_id' : 'email',
+    })
   }
   return out
 }

@@ -1,15 +1,40 @@
 <template>
   <v-container class="h-[calc(100vh-32px)] bg-app d-flex" fluid>
     <v-sheet class="model-sheet card-border p-4" rounded="15">
-      <div class="d-flex align-center justify-space-between">
-        <div class="block-title">审批模板</div>
+      <div class="d-flex align-center justify-space-between flex-wrap ga-2">
+        <v-tabs v-model="topTab" class="top-tabs" density="compact" :hide-slider="true">
+          <v-tab class="text-none" value="template">
+            <v-icon class="mr-2" size="16">mdi-file-document-multiple-outline</v-icon>
+            <span class="text-[13px]">审批模板</span>
+            <span class="sheet-tab-count">{{ chians.length }}</span>
+          </v-tab>
+
+          <v-tab class="text-none" value="type">
+            <v-icon class="mr-2" size="16">mdi-tag-multiple-outline</v-icon>
+            <span class="text-[13px]">审批类型</span>
+            <span class="sheet-tab-count">{{ typeRows.length }}</span>
+          </v-tab>
+        </v-tabs>
 
         <div class="d-flex align-center ga-2">
-          <v-btn class="text-none border border-dashed" prepend-icon="mdi-tag-multiple-outline" variant="flat"
-            @click="goApprovalTypes">审批类型</v-btn>
+          <template v-if="topTab === 'template'">
+            <v-btn class="me-2 text-none" color="primary" prepend-icon="mdi-plus" variant="flat"
+              @click="createStream">新模板</v-btn>
+          </template>
 
-          <v-btn class="me-2 text-none" color="primary" prepend-icon="mdi-plus" variant="flat"
-            @click="createStream">新模板</v-btn>
+          <!--
+            审批类型的作用域：默认对所有模板生效，也可以只看/只改某一张模板上的覆盖
+            （层级口径见 utils/approvalTypes：内置默认 → 全局 → 模板级）。
+          -->
+          <template v-else>
+            <!-- 尺寸与字号走全局 .filter-select / .filter-menu（28px / 12px，与其它筛选下拉同一档） -->
+            <v-select v-model="scopeKey" class="scope-select filter-select" density="compact" hide-details
+              item-title="title" item-value="value" :items="scopeItems"
+              :menu-props="{ contentClass: 'filter-menu' }" variant="outlined" />
+            <v-chip class="me-2" color="primary" label size="small" :variant="typeCustom ? 'tonal' : 'text'">
+              {{ typeCustom ? '已自定义' : '默认' }}
+            </v-chip>
+          </template>
         </div>
       </div>
 
@@ -20,8 +45,8 @@
         剩下的位置留给底部页签，页签就能一直贴在窗口最下方（见 model-sheet 的说明）。
       -->
       <div class="model-sheet-scroll">
-        <v-data-table class="text-body-small model-table" density="compact" :headers="headers" hide-default-footer hover
-          item-value="name" :items="rows" :loading="loading">
+        <v-data-table v-if="topTab === 'template'" class="text-body-small model-table" density="compact" :headers="headers"
+          hide-default-footer hover item-value="name" :items="rows" :loading="loading">
           <!-- 各页签的空态分开说：副本页签空 = 还没复制过，正本页签空才是真没建过模板 -->
           <template #no-data>
             <div class="py-6 text-center text-medium-emphasis">
@@ -77,8 +102,51 @@
             </tr>
           </template>
         </v-data-table>
+        <v-data-table v-else class="text-body-small model-table" density="compact" :headers="typeHeaders"
+          hide-default-footer hover item-value="code" :items="typeRows" :loading="typeLoading">
+          <template #item="{ item }">
+            <tr class="text-no-wrap">
+              <td>
+                <div class="d-flex align-center ga-2">
+                  <span class="font-weight-medium">{{ item.name }}</span>
+                  <code class="type-code">{{ item.code }}</code>
+                  <v-icon v-if="item.overridden" color="primary" size="12" title="这一层已自定义">mdi-pencil-circle</v-icon>
+                </div>
+              </td>
+
+              <td>
+                <v-chip label size="x-small" variant="tonal">{{ item.category }}</v-chip>
+              </td>
+
+              <td>
+                <strong :class="item.enabled ? 'text-success' : 'text-error'">{{ item.enabled ? '启用' : '停用' }}</strong>
+              </td>
+
+              <td style="min-width: 320px">
+                <span class="text-[12px]">{{ item.summary }}</span>
+              </td>
+
+              <td style="min-width: 180px">
+                <span class="text-[11px] text-medium-emphasis">{{ item.note || '—' }}</span>
+              </td>
+
+              <td class="text-start">
+                <v-icon-btn icon="mdi-pencil" size="24" title="编辑这一类的填写项" variant="plain"
+                  @click="goTypeEdit(item)">
+                  <v-icon size="16" />
+                </v-icon-btn>
+
+                <!-- 只有当前作用域这一层真的覆盖过才有「恢复默认」：否则它本来就跟着上一层走 -->
+                <v-icon-btn v-if="item.overridden" icon="mdi-restore" size="24" title="恢复默认（删掉这一层的覆盖）"
+                  variant="plain" @click="resetType(item)">
+                  <v-icon size="16" />
+                </v-icon-btn>
+              </td>
+            </tr>
+          </template>
+        </v-data-table>
       </div>
-      <div class="sheet-tab-bar">
+      <div v-if="topTab === 'template'" class="sheet-tab-bar">
         <div v-if="tab === 'copy' && rows.length" class="mb-1 text-[12px] text-medium-emphasis">
           副本是改到一半的草稿：建单不会用到它们（建单按「组别 + 模板」精确查名字）。
           改好名字、点行尾 ↑ 移入正本即可。
@@ -186,14 +254,28 @@
 
 <script lang="ts" setup>
 import type { ApprovalModal } from '@/types/approval'
+import type { ApprovalTypeOverrideMap } from '@/utils/approvalTypes'
+import type { ApprovalTypeScope } from '@/utils/approvalTypeStore'
 import FlowMiniMap from '@/components/FlowMiniMap.vue'
 import FlowPreview from '@/components/FlowPreview.vue'
-import { addApproval, deleteApproval, findTemplatesUsing, getApproval, updateApprovalModel } from '@/utils/collection'
+import { addApproval, deleteApproval, findTemplatesUsing, getApproval, getApprovalOptions, updateApprovalModel } from '@/utils/collection'
+// 「审批类型」页签：结论码清单与"选中后要填什么"的解析口径，与设置页共用同一份（见 utils/approvalTypes）
+import { resolveTypeTemplates, typeCategoryOf, typeFieldsSummaryOf } from '@/utils/approvalTypes'
+import { approvalTypeWriteHint, loadApprovalTypeOverrides, saveApprovalTypeOverride } from '@/utils/approvalTypeStore'
 // 正本 / 副本的名规约（判定、去标记、生成）：只此一处，别在本页再拼字符串
 import { copyNameOf, isTemplateCopy, primeNameOf } from '@/utils/templateCopy'
 import { formatDate } from '@/utils/utils'
 const router = useRouter()
 const chians = ref<ApprovalModal[]>([])
+
+/**
+ * 顶层页签：审批模板 / 审批类型。
+ *
+ * 为什么不拆两个页面：「审批类型」的作用域就是模板（默认全局 / 只覆盖某一张），
+ * 拆开之后每次都要在两个页面之间带着 id 跳来跳去；收在同一张卡片里，
+ * 切页签不会丢数据，也不用等页面重挂载。
+ */
+const topTab = ref<'template' | 'type'>('template')
 
 /**
  * 模板取数中（挂到表格的 `:loading` 上）。
@@ -228,12 +310,6 @@ function createStream() {
     path: '/createStream',
   })
 }
-/** 去「审批类型」设置页：维护"每种审批结论要填什么"（见 utils/approvalTypes 的文件头） */
-function goApprovalTypes() {
-  router.push({
-    path: '/approvalTypeSetting',
-  })
-}
 const status = ref(false)
 const streamName = ref<string>('')
 const streamNameRule = (v: string) => !!v || '审批流名称不能为空'
@@ -255,6 +331,170 @@ const headers = [
   { title: '创建时间', key: 'created' },
   { title: '操作', key: 'action', align: 'start' },
 ] as const
+
+/* ==================== 审批类型（第二页签） ==================== */
+
+/**
+ * 一行「审批类型」。列与审批模板那张表同一个形态：名称 / 状态 / 内容 / 操作。
+ *
+ * ⚠️ 这里**不存**字段本身：结论码清单与"没配就沿用上一层"的解析口径都在
+ * utils/approvalTypes 里（内置默认 → 全局 → 模板），本页只负责按作用域铺成表格。
+ */
+interface ApprovalTypeRow {
+  /** 结论码（= APPROVAL_RESULTS 的 value，也是选项树叶子的 link） */
+  code: string
+  name: string
+  /** 用途分组（常规 / 接收 / 弃置…，见 utils/approvalTypes 的 typeCategoryOf） */
+  category: string
+  enabled: boolean
+  /** 当前作用域**这一层**有没有覆盖：有才给「恢复默认」 */
+  overridden: boolean
+  /** 办理提示（给办理人的一句话，可为空） */
+  note: string
+  /** 选中这个结论后要填的东西（字段文案串，见 typeFieldsSummaryOf） */
+  summary: string
+}
+
+/** 模板列表：作用域下拉的候选（模板级覆盖就挂在 app_chain 的记录 id 上） */
+const templates = ref<{ id: string, name: string }[]>([])
+/** 作用域：'global' = 所有模板生效；否则是某张模板的 id */
+const scopeKey = ref('global')
+const typeLoading = ref(false)
+/** 全局层的覆盖：解析任何一层都要垫在最底下 */
+const globalTypeOverrides = ref<ApprovalTypeOverrideMap>({})
+/** 当前作用域的覆盖（「已自定义」标记与「恢复默认」都看它） */
+const scopeTypeOverrides = ref<ApprovalTypeOverrideMap>({})
+/** 当前作用域这一层是否有任何覆盖 */
+const typeCustom = ref(false)
+/** 类型数据读过了没有：切到页签时才读，打开页面不必多发两个请求 */
+const typeLoaded = ref(false)
+/**
+ * 模板清单的版本号：每次重读单据列表 +1（见 getDatas）。
+ *
+ * 「审批类型」页签据此判断手上的作用域下拉是不是过期了 —— 在模板页签里
+ * 新建 / 复制 / 删除 / 移入正本之后切过去，下拉里必须能看到最新的那张模板。
+ */
+const templatesVersion = ref(0)
+/** 上次读类型时用的是哪一版模板清单 */
+let typesTemplatesVersion = -1
+
+const scopeItems = computed(() => [
+  { value: 'global', title: '默认（所有审批模板）' },
+  ...templates.value.map(t => ({ value: t.id, title: t.name || '(未命名模板)' })),
+])
+
+const typeScope = computed<ApprovalTypeScope>(() => (scopeKey.value === 'global'
+  ? { kind: 'global' }
+  : { kind: 'template', templateId: scopeKey.value }))
+
+/** 解析顺序：全局层永远在前，模板层叠在它上面（见 utils/approvalTypes 的文件头） */
+const typeLayers = computed(() => (typeScope.value.kind === 'global'
+  ? [globalTypeOverrides.value]
+  : [globalTypeOverrides.value, scopeTypeOverrides.value]))
+
+const typeRows = computed<ApprovalTypeRow[]>(() => resolveTypeTemplates(typeLayers.value).map(t => ({
+  code: t.code,
+  name: t.name,
+  category: typeCategoryOf(t.code),
+  enabled: t.enabled !== false,
+  overridden: scopeTypeOverrides.value[t.code] !== undefined,
+  note: String(t.note ?? ''),
+  summary: typeFieldsSummaryOf(t.fields),
+})))
+
+const typeHeaders = [
+  { title: '名称', key: 'name' },
+  { title: '分组', key: 'category' },
+  { title: '状态', key: 'enabled' },
+  { title: '需要填写', key: 'summary' },
+  { title: '办理提示', key: 'note' },
+  { title: '操作', key: 'action', align: 'start' },
+] as const
+
+/**
+ * 读当前作用域的审批类型。
+ *
+ * 全局层与作用域层是**两次读**（全局 = 'global'，模板 = 该模板 id），
+ * 作用域本来就是全局时只读一次 —— 别为了少写一个分支去读两遍同一层。
+ */
+async function loadTypes() {
+  typeLoading.value = true
+  try {
+    // 每次都重读模板清单：在「审批模板」页签里增删过之后，作用域下拉必须跟着变
+    // （全量只有几十条，切页签 / 切作用域各读一次没有负担）
+    templates.value = await getApprovalOptions()
+    /*
+     * 作用域指向一张**已经被删掉**的模板：落回全局（否则下拉显示空白、
+     * 改出来的覆盖落在谁都不看的一层上）。改完 `scopeKey` 会触发 watch 再读一次。
+     */
+    if (scopeKey.value !== 'global' && !templates.value.some(t => t.id === scopeKey.value)) {
+      scopeKey.value = 'global'
+      return
+    }
+    const globalRow = await loadApprovalTypeOverrides({ kind: 'global' })
+    globalTypeOverrides.value = globalRow.overrides
+    if (typeScope.value.kind === 'global') {
+      scopeTypeOverrides.value = globalRow.overrides
+      typeCustom.value = globalRow.custom
+    } else {
+      const row = await loadApprovalTypeOverrides(typeScope.value)
+      scopeTypeOverrides.value = row.overrides
+      typeCustom.value = row.custom
+    }
+    typeLoaded.value = true
+    typesTemplatesVersion = templatesVersion.value
+  } catch (error) {
+    console.error('[approvalModel] 读取审批类型失败:', error)
+    notify('审批类型读取失败，请稍后重试', 'error')
+  } finally {
+    typeLoading.value = false
+  }
+}
+
+/**
+ * 编辑某一类结论：跳「审批类型」设置页，并把**当前作用域 + 结论码**带过去，
+ * 落地就直接停在这一条上（见 approvalTypeSetting 里对 query 的读取）。
+ *
+ * 为什么不把字段编排也搬进本页：那是"一条结论一套表单 + 实时预览"的深编辑，
+ * 表格里塞不下；而且它本来就只需要服务一条结论，放在独立页面里更好用。
+ */
+function goTypeEdit(row: ApprovalTypeRow) {
+  router.push({
+    path: '/approvalTypeSetting',
+    query: {
+      code: row.code,
+      ...(scopeKey.value === 'global' ? {} : { scope: scopeKey.value }),
+    },
+  })
+}
+
+/** 恢复默认 = 删掉**当前层**对这一条结论的覆盖（回到上一层，不是删数据） */
+async function resetType(row: ApprovalTypeRow) {
+  try {
+    await saveApprovalTypeOverride(typeScope.value, row.code, null)
+    await loadTypes()
+    notify(`「${row.name}」已恢复默认`, 'success')
+  } catch (error) {
+    console.error('[approvalModel] 恢复审批类型默认失败:', error)
+    notify(approvalTypeWriteHint(error), 'error')
+  }
+}
+
+watch(topTab, value => {
+  if (value !== 'type') {
+    return
+  }
+  // 第一次进类型页签才读；之后来回切不重复请求 —— 但模板清单变过（见 templatesVersion）就得重读
+  if (!typeLoaded.value || typesTemplatesVersion !== templatesVersion.value) {
+    void loadTypes()
+  }
+})
+
+watch(scopeKey, () => {
+  if (topTab.value === 'type') {
+    void loadTypes()
+  }
+})
 
 // ===== 流程预览 =====
 const previewOpen = ref(false)
@@ -309,6 +549,8 @@ async function getDatas() {
   try {
     const res = await getApproval()
     chians.value = res
+    // 清单换了版本：「审批类型」页签的作用域下拉与「已自定义」判定都要跟着重算（见 templatesVersion）
+    templatesVersion.value++
     console.log(res)
   } finally {
     loading.value = false
@@ -407,6 +649,92 @@ onMounted(() => {
 .model-table :deep(td),
 .model-table :deep(th) {
   height: 56px;
+}
+
+/*
+ * 顶层页签（审批模板 / 审批类型）：**包裹式按钮**（按设计稿的形态）。
+ *
+ *   · 整组不套外壳：底就是卡片本身，只在两个页签之间留 6px 间距；
+ *   · 选中的那个自己是一块**淡蓝圆角按钮**（主色 10% 填充 + 主色文字与图标）；
+ *   · 未选中是透明底、常规灰字，hover 才浮出一点点底色。
+ *
+ * 与底部 正本/副本（Excel 表格式页签）刻意区分开：
+ * 上面这组切的是"整块视图"，不是同一张表里的两页数据。
+ *
+ * `width: fit-content` 必须写：v-tabs 默认 flex 拉伸，不收紧的话这组按钮会被拉满整行。
+ */
+.top-tabs {
+  flex: 0 0 auto;
+  width: fit-content;
+  padding: 0;
+}
+
+.top-tabs :deep(.v-slide-group__content) {
+  gap: 6px;
+}
+
+.top-tabs :deep(.v-tab) {
+  min-width: 0;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 10px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: background-color 0.18s, color 0.18s;
+}
+
+/* 图标跟着文字走：未选中灰、选中蓝，不用逐个传 color */
+.top-tabs :deep(.v-tab .v-icon) {
+  color: inherit;
+}
+
+.top-tabs :deep(.v-tab:hover) {
+  background: rgba(var(--v-theme-on-surface), 0.05);
+}
+
+/* 选中的那一个：淡蓝圆角块（也压住 hover，免得鼠标划过时被冲淡） */
+.top-tabs :deep(.v-tab--selected),
+.top-tabs :deep(.v-tab--selected:hover) {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 600;
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+
+/* 暗色档：同一个 10% 主色在深底上太淡，提到 22% 才有"被选中"的分量 */
+.v-theme--dark .top-tabs :deep(.v-tab--selected),
+.v-theme--dark .top-tabs :deep(.v-tab--selected:hover) {
+  background: rgba(var(--v-theme-primary), 0.22);
+}
+
+/* 不用 Vuetify 的下划线滑块：选中态由上面那块填充表达 */
+.top-tabs :deep(.v-tabs-slider) {
+  display: none;
+}
+
+/* 选中项里的条数徽标跟着主色走（未选中仍是主题灰） */
+.top-tabs :deep(.v-tab--selected) .sheet-tab-count {
+  background: rgba(var(--v-theme-primary), 0.14);
+}
+
+/*
+ * 审批类型的作用域下拉：只定宽。
+ * 高度与字号不在这里写 —— 交给全局 .filter-select（28px / 12px，与页面里其它筛选下拉同一档），
+ * 展开的选项列表交给 .filter-menu（见 styles/main.scss），别在本页再抄一套数字。
+ * 190px 刚好放得下最长那项「默认（所有审批模板）」，再窄就会被省略号吃掉。
+ */
+.scope-select {
+  width: 190px;
+}
+
+/* 结论码：与「审批类型」设置页的 .field-key 同一套配色，读的人一眼知道是同一东西 */
+.type-code {
+  padding: 0 4px;
+  font-size: 11px;
+  color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.08);
+  border-radius: 4px;
 }
 
 /*

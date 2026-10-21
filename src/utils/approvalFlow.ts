@@ -385,6 +385,15 @@ export function graphToFlowFrom (
   let extraFrom = ''
 
   /**
+   * 每条**脱线支路**在 `flow` 里的起始下标（见 end 分支里"接着走落点"那段）。
+   *
+   * 铺完支路后会给这些位置的节点打上 `branchStart`（见 ApprovalFlowNode.branchStart）：
+   * 运行期顺序推进到它就停，不会顺着数组滑进**下一条**支路 ——
+   * 否则"某组提前跳出 → 提醒一下 → 结束"会接着把另外几条跳出线的提醒也发一遍。
+   */
+  const detachedStarts: number[] = []
+
+  /**
      * 给错误补上「是哪个环节出错」。
      *
      * 校验失败的分支有十几处（出线数不对 / 分支没命名 / 分支重名 / 条件没填全 / 只能有一条主线…），
@@ -1231,6 +1240,8 @@ export function graphToFlowFrom (
       const pending = [...jumpTargetIds].filter(id => !visited.has(id) && nodesById.has(id))
       if (pending.length > 0) {
         extraFrom = String((nodesById.get(pending[0])?.data as ApprovalNodeData)?.title || '未命名环节')
+        // 记下这条支路的起点：铺完所有支路后统一打 branchStart（见 detachedStarts 的说明）
+        detachedStarts.push(flow.length)
         cur = pending[0]
         continue
       }
@@ -1301,6 +1312,19 @@ export function graphToFlowFrom (
         const err = findBadRotation(spec)
         if (err) {
           return { flow: [], error: err, errorNodeId: id }
+        }
+      }
+      /*
+       * 支路分段的最后一笔：给每条脱线支路的**第一个节点**打上 `branchStart`。
+       *
+       * 运行期靠它知道"这条支路到头了"（见 types/approval 的 ApprovalFlowNode.branchStart
+       * 与 rebuildChain 的 walkFlow）—— 数组里几条支路是首尾相接的，
+       * 没有这个标记就会从一条支路直接滑进下一条，把别人的提醒环节也执行一遍。
+       */
+      for (const idx of detachedStarts) {
+        const first = flow[idx]
+        if (first) {
+          first.branchStart = true
         }
       }
       return { flow }

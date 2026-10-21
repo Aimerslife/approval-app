@@ -423,6 +423,15 @@ export function hasTemplateRef (flow: ApprovalFlow | undefined | null): boolean 
 function prefixFlow (nodes: any[], prefix: string): any[] {
   const prefixNode = (n: any): any => {
     const out: any = { ...n, id: prefix + String(n.id ?? '') }
+    /*
+     * 源模板 flow 末尾的「脱线支路分段标记」**不带进来**（见 types/approval 的 branchStart）。
+     *
+     * 那个标记成立的前提是"支路铺在**整条 flow 的末尾**"；搬进本流程后，这一段后面
+     * 还接着**本模板自己的**下游环节 —— 标记留着会让运行期在段尾就停住，
+     * 把本模板后面的环节整段吞掉。宁可让引用段内部恢复成"顺序穿过去"的老行为，
+     * 也不能吃掉调用方的后续流程（拆段重排是另一件事，风险比这个大得多）。
+     */
+    delete out.branchStart
     if (out.type === 'branch' || out.type === 'probe') {
       out.branches = (n.branches ?? []).map((b: any) => prefixBranch(b))
     }

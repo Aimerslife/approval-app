@@ -483,8 +483,18 @@ const notifyItem = computed(() => props.data.find(i => i.type === 'notify'))
 /**
  * 提醒对象（这一环会通知谁）。
  * 建单期只把**姓名**快照进 chain（见 pushNotify），所以这里只有名字、没有头像/部门。
+ *
+ * 按姓名**去重**：模板的「提醒对象」可以多选，动态负责人也可能解析出多位负责人，
+ * 同一个人很容易在成员列表里出现好几次（几个组共用一个负责人时尤其明显）。
+ * 时间线上把同一个人列三遍，会让人误以为这一环真的会发三条提醒 ——
+ * 发送侧也是"一个人只收一条"（见 utils/notifySteps 的 notifyTargets），两处口径保持一致。
  */
-const notifyTo = computed(() => notifyItem.value?.notify?.to ?? [])
+const notifyTo = computed(() => {
+  const names = (notifyItem.value?.notify?.to ?? [])
+    .map(n => String(n ?? '').trim())
+    .filter(Boolean)
+  return [...new Set(names)]
+})
 
 
 const initials = ref('')
