@@ -33,6 +33,7 @@
     "@vueuse/core": "^14.4.0",
     "@vxe-ui/core": "^4.4.20",
     "apexcharts": "^7.3.0",
+    "md-editor-v3": "^7.1.0",
     "dayjs": "^1.11.21",
     "pinia": "^3.0.4",
     "pinyin": "^4.0.0",

@@ -281,8 +281,20 @@
                       </div>
 
                       <div v-else class="panel-row ml-4">
-                        <input v-model="subCondOf(sub).field" class="panel-input" list="flow-field-options"
+                        <!-- 左值：普通情况是字段下拉；配了运算时显示表达式（点铅笔改，见 openMath） -->
+                        <div v-if="subCondOf(sub).lhsExpr" class="cond-expr" :title="subCondOf(sub).lhsExpr"
+                          @click="openMath(subCondOf(sub))">
+                          {{ subCondOf(sub).lhsExpr }}
+                        </div>
+                        <input v-else v-model="subCondOf(sub).field" class="panel-input" list="flow-field-options"
                           placeholder="字段 是否属于灯具" style="width: 120px">
+
+                        <!-- 运算：把几个字段加减乘除后再比较（结论码不参与，见 opsFor 的说明） -->
+                        <v-icon-btn v-if="!isResultField(subCondOf(sub).field)" class="ml--2" size="x-small"
+                          title="编辑运算：用几个字段做加减乘除再比较" variant="text"
+                          :color="subCondOf(sub).lhsExpr ? 'primary' : undefined" @click="openMath(subCondOf(sub))">
+                          <v-icon size="12">mdi-pencil</v-icon>
+                        </v-icon-btn>
 
                         <select v-model="subCondOf(sub).op" class="panel-input" style="width: 88px"
                           @change="onOpChange(subCondOf(sub), $event)">
@@ -361,8 +373,20 @@
 
                   <!-- 普通条件：单行 -->
                   <div v-else class="panel-row">
-                    <input v-model="condOf(item).field" class="panel-input" list="flow-field-options"
+                    <!-- 左值：普通情况是字段下拉；配了运算时显示表达式（点铅笔改，见 openMath） -->
+                    <div v-if="condOf(item).lhsExpr" class="cond-expr" :title="condOf(item).lhsExpr"
+                      @click="openMath(condOf(item))">
+                      {{ condOf(item).lhsExpr }}
+                    </div>
+                    <input v-else v-model="condOf(item).field" class="panel-input" list="flow-field-options"
                       placeholder="字段 amount" style="width: 108px">
+
+                    <!-- 运算：把几个字段加减乘除后再比较（结论码不参与，见 opsFor 的说明） -->
+                    <v-icon-btn v-if="!isResultField(condOf(item).field)" class="ml--2" size="x-small"
+                      title="编辑运算：用几个字段做加减乘除再比较" variant="text"
+                      :color="condOf(item).lhsExpr ? 'primary' : undefined" @click="openMath(condOf(item))">
+                      <v-icon size="12">mdi-pencil</v-icon>
+                    </v-icon-btn>
 
                     <select v-model="condOf(item).op" class="panel-input" style="width: 88px"
                       @change="onOpChange(condOf(item), $event)">
@@ -653,6 +677,71 @@
       </v-card>
     </v-dialog>
 
+    <!--
+      条件的「左值运算」：把"某个字段 vs 值"升级成"几个字段算出来 vs 值"。
+      语法与求值口径见 utils/conditionMath；这里只负责收集表达式 + 当场做语法检查。
+    -->
+    <v-dialog v-model="mathOpen" max-width="560">
+      <v-card rounded="lg">
+        <v-card-title class="d-flex align-center ga-2 text-[14px]">
+          <v-icon color="primary" size="18">mdi-function-variant</v-icon>
+          <span>左值运算</span>
+          <v-spacer />
+          <v-chip v-if="mathMainField" size="x-small" variant="tonal">主字段：{{ mathMainField }}</v-chip>
+        </v-card-title>
+
+        <v-card-text>
+          <div class="panel-hint mb-2">
+            左边可以不是单个字段，而是几个字段的加减乘除：例如 总库存金额 - 已接收数量。
+            支持 + - * / 与括号；字段取不到值（或语法有误）时这条条件**不命中**。
+          </div>
+
+          <input v-model="mathExpr" class="panel-input math-input" placeholder="总库存金额 - 已接收数量">
+
+          <div class="d-flex flex-wrap ga-1 mt-2">
+            <v-btn v-for="t in MATH_TOKENS" :key="t" density="comfortable" size="x-small" variant="tonal"
+              @click="insertMathToken(t)">
+              {{ t }}
+            </v-btn>
+          </div>
+
+          <div class="mt-2 d-flex flex-wrap ga-1">
+            <v-chip v-for="f in FIELD_OPTIONS" :key="f.value" size="x-small" variant="outlined"
+              @click="insertMathToken(f.value)">
+              {{ f.label }}
+            </v-chip>
+          </div>
+
+          <v-alert v-if="mathCheck.error" class="mt-3" density="compact" type="error" variant="tonal">
+            {{ mathCheck.error }}
+          </v-alert>
+
+          <v-alert v-else-if="mathUnknown.length > 0" class="mt-3" density="compact" type="warning" variant="tonal">
+            这些名字不在字段候选里：{{ mathUnknown.join('、') }}。仍可保存（取值时按名字从上下文取），
+            但请确认没有拼错 —— 拼错的名字永远取不到值，这条条件会一直不命中。
+          </v-alert>
+
+          <div v-else-if="mathCheck.fields.length > 0" class="panel-hint mt-2">
+            将读取：{{ mathCheck.fields.join('、') }}
+          </div>
+        </v-card-text>
+
+        <v-card-actions>
+          <v-btn v-if="mathTarget?.lhsExpr" class="text-none" color="error" size="small" variant="text"
+            @click="clearMath">
+            清除运算
+          </v-btn>
+
+          <v-spacer />
+          <v-btn class="text-none" size="small" variant="text" @click="mathOpen = false">取消</v-btn>
+          <v-btn class="text-none" color="primary" :disabled="!!mathCheck.error" size="small" variant="flat"
+            @click="saveMath">
+            保存
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000">
       {{ snackbar.text }}
       <template #actions>
@@ -705,6 +794,8 @@ import { ensureRejectLoopBack, graphToFlowFrom } from '@/utils/approvalFlow'
 import { addApproval, getApprovalOne, getApprovalOptions, loadWarehouses, updateApprovalModel } from '@/utils/collection'
 // 条件字段候选：与卡片内部画布共用同一份（见 utils/conditionFields 的文件头）
 import { CONDITION_FIELD_OPTIONS } from '@/utils/conditionFields'
+// 条件左值的「简单四则运算」：语法检查在这里（求值在 types/approval 的 evalCondition 里）
+import { parseArithmetic } from '@/utils/conditionMath'
 // 「跳出循环 / 轮完走向 / 提前结束轮询」的候选环节：与保存期白名单共用同一份口径
 import { collectExitTargets } from '@/utils/exitTargets'
 // 仓库清单（含"写进条件"的口径：分类 → 子仓库、追加单个）都是纯逻辑，放在 utils/warehouse 里
@@ -1084,6 +1175,101 @@ function onOpChange(c: BranchCondition, e?: Event) {
   }
   // 切到别的比较方式：多值收回单值（保留第一个非空值，而不是直接丢掉）
   collapseConditionValue(c)
+}
+
+/* ==================== 条件的「左值运算」（四则运算） ==================== */
+
+/**
+ * 运算面板里的运算符按钮。
+ *
+ * 只给半角：解析器本身认全角（会在 conditionMath 里折算），但写进模板的也该是半角 ——
+ * 同一条表达式里混着「（）」和「()」以后维护起来很难受。
+ */
+const MATH_TOKENS = ['+', '-', '*', '/', '(', ')'] as const
+
+const mathOpen = ref(false)
+/** 正在编辑运算的那条条件（null = 面板没开） */
+const mathTarget = ref<BranchCondition | null>(null)
+const mathExpr = ref('')
+
+/**
+ * 语法检查（**不取值**）：模板期没有行数据，"字段能不能取到值"要等建单 / 办理时才知道，
+ * 编辑器能查的只有写得对不对 —— 以及有没有把字段名拼错（见 mathUnknown）。
+ */
+const mathCheck = computed(() => parseArithmetic(mathExpr.value))
+
+/** 主字段 = 表达式里的第一个变量（保存时写回 `field`，展示 / 分组等老口径还认它） */
+const mathMainField = computed(() => mathCheck.value.fields[0] ?? '')
+
+/** 表达式里**不在候选清单**里的名字：只提示不拦 —— 上下文里可能有候选表没列的键 */
+const mathUnknown = computed(() =>
+  mathCheck.value.fields.filter(f => !FIELD_OPTIONS.some(o => o.value === f)),
+)
+
+/**
+ * 打开运算面板。
+ * 结论条件（`result`）直接不开：审批结论是**码**不是量，加减乘除对它没有意义
+ * （与 opsFor 只给 result 留「等于」是同一件事的两个面）。
+ */
+function openMath(c: BranchCondition) {
+  if (isResultField(c.field)) {
+    return
+  }
+  mathTarget.value = c
+  mathExpr.value = String(c.lhsExpr ?? '')
+  mathOpen.value = true
+}
+
+/** 点变量 / 运算符按钮：接到末尾（该补空格的地方补上，读起来才像一条式子） */
+function insertMathToken(token: string) {
+  const cur = mathExpr.value.trimEnd()
+  const needSpace = cur.length > 0 && !/[+\-*/(]$/.test(cur)
+  mathExpr.value = `${cur}${needSpace ? ' ' : ''}${token}${token === '(' ? '' : ' '}`
+}
+
+/**
+ * 保存运算。
+ *
+ * 空表达式 = 回到"单个字段 vs 值"（不是保存一个空式子）；
+ * 语法有错时按钮是禁用的，这里再判一次只是兜底。
+ */
+function saveMath() {
+  const c = mathTarget.value
+  if (!c) {
+    return
+  }
+  const expr = mathExpr.value.trim()
+  if (!expr) {
+    clearMath()
+    return
+  }
+  const check = parseArithmetic(expr)
+  if (check.error) {
+    return
+  }
+  c.lhsExpr = expr
+  // 主字段跟着表达式走：这样时间线文案 / 分组 / 老消费方看到的仍是"这条条件在算谁"
+  if (check.fields[0]) {
+    c.field = check.fields[0]
+  }
+  /*
+   * 运算是**数值**语义：「包含」是字符串子串匹配，对算出来的数字没有意义 ——
+   * 引擎那边也会直接判不命中（见 types/approval 的 evalCondition）。
+   * 这里顺手收敛到「大于」，免得配出一条永远不成立的条件。
+   */
+  if (c.op === 'contains') {
+    collapseConditionValue(c)
+    c.op = 'gt'
+  }
+  mathOpen.value = false
+}
+
+/** 清除运算：这条条件回到"单字段 vs 值"（`field` 保留，它本来就是表达式的主字段） */
+function clearMath() {
+  if (mathTarget.value) {
+    delete mathTarget.value.lhsExpr
+  }
+  mathOpen.value = false
 }
 
 /** 多条件组合方式：and = 全部满足，or = 任一满足 */
@@ -2647,6 +2833,35 @@ onMounted(() => {
   border: 1px dashed var(--flow-border-strong);
   border-radius: 8px;
   background: var(--flow-surface-sunken);
+}
+
+/*
+ * 左值的**运算表达式**（占了原来"字段"输入框的位置）：
+ * 用虚线框 + 主色文字标出"这不是单个字段"，点它或点旁边的铅笔都能改。
+ * 与 .panel-input 同高（26px），同一行里不会把别的控件顶歪。
+ */
+.cond-expr {
+  display: flex;
+  flex: none;
+  align-items: center;
+  max-width: 180px;
+  height: 26px;
+  padding: 0 8px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--flow-input-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--flow-input-bg);
+  border: 1px dashed var(--flow-input-focus);
+  border-radius: 6px;
+}
+
+/* 运算面板里的表达式输入：整行宽（面板里的 .panel-input 都是定宽的小控件） */
+.math-input {
+  width: 100%;
+  flex: 1 1 auto;
 }
 
 /* ===== 画布容器 ===== */

@@ -4,6 +4,11 @@
  * 不直接碰解析逻辑（那是建单期的事，见文件头「运行期不查这张表」）。
  */
 import type { ApprovalTypeTemplate } from '@/utils/approvalTypes'
+/*
+ * 条件左值的**四则运算**（`总库存金额 - 已接收数量`）：只依赖纯函数、不 import 任何业务模块，
+ * 所以放在 utils 里被这里 import 不会形成循环。
+ */
+import { evalArithmetic } from '@/utils/conditionMath'
 
 /**
  * 审批环节（ApprovalNode）提交上来的办理数据。
@@ -437,8 +442,20 @@ export function stepMembersOf (
 
 /** 分支命中条件：字段 + 操作符 + 值；branch.condition 为空表示兜底（默认）分支 */
 export interface BranchCondition {
-  /** 参与判断的表单字段 key，如 amount / department */
+  /** 参与判断的表单字段 key，如 amount / department；配了 `lhsExpr` 时它是表达式里的**主变量** */
   field: string
+  /**
+   * 左值的**简单四则运算表达式**（可选，见 utils/conditionMath）：
+   * 写了它就**不再取 `field` 的值**，而是把表达式里引用到的字段算出来再比较 ——
+   * 例如 `总库存金额 - 已接收数量`、`qty * 2`。
+   *
+   * 三条约定：
+   *   1) `field` 仍保留表达式里的**第一个变量**：老的消费方（分组展示 / 文案）还认它，
+   *      表达式本身才是求值依据；
+   *   2) `result`（审批结论）**不允许**配表达式 —— 结论是码不是量，见 opsFor 的说明；
+   *   3) 表达式取不到值（字段缺失 / 除零 / 语法错）按**不命中**处理，与 `@字段` 引用同口径。
+   */
+  lhsExpr?: string
   /** 操作符 */
   op: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains'
   /**
@@ -1372,6 +1389,14 @@ function containsHit (rawStr: string, c: BranchCondition, form: Record<string, u
  *             不传则引用一律取不到 → 按不命中处理（调用方都应显式传入）。
  */
 function evalCondition (c: BranchCondition, raw: unknown, form: Record<string, unknown> = {}): boolean {
+  /*
+   * 左值是**四则运算表达式**（c.lhsExpr，见 utils/conditionMath）：
+   * 此时左值不再是 raw（= form[c.field]），而是表达式算出来的数。
+   * 表达式取不到值 / 除零 / 语法错一律返回 null → 按**不命中**处理
+   * （与 `@字段` 引用取不到值同一口径：不认识的值不能当成成立）。
+   */
+  const exprText = String(c.lhsExpr ?? '').trim()
+  const exprValue = exprText ? evalArithmetic(exprText, form) : null
   if (raw === undefined || raw === null || raw === '') {
     return false
   }
@@ -1401,8 +1426,22 @@ function evalCondition (c: BranchCondition, raw: unknown, form: Record<string, u
      */
     return false
   }
-  const a = Number(typeof raw === 'string' ? raw.replace(/,/g, '').trim() : raw)
+  // 左值：配了表达式就用算出来的数（它是 null 时直接不命中），否则仍按字段值走老的 Number 归一化
+  if (exprText && exprValue === null) {
+    return false
+  }
+  const a = exprText
+    ? (exprValue as number)
+    : Number(typeof raw === 'string' ? raw.replace(/,/g, '').trim() : raw)
   const b = Number(typeof expect === 'string' ? expect.replace(/,/g, '').trim() : expect)
+  /*
+   * 表达式算出来的一定是数字：右侧取不到数字时**没有可比的量**，直接不命中。
+   * 不能让流程退回下面的字符串比较 —— 那会拿 `raw`（= field 那个字段的值）去比，
+   * 等于把表达式悄悄忽略掉（最坏的情况：看着配了运算，实际按单字段在分流）。
+   */
+  if (exprText && Number.isNaN(b)) {
+    return false
+  }
   const numeric = !Number.isNaN(a) && !Number.isNaN(b)
   switch (c.op) {
     case 'eq': { return numeric ? a === b : String(raw) === String(expect)
@@ -1417,8 +1456,12 @@ function evalCondition (c: BranchCondition, raw: unknown, form: Record<string, u
     }
     case 'lte': { return numeric && a <= b
     }
-    // 「包含」支持一组值（命中任一即满足）；单值走同一条路径，行为与改动前一致
-    case 'contains': { return containsHit(String(raw), c, form)
+    /*
+     * 「包含」支持一组值（命中任一即满足）；单值走同一条路径，行为与改动前一致。
+     * 左值配了运算时它没有意义（对算出来的数字做子串匹配），明确不命中 ——
+     * 编辑器在保存表达式时也会把 op 从 contains 收敛到「大于」（见 createStream 的 saveMath）。
+     */
+    case 'contains': { return exprText ? false : containsHit(String(raw), c, form)
     }
     // 脏数据里的非法 op（如旧模板手写的 '='）：明确判不命中，
     // 而不是让函数末尾隐式返回 undefined（签名声明的是 boolean）
