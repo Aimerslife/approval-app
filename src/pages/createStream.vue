@@ -679,68 +679,10 @@
 
     <!--
       条件的「左值运算」：把"某个字段 vs 值"升级成"几个字段算出来 vs 值"。
-      语法与求值口径见 utils/conditionMath；这里只负责收集表达式 + 当场做语法检查。
+      弹窗本身与卡片内部画布共用（components/flow/ConditionMathDialog）；这里只负责写回条件对象。
     -->
-    <v-dialog v-model="mathOpen" max-width="560">
-      <v-card rounded="lg">
-        <v-card-title class="d-flex align-center ga-2 text-[14px]">
-          <v-icon color="primary" size="18">mdi-function-variant</v-icon>
-          <span>左值运算</span>
-          <v-spacer />
-          <v-chip v-if="mathMainField" size="x-small" variant="tonal">主字段：{{ mathMainField }}</v-chip>
-        </v-card-title>
-
-        <v-card-text>
-          <div class="panel-hint mb-2">
-            左边可以不是单个字段，而是几个字段的加减乘除：例如 总库存金额 - 已接收数量。
-            支持 + - * / 与括号；字段取不到值（或语法有误）时这条条件**不命中**。
-          </div>
-
-          <input v-model="mathExpr" class="panel-input math-input" placeholder="总库存金额 - 已接收数量">
-
-          <div class="d-flex flex-wrap ga-1 mt-2">
-            <v-btn v-for="t in MATH_TOKENS" :key="t" density="comfortable" size="x-small" variant="tonal"
-              @click="insertMathToken(t)">
-              {{ t }}
-            </v-btn>
-          </div>
-
-          <div class="mt-2 d-flex flex-wrap ga-1">
-            <v-chip v-for="f in FIELD_OPTIONS" :key="f.value" size="x-small" variant="outlined"
-              @click="insertMathToken(f.value)">
-              {{ f.label }}
-            </v-chip>
-          </div>
-
-          <v-alert v-if="mathCheck.error" class="mt-3" density="compact" type="error" variant="tonal">
-            {{ mathCheck.error }}
-          </v-alert>
-
-          <v-alert v-else-if="mathUnknown.length > 0" class="mt-3" density="compact" type="warning" variant="tonal">
-            这些名字不在字段候选里：{{ mathUnknown.join('、') }}。仍可保存（取值时按名字从上下文取），
-            但请确认没有拼错 —— 拼错的名字永远取不到值，这条条件会一直不命中。
-          </v-alert>
-
-          <div v-else-if="mathCheck.fields.length > 0" class="panel-hint mt-2">
-            将读取：{{ mathCheck.fields.join('、') }}
-          </div>
-        </v-card-text>
-
-        <v-card-actions>
-          <v-btn v-if="mathTarget?.lhsExpr" class="text-none" color="error" size="small" variant="text"
-            @click="clearMath">
-            清除运算
-          </v-btn>
-
-          <v-spacer />
-          <v-btn class="text-none" size="small" variant="text" @click="mathOpen = false">取消</v-btn>
-          <v-btn class="text-none" color="primary" :disabled="!!mathCheck.error" size="small" variant="flat"
-            @click="saveMath">
-            保存
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <ConditionMathDialog :expr="mathExpr" :fields="FIELD_OPTIONS" :open="mathOpen" @close="mathOpen = false"
+      @save="applyMath" />
 
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000">
       {{ snackbar.text }}
@@ -776,6 +718,8 @@ import AdjustableEdge from '@/components/flow/AdjustableEdge.vue'
 import ApprovalNode from '@/components/flow/ApprovalNode.vue'
 import ConditionNode from '@/components/flow/ConditionNode.vue'
 import EdgeOptionTreeDialog from '@/components/flow/EdgeOptionTreeDialog.vue'
+// 条件左值的「四则运算」弹窗：与卡片内部画布共用同一个（语法检查 / 字段候选都在组件里）
+import ConditionMathDialog from '@/components/flow/ConditionMathDialog.vue'
 // 组间轮询卡片：画布上的卡片 + 「内部子流程」编辑对话框（内含一张小画布）
 import LoopCardDialog from '@/components/flow/LoopCardDialog.vue'
 import LoopCardNode from '@/components/flow/LoopCardNode.vue'
@@ -1179,35 +1123,14 @@ function onOpChange(c: BranchCondition, e?: Event) {
 
 /* ==================== 条件的「左值运算」（四则运算） ==================== */
 
-/**
- * 运算面板里的运算符按钮。
- *
- * 只给半角：解析器本身认全角（会在 conditionMath 里折算），但写进模板的也该是半角 ——
- * 同一条表达式里混着「（）」和「()」以后维护起来很难受。
- */
-const MATH_TOKENS = ['+', '-', '*', '/', '(', ')'] as const
-
-const mathOpen = ref(false)
-/** 正在编辑运算的那条条件（null = 面板没开） */
+/** 正在编辑运算的那条条件（null = 弹窗没开） */
 const mathTarget = ref<BranchCondition | null>(null)
+/** 弹窗打开时带给它的表达式（空 = 这条条件还没配运算） */
 const mathExpr = ref('')
+const mathOpen = ref(false)
 
 /**
- * 语法检查（**不取值**）：模板期没有行数据，"字段能不能取到值"要等建单 / 办理时才知道，
- * 编辑器能查的只有写得对不对 —— 以及有没有把字段名拼错（见 mathUnknown）。
- */
-const mathCheck = computed(() => parseArithmetic(mathExpr.value))
-
-/** 主字段 = 表达式里的第一个变量（保存时写回 `field`，展示 / 分组等老口径还认它） */
-const mathMainField = computed(() => mathCheck.value.fields[0] ?? '')
-
-/** 表达式里**不在候选清单**里的名字：只提示不拦 —— 上下文里可能有候选表没列的键 */
-const mathUnknown = computed(() =>
-  mathCheck.value.fields.filter(f => !FIELD_OPTIONS.some(o => o.value === f)),
-)
-
-/**
- * 打开运算面板。
+ * 打开运算弹窗。
  * 结论条件（`result`）直接不开：审批结论是**码**不是量，加减乘除对它没有意义
  * （与 opsFor 只给 result 留「等于」是同一件事的两个面）。
  */
@@ -1220,37 +1143,28 @@ function openMath(c: BranchCondition) {
   mathOpen.value = true
 }
 
-/** 点变量 / 运算符按钮：接到末尾（该补空格的地方补上，读起来才像一条式子） */
-function insertMathToken(token: string) {
-  const cur = mathExpr.value.trimEnd()
-  const needSpace = cur.length > 0 && !/[+\-*/(]$/.test(cur)
-  mathExpr.value = `${cur}${needSpace ? ' ' : ''}${token}${token === '(' ? '' : ' '}`
-}
-
 /**
- * 保存运算。
+ * 弹窗提交（表达式已通过语法检查，空串 = 清除运算）。
  *
- * 空表达式 = 回到"单个字段 vs 值"（不是保存一个空式子）；
- * 语法有错时按钮是禁用的，这里再判一次只是兜底。
+ * 这里只做**写回条件**这件事：主字段取谁、op 要不要收敛，是主画布的编辑口径，
+ * 卡片内部画布有自己的同样一份（见 LoopCardCanvas 的 applyMath）。
  */
-function saveMath() {
+function applyMath(expr: string) {
   const c = mathTarget.value
+  mathOpen.value = false
   if (!c) {
     return
   }
-  const expr = mathExpr.value.trim()
+  // 空表达式 = 回到"单个字段 vs 值"（`field` 保留，它本来就是表达式的主字段）
   if (!expr) {
-    clearMath()
-    return
-  }
-  const check = parseArithmetic(expr)
-  if (check.error) {
+    delete c.lhsExpr
     return
   }
   c.lhsExpr = expr
+  const fields = parseArithmetic(expr).fields
   // 主字段跟着表达式走：这样时间线文案 / 分组 / 老消费方看到的仍是"这条条件在算谁"
-  if (check.fields[0]) {
-    c.field = check.fields[0]
+  if (fields[0]) {
+    c.field = fields[0]
   }
   /*
    * 运算是**数值**语义：「包含」是字符串子串匹配，对算出来的数字没有意义 ——
@@ -1261,15 +1175,6 @@ function saveMath() {
     collapseConditionValue(c)
     c.op = 'gt'
   }
-  mathOpen.value = false
-}
-
-/** 清除运算：这条条件回到"单字段 vs 值"（`field` 保留，它本来就是表达式的主字段） */
-function clearMath() {
-  if (mathTarget.value) {
-    delete mathTarget.value.lhsExpr
-  }
-  mathOpen.value = false
 }
 
 /** 多条件组合方式：and = 全部满足，or = 任一满足 */
@@ -2858,11 +2763,7 @@ onMounted(() => {
   border-radius: 6px;
 }
 
-/* 运算面板里的表达式输入：整行宽（面板里的 .panel-input 都是定宽的小控件） */
-.math-input {
-  width: 100%;
-  flex: 1 1 auto;
-}
+/* 运算弹窗已抽成 components/flow/ConditionMathDialog（与卡片内部画布共用），样式随组件走 */
 
 /* ===== 画布容器 ===== */
 /*

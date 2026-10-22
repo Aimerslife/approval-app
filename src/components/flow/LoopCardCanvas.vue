@@ -232,7 +232,17 @@
       </div>
 
       <div v-for="(c, i) in conditions" :key="i" class="edge-row">
-        <input v-model="c.field" class="edge-input" list="card-field-options" placeholder="字段，如 当前环节对应的组别">
+        <!-- 左值：普通情况是字段下拉；配了运算时显示表达式（点铅笔改，见 openMath） -->
+        <div v-if="c.lhsExpr" class="edge-expr" :title="c.lhsExpr" @click="openMath(c)">{{ c.lhsExpr }}</div>
+        <input v-else v-model="c.field" class="edge-input" list="card-field-options"
+          placeholder="字段，如 当前环节对应的组别">
+
+        <!-- 运算：把几个字段加减乘除后再比较（结论码不参与，见主画布 opsFor 的说明） -->
+        <v-icon-btn v-if="!isResultCondition(c)" class="ml--2" size="x-small"
+          title="编辑运算：用几个字段做加减乘除再比较" variant="text"
+          :color="c.lhsExpr ? 'primary' : undefined" @click="openMath(c)">
+          <v-icon size="12">mdi-pencil</v-icon>
+        </v-icon-btn>
 
         <select v-model="c.op" class="edge-input" style="width: 84px">
           <option value="eq">等于</option>
@@ -314,6 +324,10 @@
     -->
     <EdgeOptionTreeDialog :link-options="edgeLinkOptions" :model-value="edgeOptionGroups" :open="optionDialog"
       @close="optionDialog = false" @update:model-value="commitEdgeOptionGroups" />
+
+    <!-- 条件左值的四则运算：与主画布共用同一个弹窗（语法检查 / 字段候选都在组件里） -->
+    <ConditionMathDialog :expr="mathExpr" :fields="FIELD_OPTIONS" :open="mathOpen" @close="mathOpen = false"
+      @save="applyMath" />
   </div>
 </template>
 
@@ -326,12 +340,15 @@
   import ApprovalNode from '@/components/flow/ApprovalNode.vue'
   import ConditionNode from '@/components/flow/ConditionNode.vue'
   import EdgeOptionTreeDialog from '@/components/flow/EdgeOptionTreeDialog.vue'
+  // 条件左值的「四则运算」弹窗：与主画布共用同一个（校验与候选只写一处）
+  import ConditionMathDialog from '@/components/flow/ConditionMathDialog.vue'
   import StartEndNode from '@/components/flow/StartEndNode.vue'
   import {
     APPROVAL_RESULTS,
     type ApprovalOptionGroup,
     type BranchCondition,
     type ConditionExpr,
+    collapseConditionValue,
     FIELD_REF_PREFIX,
     isConditionGroup,
     isResultCondition,
@@ -339,6 +356,8 @@
   } from '@/types/approval'
   // 条件字段候选：与主画布共用同一份（见 utils/conditionFields 的文件头）
   import { CONDITION_FIELD_OPTIONS } from '@/utils/conditionFields'
+  // 条件左值的四则运算：语法由弹窗查，这里只要"表达式里第一个变量是谁"
+  import { parseArithmetic } from '@/utils/conditionMath'
   // 连线形状清单：与主画布共用同一份（别在这里再写一份，否则两处的五种会走偏）
   import { applyEdgeShape, DEFAULT_EDGE_BORDER_RADIUS, DEFAULT_EDGE_CURVATURE, EDGE_STYLES } from '@/utils/edgeStyles'
 
@@ -925,6 +944,55 @@
     }
   }
 
+  /* ==================== 条件的「左值运算」（四则运算） ==================== */
+
+  const mathOpen = ref(false)
+  /** 正在编辑运算的那条条件 */
+  const mathTarget = ref<BranchCondition | null>(null)
+  /** 弹窗打开时带给它的表达式（空 = 这条条件还没配运算） */
+  const mathExpr = ref('')
+
+  /**
+   * 打开运算弹窗。
+   * 结论条件（`result`）直接不开：结论是**码**不是量，加减乘除对它没有意义 ——
+   * 与主画布「result 只给等于」是同一条口径。
+   */
+  function openMath (c: BranchCondition) {
+    if (isResultCondition(c)) {
+      return
+    }
+    mathTarget.value = c
+    mathExpr.value = String(c.lhsExpr ?? '')
+    mathOpen.value = true
+  }
+
+  /**
+   * 弹窗提交（空串 = 清除运算）。
+   *
+   * 写回口径与主画布**完全一致**（createStream 的 applyMath）：主字段取表达式里的第一个变量，
+   * 运算是数值语义所以 `contains` 收敛成 `gt`。两处不同的话，同一条条件在两个画布里看就不是一回事了。
+   */
+  function applyMath (expr: string) {
+    const c = mathTarget.value
+    mathOpen.value = false
+    if (!c) {
+      return
+    }
+    if (!expr) {
+      delete c.lhsExpr
+      return
+    }
+    c.lhsExpr = expr
+    const fields = parseArithmetic(expr).fields
+    if (fields[0]) {
+      c.field = fields[0]
+    }
+    if (c.op === 'contains') {
+      collapseConditionValue(c)
+      c.op = 'gt'
+    }
+  }
+
   /*
    * 字段候选：与主画布**共用同一份**（utils/conditionFields）。
    *
@@ -998,6 +1066,25 @@
   &:focus {
     outline: 1px solid #a78bfa;
   }
+}
+
+/*
+ * 左值的**运算表达式**（占了原来"字段"输入框的位置）：
+ * 虚线描边 + 单行省略，一眼看出"这不是单个字段"；点它或点旁边的铅笔都能改。
+ * 与 .edge-input 同一套尺寸，不会把同一行顶歪。
+ */
+.edge-expr {
+  flex: 1;
+  min-width: 60px;
+  padding: 3px 6px;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: #fff;
+  border: 1px dashed #a78bfa;
+  border-radius: 5px;
 }
 
 /* .edge-btn = 面板上的「配置选项」入口（内容在弹出框里，见 EdgeOptionTreeDialog） */
