@@ -325,7 +325,13 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
     fixedValues: { confirmed: true },
     note: '选中即视为已确认清仓，不需要再点确认',
   },
-  // 其他原因：原因（分组）→ 开发类才出二级原因、外部环境才出补充说明（组件 195-221 / 1396-1406）
+  /*
+   * 其他原因：原因（分组）→ 开发类才出二级原因（组件 195-221 / 1396-1406）。
+   *
+   * 「外部环境」类**不给「补充说明」框**（原先这里有一个 showWhen=外部环境的 remark 字段，已按业务口径去掉）：
+   * 那一类的说明直接写在办理栏下方共用的「意见/备注」里，且该框在这一类下**必填** ——
+   * 见 components/approval/ApprovalHandleForm 的 externalReason / opinionRequired。
+   */
   other_reason: {
     fields: [
       { key: 'reason', label: '原因', control: 'select', options: [...REASON_OPTIONS] },
@@ -335,14 +341,6 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
         control: 'select',
         options: [...SECOND_REASON_OPTIONS],
         showWhen: { key: 'reason_belong', in: ['开发类'] },
-      },
-      {
-        key: 'remark',
-        label: '补充说明',
-        control: 'textarea',
-        rows: 2,
-        placeholder: '补充说明',
-        showWhen: { key: 'reason_belong', in: ['外部环境'] },
       },
     ],
   },

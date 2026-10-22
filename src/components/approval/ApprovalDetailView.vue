@@ -212,6 +212,12 @@ const stepGroups = computed(() =>
   groupApproverSteps(chain.value, stepIds.value, startTimes.value),
 )
 
+/*
+ * 时间线**只画到当前待办**为止（与 rebuildChain 的选路口径一致）。
+ * 曾经在这里按默认线把"还没走到"的环节也画出来，但业务口径是：还没审批的单不展示后续环节 ——
+ * 后面的走向本来就取决于这一环怎么选，画出来反而会误导。
+ */
+
 /** 弃置审批段的标注（与 chain 下标一一对应，口径集中在 utils/approvalRuntime） */
 const discardMarks = computed(() =>
   discardMarksOf({

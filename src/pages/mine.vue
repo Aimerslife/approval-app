@@ -8,7 +8,7 @@
           <v-icon size="16">mdi-refresh</v-icon>
         </v-icon-btn>
       </div>
-      <!-- 搜索只作用于卡片列表；历史表格用它自己的筛选条（见 ApprovalFilterBar） -->
+      <!-- 搜索只作用于卡片列表；表格（所有审批单）用它自己的筛选条（见 ApprovalFilterBar） -->
       <v-text-field v-if="tab !== 'history'" v-model="keyword" class="filter-input my-3 max-h-[30px]" density="compact"
         flat hide-details label="搜索" prepend-inner-icon="mdi-magnify" single-line variant="solo-filled" />
       <v-list class="py-0" density="compact" nav>
@@ -26,12 +26,12 @@
     </v-sheet>
     <!-- ==================== 中 + 右 ==================== -->
     <div class="mine-main d-flex ga-3 min-w-0">
-      <!-- 历史审批单：保留原来的表格 -->
+      <!-- 所有审批单：保留原来的表格（内部键沿用 history） -->
       <v-sheet v-if="tab === 'history'" class="mine-table-col d-flex flex-column card-border overflow-hidden pt-2 px-2">
         <div class="d-flex align-center justify-space-between px-3 pt-2">
-          <span class="text-[14px] font-bold">历史审批单</span>
+          <span class="text-[14px] font-bold">所有审批单</span>
           <span class="text-[12px] text-medium-emphasis">
-            我经手过的单（含仍在流转的）· 共 {{ historyRows.length }} 张
+            全部审批单（含仍在流转的）· 共 {{ historyRows.length }} 张
           </span>
         </div>
         <ApprovalFilterBar :dirty="historyDirty" :filters="historyFilters" :options="historyOptions"
@@ -69,7 +69,7 @@
           </template>
         </v-data-table>
       </v-sheet>
-      <!-- 待办 / 抄送我的 / 我发起的：卡片列表 -->
+      <!-- 待办 / 已审批 / 抄送我的 / 我发起的：卡片列表 -->
       <v-sheet v-else class="mine-card-col d-flex flex-column  overflow-hidden bg-transparent py-2">
         <div class="d-flex align-center justify-space-between px-3 pt-2">
           <span class="text-[13px]">{{ activeTabText }}</span>
@@ -153,7 +153,7 @@ import { useUserStore } from '@/stores/user'
 import { APPROVAL_STATUS } from '@/types/approval'
 /*
  * 展示状态（未审批 / 审批中 / 待定 / 通过 / 驳回）与首页表格共用同一份派生口径；
- * 筛选（选项推导 / 应用条件 / 等价比较）也共用同一份 —— 历史板块的筛选条走的就是这些。
+ * 筛选（选项推导 / 应用条件 / 等价比较）也共用同一份 —— 表格板块的筛选条走的就是这些。
  */
 import {
   applyApprovalFilters,
@@ -211,10 +211,11 @@ const me = computed(() => userStore.member)
 const userId = computed(() => userStore.user?.id ?? '')
 
 /*
- * 左栏的四个分类。值即状态，模板里据此决定中栏渲染卡片还是表格。
- * 「历史审批单」保持原来的表格形态（筛选条 / 分页 / 删除都在），其余三档用卡片列表。
+ * 左栏的五个分类。值即状态，模板里据此决定中栏渲染卡片还是表格。
+ * 「所有审批单」保持原来的表格形态（筛选条 / 分页 / 删除都在，内部键沿用 history），
+ * 其余四档用卡片列表 —— 「已审批」与「待办」同一套形态（点卡片右栏看流程）。
  */
-type MineTab = 'pending' | 'cc' | 'created' | 'history'
+type MineTab = 'pending' | 'approved' | 'cc' | 'created' | 'history'
 const tab = ref<MineTab>('pending')
 
 interface ApprovalRow {
@@ -241,7 +242,7 @@ interface ApprovalRow {
   /**
    * 建单快照里的「平台」。
    *
-   * 本页不显示这一列，但**必须有**：历史板块的筛选走的是共享实现
+   * 本页不显示这一列，但**必须有**：表格板块的筛选走的是共享实现
    * （utils/approvalFilters 的 applyApprovalFilters），而它要求行满足 FilterableRow ——
    * 少了这个字段，整行只能在类型上退化，模板里连 item.statusColor 都取不到。
    */
@@ -362,6 +363,19 @@ const pendingRows = computed(() =>
   orders.value.filter(o => orderPendingOn(o, me.value)).map(o => toRow(o)),
 )
 
+/**
+ * 已审批：我办过、且此刻没压回我手上的单。
+ *
+ * 与「待办」互斥（同一张单不会同时出现在两档）：驳回回退会把单送回我这一环，
+ * 那种算待办、不算已审批 —— 与「待办」的判据（orderPendingOn）正好是一对补集关系。
+ */
+const approvedRows = computed(() =>
+  orders.value
+    .filter(o => !orderPendingOn(o, me.value))
+    .filter(o => orderHandledBy(o, me.value))
+    .map(o => toRow(o)),
+)
+
 /** 抄送我的：链路上（含运行期追加的抄送）有 type='cc' 的成员是我 */
 const ccRows = computed(() =>
   orders.value.filter(o => orderCcTo(o, me.value)).map(o => toRow(o)),
@@ -372,20 +386,19 @@ const createdRows = computed(() =>
   orders.value.filter(o => orderCreatedBy(o, userId.value)).map(o => toRow(o)),
 )
 
-/** 历史审批单：我经手过、且此刻没压回我手上（驳回回退会把单送回我这一环，那种算待办） */
-const historyRows = computed(() =>
-  orders.value
-    .filter(o => !orderPendingOn(o, me.value))
-    .filter(o => orderHandledBy(o, me.value))
-    .map(o => toRow(o)),
-)
+/**
+ * 所有审批单：**全部单**，不按"我经手过"过滤（那是「已审批」的口径）。
+ * 命名沿用 history（这一档就是原来那张表，筛选条 / 分页 / 删除都在）。
+ */
+const historyRows = computed(() => orders.value.map(o => toRow(o)))
 
-/** 左栏的四个分类（文案 / 图标 / 计数） */
+/** 左栏的五个分类（文案 / 图标 / 计数） */
 const tabItems = computed(() => [
   { value: 'pending' as const, text: '待办', icon: 'mdi-inbox-arrow-down-outline', count: pendingRows.value.length },
+  { value: 'approved' as const, text: '已审批', icon: 'mdi-clipboard-check-outline', count: approvedRows.value.length },
   { value: 'cc' as const, text: '抄送我的', icon: 'mdi-email-outline', count: ccRows.value.length },
   { value: 'created' as const, text: '我发起的', icon: 'mdi-send-outline', count: createdRows.value.length },
-  { value: 'history' as const, text: '历史审批单', icon: 'mdi-history', count: historyRows.value.length },
+  { value: 'history' as const, text: '所有审批单', icon: 'mdi-clipboard-list-outline', count: historyRows.value.length },
 ])
 
 const activeTabText = computed(() => tabItems.value.find(t => t.value === tab.value)?.text ?? '')
@@ -393,6 +406,9 @@ const activeTabText = computed(() => tabItems.value.find(t => t.value === tab.va
 const emptyText = computed(() => {
   if (!userStore.isLoggedIn) {
     return '登录后可以看到你名下的审批单'
+  }
+  if (tab.value === 'approved') {
+    return '还没有你审批过的单（办过的单会出现在这里）'
   }
   if (tab.value === 'cc') {
     return '还没有抄送给你的审批单'
@@ -441,6 +457,9 @@ const dayRange = computed(() => {
 
 /** 当前 tab 对应的完整行集（还未叠搜索 / 时间条件） */
 const baseRows = computed(() => {
+  if (tab.value === 'approved') {
+    return approvedRows.value
+  }
   if (tab.value === 'cc') {
     return ccRows.value
   }
@@ -479,7 +498,7 @@ const cardRows = computed(() => {
     : String(b.created).localeCompare(String(a.created))))
 })
 
-/** 当前在看的列表（上/下一条、自动选中都按它算）：卡片模式是卡片行，历史模式是表格行 */
+/** 当前在看的列表（上/下一条、自动选中都按它算）：卡片模式是卡片行，表格模式是表格行 */
 const activeRows = computed(() =>
   tab.value === 'history' ? historyFilteredRows.value : cardRows.value,
 )
@@ -492,7 +511,7 @@ const selectedNode = ref<ApprovalRow | null>(null)
 /** 选中行对应的原始单据（时间线要用它重算链路） */
 const selectedOrder = computed(() => orders.value.find(o => o.id === selectedNode.value?.id) ?? null)
 
-/** 历史模式必须有选中才显示右栏；卡片模式常驻（没有选中时显示空态） */
+/** 表格模式（所有审批单）必须有选中才显示右栏；卡片模式常驻（没有选中时显示空态） */
 const showDetail = computed(() => tab.value !== 'history' || !!selectedNode.value)
 
 const selectedIndex = computed(() =>
@@ -527,7 +546,7 @@ function nextStep() {
   }
 }
 
-/** 历史表格点行：打开右栏（表格仍然在左边） */
+/** 表格（所有审批单）点行：打开右栏（表格仍然在左边） */
 function handleRowClick(_event: Event, { item }: { item: ApprovalRow }) {
   selectedNode.value = item
 }
@@ -563,7 +582,7 @@ function onAvatarError(row: ApprovalRow) {
   }
 }
 
-/* ==================== 历史审批单（表格 + 筛选） ==================== */
+/* ==================== 所有审批单（表格 + 筛选） ==================== */
 
 const historyPage = ref(1)
 const historyPerPage = ref(8)
@@ -582,7 +601,7 @@ const historyOptions = computed(() => {
   return map
 })
 
-/** 历史板块展示的行 = 我经手过的单 ∩ 生效条件 */
+/** 所有审批单板块展示的行 = 全部单 ∩ 生效条件 */
 const historyFilteredRows = computed(() => applyApprovalFilters(historyRows.value, historyApplied))
 
 /** 控件改动只进草稿，等「确认」（与 useApprovalTable 对下拉的处理刻意不同，见模板说明） */
@@ -610,7 +629,7 @@ const historyPageCount = computed(() =>
 /*
  * 当前表的列：**不摆「审批结论」**（单还没办结，整列都是 '—'）也**不摆「当前审批人」**
  * （这一页的当前单本就都压在我手上，那一列每行都是同一个名字）。
- * 历史表才摆它们（见 historyHeaders）。
+ * 表格（所有审批单）才摆它们（见 historyHeaders）。
  */
 const headers = ref([
   { title: '审批单号', key: 'order_no', align: 'start' },
@@ -625,7 +644,7 @@ const headers = ref([
 ] as const)
 
 /**
- * 历史板块的表头：由当前表的列**派生**（列顺序只写一处），比它多两列 ——
+ * 表格板块的表头：由当前表的列**派生**（列顺序只写一处），比它多两列 ——
  *   · 「最后办理人」（插在「主MODEL」之后）；
  *   · 「审批结论」（插在「状态」之后）。
  */
@@ -667,7 +686,7 @@ watch(activeRows, list => {
   selectedNode.value = list[0] ?? null
 }, { immediate: true })
 
-/** 切 tab：历史默认不选中（保持全宽表格）；其它三档选中第一张 */
+/** 切 tab：所有审批单默认不选中（保持全宽表格）；其它四档选中第一张 */
 watch(tab, value => {
   if (value === 'history') {
     selectedNode.value = null
@@ -761,27 +780,35 @@ onMounted(() => {
   min-width: 0;
 }
 
-/* 历史模式：表格吃掉剩下空间；右栏出现时单独定宽，不去挤表格的可读宽度 */
+/* 表格模式（所有审批单）：表格吃掉剩下空间；右栏出现时单独定宽，不去挤表格的可读宽度 */
 .mine-table-col {
   flex: 1 1 auto;
   min-width: 0;
 }
 
+/*
+ * 卡片模式（待办 / 已审批 / 抄送 / 我发起的）的右栏：吃掉中栏之外剩下的全部宽度。
+ *
+ * min-width 较宽（480px）：时间线一行里要并排放姓名 + 结论 + 意见 + 时间，
+ * 再窄就会折成两三行（见 ApprovalDetailView 的 .detail-body）。它只是**下限**，
+ * 窗口宽时右栏还会继续变宽，不会停在这里。
+ */
 .mine-detail {
   flex: 1 1 0;
-  min-width: 320px;
+  min-width: 480px;
   /* 圆角裁切 + 内容滚动交给内部（见 ApprovalDetailView 的 .detail-body） */
   overflow: hidden;
 }
 
 /*
- * 历史板块点开的详情比卡片模式更宽：里面要放单号 / 时间线 / 办理栏，
- * 440px 时时间线上的姓名 + 意见 + 时间挤成一条，所以按容器宽度取一档更宽的基准。
- * clamp 而不是固定值：宽屏（≥1600）拿到 620px 上限，窄屏（≤1150）仍保底 440px，
- * 中间按 38% 平滑过渡，不会把左边的表格压得只剩几列。
+ * 表格板块点开的详情：表格与右栏要分宽度，所以这里给一档**固定基准**（不是吃剩余空间）。
+ *
+ * 数值的取法：clamp 的下限 520px 是"不折行"的底线，上限 760px 是"再宽时间线也不会更好读"；
+ * 中间按 42% 随窗口平滑过渡 —— 宽屏（≥1810）拿到 760px，窄屏（≤1240）保底 520px，
+ * 既让详情看得清，也不会把左边的表格压得只剩几列。
  */
 .mine-detail--fixed {
-  flex: 0 0 clamp(440px, 38%, 620px);
+  flex: 0 0 clamp(550px, 42%, 800px);
 }
 
 /* 窄一点的窗口（笔记本外接小屏）把中间那一栏收一点，别把右栏挤没 */

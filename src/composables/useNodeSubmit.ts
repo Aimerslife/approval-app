@@ -163,6 +163,21 @@ export function useNodeSubmit (options: {
       const rebuilt = rebuildChain(flow, decisions, terminalMap, context)
 
       /*
+       * 3.1 结论必须真的让流程往前挪（或者结束它）。
+       *
+       * rebuildChain 碰到"这个结论没有命中任何一条出线、也没有兜底主线"时会把它当成流程卡住，
+       * 并把 currentStep 停在刚办完的这一环（end.kind = 'stuck'）。这种结论写进库里，
+       * 现场看到的就是「审批完了，但没进入下一环节」：本环节显示已办，后面一片空白，谁也没法接着办，
+       * 而且单据状态还是"进行中"，只能靠改模板 + 洗数据来救。
+       * 与其把单子写死，不如当场拦下、让办理人改选一个（或让管理员补上这一条出线）。
+       */
+      if (!rebuilt.done && rebuilt.currentStep === payload.index) {
+        options.onMessage?.('该结论在流程里没有对应的后置环节，请改选其它选项（或联系管理员检查流程模板）', 'error')
+        payload.done(false)
+        return null
+      }
+
+      /*
        * 3.5 「选择接收团队 / 选择接收部门」：只校验"选了没有"，**不往后续环节写人**。
        *
        * 为什么不填充下一环（早先那版写过，已按业务口径改掉）：

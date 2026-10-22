@@ -18,6 +18,10 @@
 
         <div class="d-flex align-center ga-2">
           <template v-if="topTab === 'template'">
+            <!-- 导入 / 导出 JSON：用来在环境之间搬模板（文件格式见 utils/templateJson） -->
+            <v-btn class="me-2 text-none" prepend-icon="mdi-import" variant="tonal" @click="openImport">
+              导入 JSON
+            </v-btn>
             <v-btn class="me-2 text-none" color="primary" prepend-icon="mdi-plus" variant="flat"
               @click="createStream">新模板</v-btn>
           </template>
@@ -97,6 +101,12 @@
                 <v-icon-btn v-if="isTemplateCopy(item.name)" icon="mdi-arrow-up-bold-box-outline" size="24"
                   title="改名并移入正本" variant="plain" @click="promoteParten(item)">
                   <v-icon color="#1867C0" size="16" />
+                </v-icon-btn>
+
+                <!-- 导出成 JSON：文件里只有名字 + 启停 + 三要素，拿去别的环境用「导入 JSON」还原 -->
+                <v-icon-btn icon="mdi-export-variant" size="24" title="导出为 JSON" variant="plain"
+                  @click="exportOne(item)">
+                  <v-icon  size="16" />
                 </v-icon-btn>
               </td>
             </tr>
@@ -196,6 +206,51 @@
         </v-card>
       </template>
 
+      <!-- 导入 JSON：选文件 → 当场解析出名字 / 环节数 → 确认后建一张新模板 -->
+      <template v-else-if="currentPanel == 'import'">
+        <v-card min-width="520">
+          <v-card-title>
+            <v-icon size="18">mdi-file-import-outline</v-icon>
+            <span class="text-[14px] ml-1">导入审批模板（JSON）</span>
+          </v-card-title>
+
+          <v-card-text>
+            <v-file-input v-model="importFile" accept=".json,application/json" density="compact" hide-details="auto"
+              label="选择模板 JSON 文件" prepend-icon="" prepend-inner-icon="mdi-file-upload-outline"
+              variant="outlined" @update:model-value="readImportFile" />
+
+            <!-- 解析成功才给名称 / 摘要：解析失败时下面只有一条原因，不给"看起来能提交"的输入框 -->
+            <template v-if="importPayload">
+              <v-text-field v-model="importName" class="mt-3" density="compact" hide-details="auto" label="模板名称"
+                :rules="[streamNameRule]" variant="outlined" />
+
+              <div class="mt-2 d-flex align-center flex-wrap ga-2 text-[12px] text-medium-emphasis">
+                <v-chip color="primary" label size="x-small" variant="tonal">
+                  {{ importPayload.status ? '启用' : '未启用' }}
+                </v-chip>
+                <span>{{ importPayload.chain.chain.length }} 个审批环节</span>
+                <span v-if="importPayload.chain.flow?.length">{{ importPayload.chain.flow.length }} 个流程节点</span>
+                <span v-if="!importPayload.chain.flow?.length" class="text-warning">（没有流程结构，只有链路）</span>
+              </div>
+
+              <div class="mt-2 text-[11px] text-medium-emphasis">
+                导入只会新建一张模板（不会覆盖同名的），id / 创建时间这些源记录信息不会带过来。
+              </div>
+            </template>
+
+            <v-alert v-if="importError" class="mt-3" density="compact" type="error" variant="tonal">
+              {{ importError }}
+            </v-alert>
+          </v-card-text>
+
+          <template #actions>
+            <v-btn class="ms-auto" color="error" size="small" text="取消" @click="dialog = false" />
+            <v-btn color="primary" :disabled="!importPayload" :loading="importing" size="small" text="确认导入"
+              variant="tonal" @click="importNode" />
+          </template>
+        </v-card>
+      </template>
+
       <template v-else>
         <v-card min-width="400">
           <v-card-title class="d-flex align-center justify-space-between">
@@ -264,6 +319,13 @@ import { resolveTypeTemplates, typeCategoryOf, typeFieldsSummaryOf } from '@/uti
 import { approvalTypeWriteHint, loadApprovalTypeOverrides, saveApprovalTypeOverride } from '@/utils/approvalTypeStore'
 // 正本 / 副本的名规约（判定、去标记、生成）：只此一处，别在本页再拼字符串
 import { copyNameOf, isTemplateCopy, primeNameOf } from '@/utils/templateCopy'
+// 模板 JSON 的导出 / 导入：文件格式、解析规则、重名处理都在里面（本页只负责按钮与提示）
+import {
+  downloadTemplateJson,
+  parseTemplateJson,
+  type TemplatePayload,
+  uniqueTemplateName,
+} from '@/utils/templateJson'
 import { formatDate } from '@/utils/utils'
 const router = useRouter()
 const chians = ref<ApprovalModal[]>([])
@@ -640,6 +702,101 @@ async function removeNode() {
   notify(message, code === 0 ? 'success' : 'error')
   dialog.value = false
 }
+
+/* ==================== JSON 导出 / 导入 ==================== */
+
+/**
+ * 导入弹窗里选中的文件 / 解析结果（null = 还没选或解析失败）。
+ * 类型带上数组：v-file-input 没开 `multiple` 时 Vuetify 仍可能给数组（版本差异），两边都认。
+ */
+const importFile = ref<File | File[] | null>(null)
+const importPayload = ref<TemplatePayload | null>(null)
+/** 导入后的模板名：预填文件里的名字，撞名时自动接「（导入）」（见 uniqueTemplateName） */
+const importName = ref('')
+const importError = ref('')
+const importing = ref(false)
+
+/** 导出这一行为 JSON 文件（文件名 = 模板名，非法字符会被替换，见 templateFileName） */
+function exportOne(item: ApprovalModal) {
+  try {
+    const json = downloadTemplateJson(item)
+    const flow = json.chain.flow?.length ?? 0
+    notify(`「${json.name}」已导出（${json.chain.chain.length} 个环节${flow ? ` / ${flow} 个流程节点` : ''}）`, 'success')
+  } catch (error) {
+    console.error('[approvalModel] 导出模板失败:', error)
+    notify('导出失败，请稍后重试', 'error')
+  }
+}
+
+/** 打开导入弹窗：每次都清空上一次选的文件与解析结果，别让人误提交上次那份 */
+function openImport() {
+  importFile.value = null
+  importPayload.value = null
+  importName.value = ''
+  importError.value = ''
+  currentPanel.value = 'import'
+  dialog.value = true
+}
+
+/**
+ * 选了文件就**当场解析**：能立刻告诉用户"这个文件能不能用、里面有几环"，
+ * 而不是等到点「确认导入」才失败。解析失败只显示原因，确认按钮保持禁用。
+ */
+async function readImportFile(value: File | File[] | null) {
+  const file = Array.isArray(value) ? value[0] : value
+  importPayload.value = null
+  importName.value = ''
+  importError.value = ''
+  if (!file) {
+    return
+  }
+  try {
+    const payload = parseTemplateJson(await file.text())
+    importPayload.value = payload
+    // 撞名就自动加后缀：模板是**按名字**查的，重名会让"取到哪一张"变得不确定
+    importName.value = uniqueTemplateName(payload.name, chians.value.map(t => t.name))
+  } catch (error) {
+    importError.value = error instanceof Error ? error.message : '文件解析失败'
+  }
+}
+
+/**
+ * 确认导入 = 建一张**新模板**（不覆盖同名的那张）。
+ *
+ * 落库走 addApproval（与「复制」同一条路）：它内部已 catch，失败时**返回 error 对象**
+ * 而不是抛出 —— 所以这里必须按返回值判成败，不能只靠 try/catch。
+ */
+async function importNode() {
+  const payload = importPayload.value
+  if (!payload) {
+    notify('请先选择一个模板 JSON 文件', 'error')
+    return
+  }
+  const name = importName.value.trim()
+  if (!name) {
+    notify('模板名称不能为空', 'error')
+    return
+  }
+  importing.value = true
+  try {
+    const res = await addApproval(name, payload.status, { ...payload.chain })
+    if (res instanceof Error) {
+      notify('导入失败，请稍后重试', 'error')
+      return
+    }
+    notify(`已导入「${name}」，可在表格里继续编辑`, 'success')
+    dialog.value = false
+    // 名字里带「- 副本」的会落在副本页签（与复制同一套规约），否则在正本
+    tab.value = isTemplateCopy(name) ? 'copy' : 'main'
+    await getDatas()
+  } catch (error) {
+    console.error('[approvalModel] 导入模板失败:', error)
+    notify('导入失败，请稍后重试', 'error')
+  } finally {
+    importing.value = false
+  }
+}
+
 onMounted(() => {
   getDatas()
 })

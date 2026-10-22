@@ -337,6 +337,12 @@ export interface ApprovalNextStep {
   allowedResults?: string[]
 }
 
+/*
+ * 业务口径：**不预览**当前待办之后的环节。
+ * 还没审批的单，后续走向取决于当前这一环怎么选，按默认线提前画出来会误导；
+ * 因此时间线只到当前待办为止（见 types/approval 的 rebuildChain）。
+ */
+
 /**
  * 一组里的第 2..N 环 → ApprovalNode 的 `next-steps`。
  * 选项按各自的 stepId 从两张表里取（就是页面上传给 `allowed-options` / `allowed-results` 的那两张）。

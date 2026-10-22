@@ -322,6 +322,7 @@
     drawerSet.value = true
   }
   function goApproval (row?: ApprovalRow | null) {
+    console.log(row)
     const no = row?.order_no ?? selectedNode.value?.order_no
     router.push({ path: '/approvalPage', query: no ? { order_no: no } : {} })
   }
