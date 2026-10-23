@@ -43,6 +43,15 @@ export function useApprovalTable () {
   const orders = shallowRef<ApprovalOrder[]>([])
   const rows = computed<ApprovalRow[]>(() => orders.value.map(toApprovalRow))
 
+  /**
+   * 正在取数。
+   *
+   * 表格初次进来时是**空的**（`orders` 还没有值），没有这个标志的话，
+   * 首屏那 1~3 秒看到的是「暂无数据」—— 分不清"真的没有单"还是"还在读"。
+   * 页面把它接到 `v-data-table` 的 `loading` 上（表格自带上进度条 + 遮罩）。
+   */
+  const loading = ref(false)
+
   /** 当前审批单 = 未结束；历史审批单 = 已结束 */
   const pendingRows = computed(() => rows.value.filter(r => r.status === APPROVAL_STATUS.PENDING))
   const historyRows = computed(() => rows.value.filter(r => r.status !== APPROVAL_STATUS.PENDING))
@@ -104,8 +113,15 @@ export function useApprovalTable () {
 
   /** 取数：全量拉一次 —— 与 v-data-table 的客户端分页/排序配套，筛选在本地做 */
   async function load () {
-    // markRaw：连元素这层也不建代理（这些快照是只读的，不需要响应式）
-    orders.value = (await getApprovalOrder()).map(o => markRaw(o))
+    loading.value = true
+    try {
+      // markRaw：连元素这层也不建代理（这些快照是只读的，不需要响应式）
+      orders.value = (await getApprovalOrder()).map(o => markRaw(o))
+    } finally {
+      // 失败也要落回 false：getApprovalOrder 内部已 catch 成空数组，
+      // 真抛出来时也不能让进度条永远转着
+      loading.value = false
+    }
   }
 
   /**
@@ -122,6 +138,7 @@ export function useApprovalTable () {
   return {
     orders,
     rows,
+    loading,
     pendingRows,
     historyRows,
     filters,

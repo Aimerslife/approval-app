@@ -133,6 +133,13 @@
       </div>
     </div>
 
+    <!--
+      取数中：表格上方一条细进度条。
+      表格自己也有 loading（表体遮罩），但它画在**表头下面**，行多 / 表高时很不显眼；
+      首屏"暂无数据"那几秒尤其需要这条，否则看不出是在读还是真没数据。
+    -->
+    <v-progress-linear v-if="loading" color="#0052D9" height="2" indeterminate />
+
     <v-data-table-server
       v-model="selectedIds"
       v-model:items-per-page="itemsPerPage"

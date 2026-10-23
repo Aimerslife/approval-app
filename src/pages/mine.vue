@@ -38,6 +38,8 @@
           :select-keys="['statusText', 'approver', '主MODEL']" :select-labels="{ approver: '最后办理人' }"
           @apply="applyHistoryFilters" @patch="patchHistoryFilters" @reset="resetHistoryFilters" />
         <v-divider />
+        <!-- 首屏 / 切档取数：表格上方一条细进度条（表格自带的 loading 在表头下面，行少时不明显） -->
+        <v-progress-linear v-if="tabLoading" class="mt-1" color="primary" height="2" indeterminate />
         <v-data-table v-model:page="historyPage" border class="text-[12px] mine-table" density="compact" fixed-footer
           fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
           :loading="tabLoading" striped="odd" @click:row="handleRowClick">
@@ -85,6 +87,20 @@
         <!-- 取数中：一条细进度条（卡片区没有表格那种遮罩，空了会像"没有单"） -->
         <v-progress-linear v-if="tabLoading" class="mt-1" color="primary" height="2" indeterminate />
         <div class="order-list overflow-y-auto pa-2">
+          <!--
+            首屏还没有数据时的骨架卡：比"空白 + 空态文案"更能说明正在读，
+            也不会出现"先说没有待办、一秒后突然冒出一堆"的跳动。
+            已经读到内容时不再显示（刷新时不打断阅读）。
+          -->
+          <template v-if="tabLoading && cardRows.length === 0">
+            <v-skeleton-loader
+              v-for="i in 3"
+              :key="`sk-${i}`"
+              class="mb-2 rounded-lg"
+              type="list-item-two-line"
+            />
+          </template>
+
           <v-card v-for="row in cardRows" :key="row.id" class="order-card" variant="flat"
             :class="{ 'order-card--active': row.id === selectedNode?.id }" rounded="lg" @click="selectRow(row)">
             <v-card-title class="order-card__head d-flex align-start justify-space-between">

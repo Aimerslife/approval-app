@@ -28,6 +28,8 @@
             @reset="resetFilters"
           />
           <v-divider class="mt-3" />
+          <!-- 首屏 / 刷新时：一条细进度条（表格自带的 loading 遮罩只盖住表体，顶部这条更显眼） -->
+          <v-progress-linear v-if="loading" class="mt-2" color="primary" height="2" indeterminate />
           <v-data-table
             v-model:page="page"
             border
@@ -38,6 +40,7 @@
             :headers="pendingHeaders"
             hover
             :items="pendingList"
+            :loading="loading"
             :items-per-page="itemsPerPage"
             items-per-page-text="每页条数"
             striped="odd"
@@ -90,6 +93,7 @@
           />
 
           <v-divider class="mt-3" />
+          <v-progress-linear v-if="loading" class="mt-2" color="primary" height="2" indeterminate />
 
           <v-data-table
             v-model:page="page"
@@ -101,6 +105,7 @@
             :headers="historyHeaders"
             hover
             :items="historyList"
+            :loading="loading"
             :items-per-page="itemsPerPage"
             :items-per-page-options="[20, 50, 100, 200]"
             items-per-page-text="每页条数"
@@ -243,6 +248,7 @@
    */
   const {
     orders,
+    loading,
     filters,
     filtersDirty,
     applyFilters,
