@@ -89,15 +89,6 @@
               @submit="onNodeSubmit"
             />
 
-            <!--
-              后续环节（**还没走到**）：只画出来让人看到整条路，不参与办理、圆点不闪。
-              与首页 / 我的详情同一口径（见 utils/approvalRuntime 的 upcomingRouteOf）。
-            -->
-            <ApprovalNode v-for="(g, gi) in upcoming.groups" :key="`future-${gi}`"
-              :can-handle="false" :data="g.steps[0]" hide-handle
-              :index="runtime.chain.length + g.indexes[0]" :length="runtime.chain.length + upcoming.chain.length"
-              :start-time="orderDatas?.created" upcoming />
-
             <v-timeline-item v-if="receiver" class="mb-6" dot-color="#1055C9" size="small">
               <template #icon>
                 <v-icon color="white" size="14">mdi-inbox-arrow-down</v-icon>
@@ -222,7 +213,6 @@
   import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
   // 运行期视图（重算链路 / 环节负责人 / 连续同人环节合并 / 弃置段起点）：与首页表格同一口径
   import {
-    type ApproverStepGroup,
     discardMarkOf,
     discardMarksOf,
     groupApproverSteps,
@@ -232,7 +222,6 @@
     queueCursorOf,
     runtimeOf,
     stepStartTimesOf,
-    upcomingRouteOf,
   } from '@/utils/approvalRuntime'
   // 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口，别自己读 record.data）
   import { toProductView } from '@/utils/biRowFields'
@@ -613,14 +602,6 @@
    * 两条节点（看着像重复），还得连点两次「办理」。合并后一条节点、弹窗里把这一串动作连着办。
    */
   const stepGroups = computed(() => groupApproverSteps(runtime.value.chain, runtime.value.stepIds, stepStartTimes.value))
-
-  /**
-   * 「后续环节」（还没走到）：按默认线把剩下的路画出来，只做展示。
-   * 与首页 / 我的详情同一口径（见 utils/approvalRuntime 的 upcomingRouteOf）。
-   */
-  const upcoming = computed(() => (orderDatas.value
-    ? upcomingRouteOf(orderDatas.value)
-    : { chain: [], stepIds: [], groups: [] as ApproverStepGroup[] }))
 
   /**
    * 弃置审批段的标注（与 chain 下标一一对应，不在段里的位置是 undefined）。

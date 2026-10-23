@@ -1,4 +1,22 @@
 {
+  /*
+   * 根 tsconfig：只负责"工程引用"（IDE / vue-tsc 各自用 tsconfig.app / tsconfig.node）。
+   *
+   * 这里额外声明一份 `paths`，是给**运行时**用的：
+   * app server（`server/index.ts`）由 `tsx` 直接跑源码，tsx 只读**根** tsconfig 的 paths，
+   * 不会跟进 `references`。少了这一段，任何被服务端间接加载的模块只要写了 `@/utils/…`
+   * 这类**值导入**，服务端就会 `ERR_MODULE_NOT_FOUND: Cannot find package '@/utils'`
+   * 直接起不来（2026-10 的实际事故：组织架构刷新与头像接口整片 502）。
+   * 类型导入（import type）不受影响，运行时会被擦除。
+   */
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
   "files": [],
   "references": [
     {

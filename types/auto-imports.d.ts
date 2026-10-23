@@ -153,6 +153,7 @@ declare global {
   const useAttrs: typeof import('vue').useAttrs
   const useAutoGrowInputWidth: typeof import('../src/composables/useAutoGrowInputWidth').useAutoGrowInputWidth
   const useAvatarDirectory: typeof import('../src/stores/avatarDirectory').useAvatarDirectory
+  const useAvatarSrc: typeof import('../src/composables/useAvatarSrc').useAvatarSrc
   const useBase64: typeof import('@vueuse/core').useBase64
   const useBattery: typeof import('@vueuse/core').useBattery
   const useBiDataStore: typeof import('../src/stores/biData').useBiDataStore

@@ -7,8 +7,14 @@ import type { ApprovalTypeTemplate } from '@/utils/approvalTypes'
 /*
  * 条件左值的**四则运算**（`总库存金额 - 已接收数量`）：只依赖纯函数、不 import 任何业务模块，
  * 所以放在 utils 里被这里 import 不会形成循环。
+ *
+ * ⚠️ 路径必须写**相对**（`../utils/…`），不能用 `@/utils/…`：
+ * 这个文件会被 **app server**（`server/index.ts`，tsx 直接跑源码）间接加载，而 tsx 只认根
+ * `tsconfig.json` 里的 `paths` —— 那份是 `references` 结构、没有 paths，`@/` 会被当成 npm 包名，
+ * 于是服务端启动即 `ERR_MODULE_NOT_FOUND: Cannot find package '@/utils'`（整台 app server 起不来，
+ * 组织架构刷新 / 头像 / 飞书接口全 502）。类型导入（import type）不受影响，运行时会被擦除。
  */
-import { evalArithmetic } from '@/utils/conditionMath'
+import { evalArithmetic } from '../utils/conditionMath'
 
 /**
  * 审批环节（ApprovalNode）提交上来的办理数据。

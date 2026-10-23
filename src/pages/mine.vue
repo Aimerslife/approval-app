@@ -148,6 +148,8 @@ import { useApprovalSelect } from '@/composables/useApprovalSelect'
 import { useNodeSubmit } from '@/composables/useNodeSubmit'
 // 头像目录：单据快照里不存成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
 import { useAvatarDirectory } from '@/stores/avatarDirectory'
+// 头像地址的逐级降级（代理 → 原地址 → 首字）：与时间线同一份实现
+import { useAvatarSrc } from '@/composables/useAvatarSrc'
 // 登录者（审批链成员的形状）：三档"我的单"都拿它跟链上成员比（见 orderPendingOn / orderCcTo）
 import { useUserStore } from '@/stores/user'
 import { APPROVAL_STATUS } from '@/types/approval'
@@ -564,22 +566,20 @@ function initialOf(name?: string) {
 
 /*
  * 卡片上的头像：按 open_id / email 到**头像目录**里现查（快照里不存头像，见 stores/avatarDirectory）。
- * 两处兜底与时间线里的成员头像同一口径（components/ApprovalNode 的 memberAvatar）：
- *   · 查不到 → 返回空串，模板退回首字；
- *   · 图加载失败 → 记下这个地址，之后不再反复试（飞书头像 URL 带签名，会过期，留着就是一排空圈）。
+ * 地址本身与时间线里的成员头像走同一套规则（utils/avatar + useAvatarSrc）：
+ *   代理优先 → 原始签名地址兜底 → 都失败才退回首字。
  */
 const avatarDir = useAvatarDirectory()
-const failedAvatars = ref<Record<string, true>>({})
+const avatarSrc = useAvatarSrc()
+/** 这一行的原始头像地址（老单自带 avatar 直显；新单按 open_id / email 现查） */
+function avatarRawOf(row: ApprovalRow) {
+  return row.owner?.avatar || avatarDir.avatarOf(row.owner)
+}
 function avatarOf(row: ApprovalRow) {
-  // 老单成员自带 avatar 直显；新单按 open_id / email 现查
-  const url = row.owner?.avatar || avatarDir.avatarOf(row.owner)
-  return url && !failedAvatars.value[url] ? url : ''
+  return avatarSrc.srcOf(avatarRawOf(row))
 }
 function onAvatarError(row: ApprovalRow) {
-  const url = row.owner?.avatar || avatarDir.avatarOf(row.owner)
-  if (url) {
-    failedAvatars.value[url] = true
-  }
+  avatarSrc.onError(avatarRawOf(row))
 }
 
 /* ==================== 所有审批单（表格 + 筛选） ==================== */

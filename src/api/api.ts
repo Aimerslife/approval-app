@@ -10,18 +10,23 @@ import { PB_REQUEST_KEY } from '@/utils/pbRequestKeys'
  * 这里只负责「BI 的 fields + 二维 rows → 对象数组」这一步转换。
  */
 import { resolveFieldKey, resolveFieldValue } from '@/utils/productFields'
+// 头像地址规则（同源路径 / 飞书签名 URL / 纯路径）只写在 utils/avatar，这里取首选地址
+import { avatarSrcOf } from '@/utils/avatar'
 
 // ========== 通用工具 ==========
 
-/** 将飞书头像 URL 转为服务端代理 URL，确保浏览器能正确加载 */
+/**
+ * 将飞书头像 URL 转为服务端代理 URL，确保浏览器能正确加载。
+ *
+ * 具体规则（同源路径原样返回、飞书域名走代理、非飞书域名不代理）统一在 utils/avatar 里，
+ * 这里只做"取首选地址"这一步 —— 别再在别处手拼 `/api/feishu/avatar?url=`。
+ */
 export function proxyAvatar(rawUrl?: string): string | undefined {
   if (!rawUrl) {
     console.warn('[proxyAvatar] 原始头像 URL 为空')
     return undefined
   }
-  const proxied = `/api/feishu/avatar?url=${encodeURIComponent(rawUrl)}`
-  console.log(`[proxyAvatar] ${rawUrl.slice(0, 60)}... → ${proxied.slice(0, 60)}...`)
-  return proxied
+  return avatarSrcOf(rawUrl) || undefined
 }
 
 async function feishuGet<T = any>(path: string, label: string): Promise<T> {

@@ -1,7 +1,7 @@
 <template>
     <v-avatar :class="['user-avatar', { 'user-avatar--interactive': interactive }]"
       :color="showImage ? undefined : 'primary'" :size="size" :title="name" :variant="showImage ? undefined : 'tonal'">
-      <v-img v-if="showImage" :alt="name" :src="avatarUrl" @error="failed = true" />
+      <v-img v-if="showImage" :alt="name" :src="avatarUrl" @error="onAvatarError" />
       <span v-else-if="hasUser" class="user-avatar__initial" :style="{ fontSize: `${initialSize}px` }">{{ initial
         }}</span>
       <v-icon v-else icon="mdi-account" :size="iconSize" />
@@ -9,7 +9,8 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
+import { useAvatarSrc } from '@/composables/useAvatarSrc'
 import { useUserStore } from '@/stores/user'
 
 /**
@@ -39,16 +40,21 @@ const props = withDefaults(defineProps<{
 
 const userStore = useUserStore()
 
-const avatarUrl = computed(() => userStore.avatar)
+/*
+ * 地址走 useAvatarSrc：服务端代理优先、原始签名地址兜底、都失败才退回首字。
+ * 飞书头像 URL 带签名会过期，直连的话过期就是空圈（见 utils/avatar 的文件头）。
+ * store 里那份是"解析后的原始地址"，这里只负责挑最终给 <img> 用的那一个。
+ */
+const avatarSrc = useAvatarSrc()
+const avatarUrl = computed(() => avatarSrc.srcOf(userStore.avatar))
+function onAvatarError () {
+  avatarSrc.onError(userStore.avatar)
+}
+
 const name = computed(() => userStore.displayName || '未登录')
 /** 有没有"人"可显示：未登录时 store 的 displayName 是「未登录」，取首字会变成个"未"字头像 */
 const hasUser = computed(() => userStore.isLoggedIn)
-
-const failed = ref(false)
-watch(avatarUrl, () => {
-  failed.value = false
-})
-const showImage = computed(() => hasUser.value && !!avatarUrl.value && !failed.value)
+const showImage = computed(() => hasUser.value && !!avatarUrl.value)
 
 /** 姓名首字：中文取第一个字（「张三」→「张」），英文取首字母并大写 */
 const initial = computed(() => {

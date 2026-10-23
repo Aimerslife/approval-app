@@ -297,6 +297,8 @@
   import { proxyAvatar } from '@/api/api'
   // 头像目录：单据快照里不带成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
   import { useAvatarDirectory } from '@/stores/avatarDirectory'
+  // 头像地址的逐级降级（代理 → 原地址 → 首字）：见 composables/useAvatarSrc 的文件头
+  import { useAvatarSrc } from '@/composables/useAvatarSrc'
   // 「选择接收团队」的结论码：历史单的 members 没记 pick，按结论码补粒度（见 pickedReceiver）
   import { PICK_TEAM_RESULT } from '@/types/approval'
   // 环节负责人口径（mainOf）与「连续同人环节」的类型都来自这里，别在组件里另写一套
@@ -491,19 +493,15 @@
    */
   const avatarDir = useAvatarDirectory()
   /*
-   * 贴图失败的地址（URL 过期 / 被拦）：记下来之后一律走首字，不再反复试同一个坏图。
-   * 飞书头像 URL 带签名的那些会过期，留着不管就是一排空圈。
+   * 地址本身交给 useAvatarSrc 做**逐级降级**（服务端代理 → 原始签名地址 → 首字）：
+   * 飞书头像 URL 带签名、会过期，直连只在签名有效期内可用（过期就是整片 403，见 utils/avatar）。
    */
-  const failedAvatars = ref<Record<string, true>>({})
+  const avatarSrc = useAvatarSrc()
   function memberAvatar (m?: ApprovalChainItem) {
-    const url = m?.avatar || avatarDir.avatarOf(m)
-    return url && !failedAvatars.value[url] ? url : ''
+    return avatarSrc.srcOf(m?.avatar || avatarDir.avatarOf(m))
   }
   function onAvatarError (m?: ApprovalChainItem) {
-    const url = m?.avatar || avatarDir.avatarOf(m)
-    if (url) {
-      failedAvatars.value[url] = true
-    }
+    avatarSrc.onError(m?.avatar || avatarDir.avatarOf(m))
   }
   /*
    * 加载放在 watch 而不是 computed：这是"发请求 + 写缓存"的副作用，computed 里不该发请求。
