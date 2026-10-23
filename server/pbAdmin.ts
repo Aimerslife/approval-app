@@ -58,6 +58,46 @@ export interface AdminCaller {
   email?: string
 }
 
+/** 通过校验的**普通登录者**身份（「我的审批」按它判"这张单是不是我的"） */
+export interface CallerIdentity {
+  id: string
+  /** 飞书 open_id（链上成员的比较口径之一是它） */
+  open_id: string
+  name: string
+  email: string
+  role: string
+}
+
+/**
+ * 校验"这是个已登录用户"，并返回他的身份。
+ *
+ * 与 assertSuperAdmin 同一套做法：拿调用者自己的 token 问 PocketBase（auth-refresh），
+ * 前端传来的 open_id / email 一律不采信 —— 否则谁都能伪造一个 open_id 去看别人的待办。
+ *
+ * 这里**不要求** superAdmin：本接口只是"读自己名下的单"，任何登录者都该能用。
+ */
+export async function assertUser (token: string): Promise<CallerIdentity> {
+  if (!token) {
+    throw new Error('缺少登录凭据（请求头里没有 token）')
+  }
+  const res = await fetch(new URL('/api/collections/users/auth-refresh', PB_URL).toString(), {
+    method: 'POST',
+    headers: { Authorization: token },
+  })
+  if (!res.ok) {
+    throw new Error(`登录凭据无效或已过期（HTTP ${res.status}），请重新登录后再试`)
+  }
+  const body: { record?: Record<string, unknown> } = await res.json()
+  const record = body?.record ?? {}
+  return {
+    id: String(record.id ?? ''),
+    open_id: String(record.open_id ?? ''),
+    name: String(record.name ?? ''),
+    email: String(record.email ?? ''),
+    role: String(record.role ?? ''),
+  }
+}
+
 /**
  * 校验调用者身份：必须是 `users.role === 'superAdmin'`。
  *

@@ -58,11 +58,12 @@
         </template>
       </v-data-table>
     </v-sheet>
-    <!-- 团队 → 默认审批人：默认值在 utils/organazation.ts 里维护，这里负责展示与「换人」 -->
+    <!-- 团队 → 默认审批人：数据在 data/people.json（页面上的「新增团队」直接写它，见 utils/peopleConfig） -->
     <div class="my-5 px-1">
       <div class="font-bold block-title">人员配置</div>
       <div class="text-[12px] text-medium-emphasis mt-1">
-        管理团队默认审批人；部门审批人按部门维护（同部门的团队共用）
+        管理团队默认审批人；部门审批人按部门维护（同部门的团队共用）。
+        团队清单维护在 <code>{{ PEOPLE_JSON_PATH }}</code>，新增会直接写进这份文件
       </div>
     </div>
     <v-sheet class="overflow-hidden card-border px-4 pt-4 pb-2" rounded="15">
@@ -75,6 +76,8 @@
           <span v-if="deptCustomCount" class="text-[12px] text-medium-emphasis ml-2">
             · 部门已改 <b class="text-primary">{{ deptCustomCount }}</b> 个</span>
         </div>
+        <v-btn color="primary" prepend-icon="mdi-account-plus-outline" size="small" variant="flat"
+          @click="openAddPerson">新增团队</v-btn>
         <v-text-field v-model="approverSearch" clearable density="compact" hide-details class="filter-input"
           label="搜索团队 / 审批人" prepend-inner-icon="mdi-magnify" single-line style="max-width: 260px" variant="outlined" />
       </div>
@@ -269,6 +272,61 @@
       </v-card>
     </v-dialog>
 
+    <!--
+      新增团队 / 默认审批人：写的是 data/people.json（浏览器碰不到仓库文件，所以要经 app server 落盘，
+      见 utils/peopleConfig 与 server/people.ts）。
+      「更换」那个弹窗改的是 PB 里的覆盖值，两者不冲突：JSON 是默认值，覆盖值只顶掉某一行的人。
+    -->
+    <v-dialog v-model="addOpen" max-width="820">
+      <v-card class="overflow-hidden" rounded="xl">
+        <v-card-title class="d-flex align-center justify-space-between px-6 py-4">
+          <div class="d-flex align-center ga-2">
+            <v-avatar color="primary" size="28" variant="tonal">
+              <v-icon icon="mdi-account-plus-outline" size="16" />
+            </v-avatar>
+            <span class="text-[15px] font-bold">新增团队</span>
+          </div>
+
+          <v-icon-btn icon="mdi-close" size="small" variant="text" @click="addOpen = false" />
+        </v-card-title>
+
+        <v-divider />
+
+        <v-card-text class="px-6 py-4">
+          <div class="d-flex ga-3">
+            <!-- combobox：部门可以直接输入新的（新建部门时没人能选） -->
+            <v-combobox v-model="addDraft.parent" class="filter-input h-[28px]" density="compact" :items="deptOptions"
+              label="上级部门" placeholder="选已有部门，或直接输入新部门" variant="outlined">
+              <template #message>
+                <span class="text-[11px]">同部门的团队共用「部门审批人」；新部门请顺手在 JSON 里补 parentManager</span>
+              </template>
+            </v-combobox>
+
+            <v-text-field v-model="addDraft.group" class="filter-input" density="compact" hide-details="auto" single-line 
+              label="团队名" placeholder="如：美4组" variant="outlined" />
+          </div>
+
+          <div class="text-[12px] text-medium-emphasis mt-4 mb-2">
+            默认审批人：<b>{{ addDraft.manager || '未选择' }}</b>
+            <span v-if="addDraft.managerEmail"> · {{ addDraft.managerEmail }}</span>
+          </div>
+
+          <!-- 通讯录自带搜索与刷新；高度由 .approver-tree 收住（与「更换审批人」同一个类） -->
+          <div class="approver-tree">
+            <OrgTree @select="onAddOrgSelect" />
+          </div>
+        </v-card-text>
+
+        <v-divider />
+
+        <v-card-actions class="px-6 py-3">
+          <v-spacer />
+          <v-btn variant="text" @click="addOpen = false">取消</v-btn>
+          <v-btn color="primary" :loading="addSaving" variant="flat" @click="saveNewPerson">保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- 改数据的结果要有反馈，不能静默 -->
     <v-snackbar v-model="hint.show" :color="hint.color" location="top" timeout="3000" variant="tonal">
       {{ hint.text }}
@@ -343,6 +401,13 @@
 <script lang="ts" setup>
 import OrgTree from '@/components/OrgTree.vue'
 import type { OrgSelectPayload, OrgSelectedUser } from '@/components/OrgTree.vue'
+/*
+ * 人员配置的落库口：数据只有一份 data/people.json（见 types/people 的文件头）。
+ * addPersonRow 会经 app server 写文件、并把写完的整份清单换进内存表 ——
+ * 于是「换人」那种 PB 覆盖值与本页新增的默认值能在同一张表里并列显示。
+ */
+import { addPersonRow } from '@/utils/peopleConfig'
+import { findPersonProblem, PEOPLE_JSON_PATH } from '@/types/people'
 import {
   deleteDeptApproverOverride,
   deleteGroupApproverOverride,
@@ -659,6 +724,82 @@ async function savePicked() {
     showHint('保存失败，请稍后重试', 'error')
   } finally {
     saving.value = false
+  }
+}
+
+/* ==================== 新增团队（写 data/people.json） ==================== */
+/*
+ * 与上面「更换审批人」的分工：
+ *   · 这里 = **默认值**（JSON 里的一行）：团队清单本身长了、或给新团队指定默认审批人；
+ *   · 上面 = **覆盖值**（PB group_approvers）：团队不变，只把这一行的默认人换掉。
+ * 两者合并显示在同一张表里（见 utils/groupApprovers 的 mergeGroupApprovers）。
+ */
+
+const addOpen = ref(false)
+const addSaving = ref(false)
+/** 草稿：审批人相关的三个字段来自通讯录（邮箱/头像可缺，JSON 里存下来表格才有得显示） */
+const addDraft = ref({ parent: '', group: '', manager: '', managerEmail: '', managerAvatar: '' })
+
+/** 部门候选：现有清单里出现过的部门（combobox，可直接输入新部门） */
+const deptOptions = computed(() => [...new Set(approverRows.value.map(r => r.parent).filter(Boolean))])
+
+function openAddPerson() {
+  addDraft.value = {
+    // 预填第一个部门：多数新增都是往已有部门里加团队，省一次点选
+    parent: deptOptions.value[0] ?? '',
+    group: '',
+    manager: '',
+    managerEmail: '',
+    managerAvatar: '',
+  }
+  addOpen.value = true
+}
+
+/** 通讯录里只能选**人**：点到部门时忽略并提示（与「更换审批人」同一口径） */
+function onAddOrgSelect(payload: OrgSelectPayload | null) {
+  if (!payload) {
+    return
+  }
+  if (payload.type !== 'user') {
+    showHint('请在通讯录里点选成员，而不是部门')
+    return
+  }
+  addDraft.value.manager = payload.user.name
+  addDraft.value.managerEmail = payload.user.email ?? ''
+  addDraft.value.managerAvatar = payload.user.avatar ?? ''
+}
+
+async function saveNewPerson() {
+  const draft = addDraft.value
+  // 前端先拦一道（必填 / 团队重名），口径与服务端共用 types/people 的 findPersonProblem
+  const problem = findPersonProblem(draft, approverRows.value)
+  if (problem) {
+    showHint(problem, 'warning')
+    return
+  }
+
+  addSaving.value = true
+  try {
+    await addPersonRow({
+      parent: draft.parent.trim(),
+      // 新团队的部门负责人留空：那是「部门级」的值，已有部门由该部门其他行提供，
+      // 新部门则请在 JSON 里补 parentManager（弹窗里有提示）
+      parentManager: '',
+      group: draft.group.trim(),
+      manager: draft.manager.trim(),
+      ...(draft.managerEmail ? { managerEmail: draft.managerEmail } : {}),
+      ...(draft.managerAvatar ? { managerAvatar: draft.managerAvatar } : {}),
+    })
+    // 内存表已被 addPersonRow 换掉，重新合并一次就能看到新行（不必刷新页面）
+    await loadApprovers()
+    addOpen.value = false
+    showHint(`团队「${draft.group.trim()}」已保存到 ${PEOPLE_JSON_PATH}`, 'success')
+  } catch (error) {
+    console.error('[roleSetting] 新增团队失败:', error)
+    // 服务端返回的原因（重名 / 缺字段）原样展示：这类失败必须让人看见
+    showHint(error instanceof Error ? error.message : '保存失败，请稍后重试', 'error')
+  } finally {
+    addSaving.value = false
   }
 }
 

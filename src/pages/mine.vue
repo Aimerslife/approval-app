@@ -31,7 +31,7 @@
         <div class="d-flex align-center justify-space-between px-3 pt-2">
           <span class="text-[14px] font-bold">所有审批单</span>
           <span class="text-[12px] text-medium-emphasis">
-            全部审批单（含仍在流转的）· 共 {{ historyRows.length }} 张
+            全部审批单（含仍在流转的）· 共 {{ tabCounts.history }} 张
           </span>
         </div>
         <ApprovalFilterBar :dirty="historyDirty" :filters="historyFilters" :options="historyOptions"
@@ -40,7 +40,7 @@
         <v-divider />
         <v-data-table v-model:page="historyPage" border class="text-[12px] mine-table" density="compact" fixed-footer
           fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
-          striped="odd" @click:row="handleRowClick">
+          :loading="tabLoading" striped="odd" @click:row="handleRowClick">
           <template #item.order_no="{ value }">
             <span class="font-bold">{{ value }}</span>
           </template>
@@ -82,6 +82,8 @@
             </v-icon-btn>
           </div>
         </div>
+        <!-- 取数中：一条细进度条（卡片区没有表格那种遮罩，空了会像"没有单"） -->
+        <v-progress-linear v-if="tabLoading" class="mt-1" color="primary" height="2" indeterminate />
         <div class="order-list overflow-y-auto pa-2">
           <v-card v-for="row in cardRows" :key="row.id" class="order-card" variant="flat"
             :class="{ 'order-card--active': row.id === selectedNode?.id }" rounded="lg" @click="selectRow(row)">
@@ -113,7 +115,7 @@
             </v-card-actions>
           </v-card>
 
-          <div v-if="cardRows.length === 0" class="empty-hint d-flex flex-column align-center justify-center">
+          <div v-if="!tabLoading && cardRows.length === 0" class="empty-hint d-flex flex-column align-center justify-center">
             <v-icon color="medium-emphasis" size="36">mdi-inbox-outline</v-icon>
             <span class="text-[12px] text-medium-emphasis mt-2">{{ emptyText }}</span>
           </div>
@@ -135,7 +137,8 @@
 </template>
 
 <script setup lang="ts">
-import type { DeleteOrderSummary } from '@/api/api'
+// 按档取数：判据在服务端（见 utils/… 与 server/mineOrders.ts），这里只负责调度与渲染
+import { type DeleteOrderSummary, fetchMineOrders } from '@/api/api'
 import type { ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
 // 右侧「审批详情」：与首页抽屉共用同一个组件（信息 + 流程时间线 + 办理入口）
 import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
@@ -188,16 +191,11 @@ import {
 import {
   lastHandledOf,
   mainOf,
-  orderCcTo,
-  orderCreatedBy,
-  orderHandledBy,
-  orderPendingOn,
   runtimeOf,
   stepStartTimesOf,
 } from '@/utils/approvalRuntime'
 // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
 import { toProductView } from '@/utils/biRowFields'
-import { getApprovalOrder } from '@/utils/collection'
 // 推送规则（只为了拿「超时阈值」）：与提醒设置、超时跑批同源，读不到就用默认规则
 import { DEFAULT_PUSH_RULES, type PushRules } from '@/utils/pushRules'
 import { loadPushRules } from '@/utils/pushRulesStore'
@@ -207,10 +205,11 @@ import { workingHoursBetween } from '@/utils/workingHours'
 
 const router = useRouter()
 const userStore = useUserStore()
-/** 登录者（审批链成员形状）；未登录是 undefined —— 那种情况下"我的单"一律为空 */
-const me = computed(() => userStore.member)
-/** 登录者 id：与 approval_chain.creator 同源（「我发起的」按它判，见 orderCreatedBy） */
-const userId = computed(() => userStore.user?.id ?? '')
+/*
+ * 登录者的 open_id / email / name 不在这里比对了 —— 四档归类都在服务端算
+ * （server/mineOrders.ts 用同一个 useUserStore.member 口径的成员对象）。
+ * 页面只用到 isLoggedIn 决定要不要发请求、以及空态文案。
+ */
 
 /*
  * 左栏的五个分类。值即状态，模板里据此决定中栏渲染卡片还是表格。
@@ -343,8 +342,81 @@ function toRow(order: ApprovalOrder): ApprovalRow {
   }
 }
 
-/** 全部审批单（approval_chain），已按创建时间倒序 —— 见 getApprovalOrder */
-const orders = ref<ApprovalOrder[]>([])
+/*
+ * ==================== 按档懒加载 ====================
+ *
+ * 进页面只取「待办」，切到哪一档才取哪一档（每档第一次进才请求，之后用缓存）。
+ *
+ * 为什么不再"一次拉全量再本地筛"：四档的判据都要按 flow + decisions 重算链路，
+ * 意味着每次进页面都要把**所有**审批单（每条带完整流程快照）拉进浏览器再跑一遍。
+ * 现在判据挪到服务端（server/mineOrders.ts，复用同一套纯函数），浏览器每次只拿当前这一档。
+ *
+ * 左栏角标要显示五档条数，所以服务端每次把五档数量一起返回（它反正要全部算一遍）。
+ */
+const TAB_KEYS: MineTab[] = ['pending', 'approved', 'cc', 'created', 'history']
+
+/** 每档的整单（服务端返回的原始单据） */
+const tabOrders = reactive<Record<MineTab, ApprovalOrder[]>>({
+  pending: [],
+  approved: [],
+  cc: [],
+  created: [],
+  history: [],
+})
+
+/** 每档的条数（服务端算的，与列表同源；不要用 tabOrders[x].length 代替 —— 没加载过的档是 0） */
+const tabCounts = reactive<Record<MineTab, number>>({
+  pending: 0,
+  approved: 0,
+  cc: 0,
+  created: 0,
+  history: 0,
+})
+
+/**
+ * 这一档**取过没有**。
+ * 必须单独记：空数组既可能是"还没请求"，也可能是"请求过、确实没有单" ——
+ * 只用 length 判断会让空档每次切回来都重新请求一次。
+ */
+const tabLoaded = reactive<Record<MineTab, boolean>>({
+  pending: false,
+  approved: false,
+  cc: false,
+  created: false,
+  history: false,
+})
+
+/** 当前档正在取数（表格 / 卡片列表的加载态） */
+const tabLoading = ref(false)
+
+/**
+ * 取一档数据。
+ *
+ * @param force true = 无视缓存重新取（刷新按钮、办完单、删单之后用）
+ *
+ * 未登录直接跳过（服务端会 401）：登录态由 watch 兜住，登录后会自动补一次。
+ */
+async function loadTab(target: MineTab, force = false) {
+  if (!userStore.isLoggedIn) {
+    return
+  }
+  if (!force && tabLoaded[target]) {
+    return
+  }
+  tabLoading.value = true
+  try {
+    const res = await fetchMineOrders(target)
+    tabOrders[target] = res.rows
+    Object.assign(tabCounts, res.counts)
+    tabLoaded[target] = true
+  } catch (error) {
+    // 失败必须说出来：静默的话卡片区就是一片空白，看着像"我没有待办"
+    console.error('[mine] 读取失败:', error)
+    showMsg(error instanceof Error ? error.message : '读取失败，请稍后重试', 'error')
+  } finally {
+    tabLoading.value = false
+  }
+}
 
 /**
  * 「超时阈值」的来源：与「提醒设置」的推送规则**同源** —— 那边把阈值改成 24，
@@ -358,49 +430,36 @@ async function loadProgressRules() {
   pushRules.value = (await loadPushRules()).rules
 }
 
-/* ==================== 三档"我的单" ==================== */
-
-/** 待办：此刻压在我手上的在办单 */
-const pendingRows = computed(() =>
-  orders.value.filter(o => orderPendingOn(o, me.value)).map(o => toRow(o)),
-)
+/* ==================== 各档的行（由已加载的单据派生） ==================== */
 
 /**
- * 已审批：我办过、且此刻没压回我手上的单。
+ * 每档的行。
  *
- * 与「待办」互斥（同一张单不会同时出现在两档）：驳回回退会把单送回我这一环，
- * 那种算待办、不算已审批 —— 与「待办」的判据（orderPendingOn）正好是一对补集关系。
+ * 放 computed 而不是取回数据时就转好：toRow 依赖 `pushRules`（超时阈值），
+ * 阈值一改（提醒设置里调过）进度列的"超时"要立刻跟着变，缓存成数组就变不了。
+ * 各档的行数本来就小（只有当前页用到的那些单），重算一次可以忽略。
  */
-const approvedRows = computed(() =>
-  orders.value
-    .filter(o => !orderPendingOn(o, me.value))
-    .filter(o => orderHandledBy(o, me.value))
-    .map(o => toRow(o)),
-)
-
-/** 抄送我的：链路上（含运行期追加的抄送）有 type='cc' 的成员是我 */
-const ccRows = computed(() =>
-  orders.value.filter(o => orderCcTo(o, me.value)).map(o => toRow(o)),
-)
-
-/** 我发起的：建单时落库的 creator 是我（历史单没有这个字段，不会误算） */
-const createdRows = computed(() =>
-  orders.value.filter(o => orderCreatedBy(o, userId.value)).map(o => toRow(o)),
-)
+const rowsByTab = computed<Record<MineTab, ApprovalRow[]>>(() => ({
+  pending: tabOrders.pending.map(o => toRow(o)),
+  approved: tabOrders.approved.map(o => toRow(o)),
+  cc: tabOrders.cc.map(o => toRow(o)),
+  created: tabOrders.created.map(o => toRow(o)),
+  history: tabOrders.history.map(o => toRow(o)),
+}))
 
 /**
  * 所有审批单：**全部单**，不按"我经手过"过滤（那是「已审批」的口径）。
  * 命名沿用 history（这一档就是原来那张表，筛选条 / 分页 / 删除都在）。
  */
-const historyRows = computed(() => orders.value.map(o => toRow(o)))
+const historyRows = computed(() => rowsByTab.value.history)
 
-/** 左栏的五个分类（文案 / 图标 / 计数） */
+/** 左栏的五个分类（文案 / 图标 / 计数）—— 计数来自服务端，没加载过的档也有值 */
 const tabItems = computed(() => [
-  { value: 'pending' as const, text: '待办', icon: 'mdi-inbox-arrow-down-outline', count: pendingRows.value.length },
-  { value: 'approved' as const, text: '已审批', icon: 'mdi-clipboard-check-outline', count: approvedRows.value.length },
-  { value: 'cc' as const, text: '抄送我的', icon: 'mdi-email-outline', count: ccRows.value.length },
-  { value: 'created' as const, text: '我发起的', icon: 'mdi-send-outline', count: createdRows.value.length },
-  { value: 'history' as const, text: '所有审批单', icon: 'mdi-clipboard-list-outline', count: historyRows.value.length },
+  { value: 'pending' as const, text: '待办', icon: 'mdi-inbox-arrow-down-outline', count: tabCounts.pending },
+  { value: 'approved' as const, text: '已审批', icon: 'mdi-clipboard-check-outline', count: tabCounts.approved },
+  { value: 'cc' as const, text: '抄送我的', icon: 'mdi-email-outline', count: tabCounts.cc },
+  { value: 'created' as const, text: '我发起的', icon: 'mdi-send-outline', count: tabCounts.created },
+  { value: 'history' as const, text: '所有审批单', icon: 'mdi-clipboard-list-outline', count: tabCounts.history },
 ])
 
 const activeTabText = computed(() => tabItems.value.find(t => t.value === tab.value)?.text ?? '')
@@ -459,16 +518,8 @@ const dayRange = computed(() => {
 
 /** 当前 tab 对应的完整行集（还未叠搜索 / 时间条件） */
 const baseRows = computed(() => {
-  if (tab.value === 'approved') {
-    return approvedRows.value
-  }
-  if (tab.value === 'cc') {
-    return ccRows.value
-  }
-  if (tab.value === 'created') {
-    return createdRows.value
-  }
-  return pendingRows.value
+  // 表格（history）不走这里；其余四档就是服务端刚返回的那一档
+  return rowsByTab.value[tab.value]
 })
 
 /**
@@ -510,8 +561,18 @@ const activeRows = computed(() =>
 /** 选中的那一行（右栏显示的就是它的流程） */
 const selectedNode = ref<ApprovalRow | null>(null)
 
-/** 选中行对应的原始单据（时间线要用它重算链路） */
-const selectedOrder = computed(() => orders.value.find(o => o.id === selectedNode.value?.id) ?? null)
+/**
+ * 选中行对应的原始单据（时间线要用它重算链路）。
+ * 只在**当前档**里找：同一张单可能同时出现在别的档（如「抄送我的」与「所有审批单」），
+ * 但右栏显示的必须是眼前这一档的那张。
+ */
+const selectedOrder = computed(() => {
+  const id = selectedNode.value?.id
+  if (!id) {
+    return null
+  }
+  return tabOrders[tab.value].find(o => o.id === id) ?? null
+})
 
 /** 表格模式（所有审批单）必须有选中才显示右栏；卡片模式常驻（没有选中时显示空态） */
 const showDetail = computed(() => tab.value !== 'history' || !!selectedNode.value)
@@ -526,6 +587,8 @@ const hasNextStep = computed(() =>
 
 function switchTab(value: MineTab) {
   tab.value = value
+  // 第一次进这一档才请求；已经取过的直接复用缓存
+  void loadTab(value)
 }
 
 function selectRow(row: ApprovalRow) {
@@ -702,13 +765,22 @@ function showMsg(text: string, color: 'success' | 'error' | 'warning' = 'success
   snackbar.value = { show: true, text, color }
 }
 
-/** 提交 / 抄送后的回填：更新列表里那条，并把选中的行换成新的快照（右栏时间线才会跟着变） */
+/**
+ * 提交 / 抄送后的回填。
+ *
+ * 两件事都要做：
+ *   ① 已加载的每一档里，把这条单换成新快照（右栏时间线读的是它）；
+ *   ② **重取当前档**：办完之后它的归属可能变了（待办 → 已审批），
+ *      只改本地数组的话，它会赖在「待办」里直到手动刷新，左栏角标也是旧的。
+ */
 function onOrderUpdated(updated: ApprovalOrder) {
-  orders.value = orders.value.map(o => (o.id === updated.id ? { ...o, ...updated } : o))
-  const row = orders.value.find(o => o.id === updated.id)
-  if (row && selectedNode.value?.id === updated.id) {
-    selectedNode.value = toRow(row)
+  for (const key of TAB_KEYS) {
+    const i = tabOrders[key].findIndex(o => o.id === updated.id)
+    if (i >= 0) {
+      tabOrders[key][i] = { ...tabOrders[key][i], ...updated }
+    }
   }
+  void loadTab(tab.value, true)
 }
 
 const { submitNode } = useNodeSubmit({
@@ -748,12 +820,24 @@ function onDeleteFailed(message: string) {
   showMsg(message, 'error')
 }
 
+/** 刷新当前档（右上角的刷新按钮；各档缓存在切 tab 时自然复用） */
 async function getDatas() {
-  orders.value = await getApprovalOrder()
+  await loadTab(tab.value, true)
 }
 
+/*
+ * 登录态到位后再补一次：首屏挂载时 userStore 可能还没 init 完（isLoggedIn 为 false），
+ * loadTab 会直接跳过 —— 不兜这一下，页面就停在"空列表"上，除非手动点刷新。
+ */
+watch(() => userStore.isLoggedIn, ok => {
+  if (ok && !tabLoaded[tab.value]) {
+    void loadTab(tab.value)
+  }
+})
+
 onMounted(() => {
-  getDatas()
+  // 进页面只取「待办」，其余四档等切过去再取
+  void loadTab(tab.value)
   // 进度列的「超时阈值」来自提醒设置：拉一次（失败回落默认规则，不影响列表）
   void loadProgressRules()
   // 卡片头像：拉一次通讯录缓存（幂等；失败只告警，头像退回首字，不影响列表）

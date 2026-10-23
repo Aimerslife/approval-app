@@ -1,0 +1,68 @@
+[
+  {
+    "parent": "TK",
+    "parentManager": "戴丽淑",
+    "group": "TK",
+    "manager": "戴丽淑"
+  },
+  {
+    "parent": "市场部",
+    "parentManager": "林泽昆",
+    "group": "拓业部",
+    "manager": "彭诗懿"
+  },
+  {
+    "parent": "市场部",
+    "parentManager": "林泽昆",
+    "group": "市场部1组",
+    "manager": "林思诺"
+  },
+  {
+    "parent": "市场部",
+    "parentManager": "张卓艳",
+    "group": "市场部2组",
+    "manager": "林思诺"
+  },
+  {
+    "parent": "B2C销售部",
+    "parentManager": "",
+    "group": "美2组",
+    "manager": "周开胜"
+  },
+  {
+    "parent": "B2C销售部",
+    "parentManager": "张卓艳",
+    "group": "美1组",
+    "manager": "范少玲"
+  },
+  {
+    "parent": "B2C销售部",
+    "parentManager": "张卓艳",
+    "group": "美3组",
+    "manager": "李凯杰"
+  },
+  {
+    "parent": "B2C销售部",
+    "parentManager": "张卓艳",
+    "group": "夜灯-其他",
+    "manager": "陈颖"
+  },
+  {
+    "parent": "B2C销售部",
+    "parentManager": "张卓艳",
+    "group": "亚马逊-未维护",
+    "manager": "陈颖"
+  },
+  {
+    "parent": "B2C销售部",
+    "parentManager": "张卓艳",
+    "group": "多站点组",
+    "manager": "魏燕玲"
+  },
+  {
+    "parent": "B2C销售部",
+    "parentManager": "张卓艳",
+    "group": "欧洲组",
+    "manager": "黄伟强"
+  }
+]

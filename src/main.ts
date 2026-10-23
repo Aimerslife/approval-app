@@ -18,6 +18,11 @@ import VxeUITable from 'vxe-table'
 
 // Plugins
 import { registerPlugins } from '@/plugins'
+/*
+ * 人员配置（团队 → 默认审批人）：数据在 data/people.json，运行期以 app server 那份为准。
+ * 这里在**挂载之前**拉一次（见文件末尾的说明）。
+ */
+import { hydratePeopleConfig } from '@/utils/peopleConfig'
 import App from './App.vue'
 import '@kangc/v-md-editor/lib/style/codemirror-editor.css'
 import '@kangc/v-md-editor/lib/theme/style/github.css'
@@ -74,4 +79,17 @@ app.use(VMdPreview)
 app.use(VxeUI)
 app.use(VxeUITable)
 
-app.mount('#app')
+/*
+ * 先取一次最新的团队表，再挂应用。
+ *
+ * 为什么必须在挂载**之前**：团队表是**同步读取**的（utils/organazation 的 groupManage），
+ * 首屏就可能用到它 —— 人员配置表、模板里的「选择接收团队」候选、动态审批人解析。
+ * 挂载后再补的话，这些地方会先按打包快照渲染一遍，得刷新一次才正常。
+ *
+ * hydrate 内部有 1.5s 超时且不抛错：服务没起 / 文件没了都照常启动（用打包里的快照），
+ * 不会因为这份"锦上添花"的数据把整个应用卡住白屏。
+ */
+void (async () => {
+  await hydratePeopleConfig()
+  app.mount('#app')
+})()

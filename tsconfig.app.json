@@ -12,6 +12,8 @@
   "compilerOptions": {
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    // 人员配置（data/people.json）是 import 进 utils/organazation 的 —— 不开这个，TS 不认 .json 模块
+    "resolveJsonModule": true,
     "paths": {
       "@/*": [
         "./src/*"

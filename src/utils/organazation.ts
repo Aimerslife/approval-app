@@ -1,71 +1,32 @@
-export const groupManage=[
-    {   
-        parent:"TK",
-        parentManager:'戴丽淑',
-        group:"TK",
-        manager:"戴丽淑",
-    },
-    {   
-        parent:"市场部",
-        parentManager:'林泽昆',
-        group:"拓业部",
-        manager:"彭诗懿",
-    },
-    {   
-        parent:"市场部",
-        parentManager:'林泽昆',
-        group:"市场部1组",
-        manager:"林思诺",
-    },
-    {   
-        parent:"市场部",
-        parentManager:'张卓艳',
-        group:"市场部2组",
-        manager:"林思诺",
-    },
-    {   
-        parent:"B2C销售部",
-        parentManager:'',
-        group:"美2组",
-        manager:"周开胜",
-    },
-    {   
-        parent:"B2C销售部",
-        parentManager:'张卓艳',
-        group:"美1组",
-        manager:"范少玲",
-    },
-    {   
-        parent:"B2C销售部",
-        parentManager:'张卓艳',
-        group:"美3组",
-        manager:"李凯杰",
-    },
-    {   
-        parent:"B2C销售部",
-        parentManager:'张卓艳',
-        group:"夜灯-其他",
-        manager:"陈颖",
-    },
-    {   
-        parent:"B2C销售部",
-        parentManager:'张卓艳',
-        group:"亚马逊-未维护",
-        manager:"陈颖",
-    },
-     {   
-        parent:"B2C销售部",
-        parentManager:'张卓艳',
-        group:"多站点组",
-        manager:"魏燕玲",
-    },
-     {   
-        parent:"B2C销售部",
-        parentManager:'张卓艳',
-        group:"欧洲组",
-        manager:"黄伟强",
-    }
-]
+import { normalizePeople, type PersonRow } from '@/types/people'
+import peopleConfig from '../../data/people.json'
+
+/*
+ * ===== 团队表（团队 → 部门 / 团队负责人 / 部门负责人）=====
+ *
+ * **数据只有一份**：仓库根目录的 `data/people.json`（结构见 types/people 的 PersonRow）。
+ *
+ *   · 下面 import 进来的是**打包时的快照**：服务没起 / 首屏渲染时先用它，页面不会空着；
+ *   · 启动后 main.ts 会向 app server 拉同一份文件（GET /api/people），用 applyPeopleConfig 覆盖
+ *     —— 这样"别人新增的团队"刷新页面也能看到（打包快照是死的，不会自己变）；
+ *   · 「角色设置 → 人员配置 → 新增团队」写的就是那份文件（POST /api/people 落盘）。
+ *
+ * 也可以直接手工编辑 data/people.json：开发期 Vite 会热更新，改完即生效。
+ * 新增条目只要保证 parent / group / manager 三项齐全，其余可省（见 normalizePersonRow）。
+ */
+export const groupManage: TeamGroupRow[] = normalizePeople(peopleConfig as unknown as PersonRow[])
+
+/**
+ * 用服务端那份 JSON 覆盖内存里的团队表 —— **原地替换**。
+ *
+ * ⚠️ 必须 `splice` 而不是 `groupManage = rows`：
+ *    别的模块都是 `import { groupManage }` 拿到的**同一个数组引用**，
+ *    换引用它们看到的还是旧数组 —— 表现就是"新增的人在人员配置里可见，
+ *    但流程/选团队的地方找不到"（本仓库在别处也踩过同一类坑）。
+ */
+export function applyPeopleConfig (rows: readonly PersonRow[]): void {
+  groupManage.splice(0, groupManage.length, ...normalizePeople(rows))
+}
 
 /**
  * 团队表的一行：**部门（parent）→ 团队（group）**，`manager` 是该团队负责人。
@@ -88,6 +49,10 @@ export interface TeamGroupRow {
    * 避免"同一部门在不同行上得到不同负责人"。
    */
   parentManager?: string
+  /** 默认审批人的邮箱（从通讯录选人时记下来的，可缺；表格里直接展示） */
+  managerEmail?: string
+  /** 默认审批人的头像（可缺，口径同上） */
+  managerAvatar?: string
 }
 
 /**
@@ -116,8 +81,16 @@ export function teamGroups (keyword = ''): Array<{ name: string, groups: TeamGro
   return [...byParent].map(([name, groups]) => ({ name, groups }))
 }
 
-/** 团队表里一共有多少个团队（提示文案用，如「共 10 个团队」） */
-export const TEAM_GROUP_COUNT = groupManage.length
+/**
+ * 团队表里一共有多少个团队（提示文案用，如「共 11 个团队」）。
+ *
+ * ⚠️ 写成**函数**而不是 `export const TEAM_GROUP_COUNT = groupManage.length`：
+ *    团队表在启动后会被服务端那份 JSON 覆盖（见 applyPeopleConfig），
+ *    常量在 import 那一刻就定死了 —— 新增团队后文案会一直停在旧数字上。
+ */
+export function teamGroupCount (): number {
+  return groupManage.length
+}
 
 /**
  * 某个**团队**属于哪个**部门**（团队表里反查 `parent`）。

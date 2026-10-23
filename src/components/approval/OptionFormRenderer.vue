@@ -8,7 +8,7 @@
           density="compact"
           hide-details="auto"
           :label="field.label"
-          :model-value="valueOf(field.key)"
+          :model-value="displayValueOf(field)"
           :placeholder="field.placeholder"
           :readonly="isReadonly(field)"
           :rules="rulesFor(field)"
@@ -19,14 +19,22 @@
 
         <!-- 价值紧跟在数量框右侧（排头）：框宽受限时它会跟着换行，但不会掉到框下面单独成行 -->
         <span v-if="valueNoteOf(field)" class="field-side" :title="valueTitleOf()">
-          价值 ￥{{ valueNoteOf(field) }}
+          价值 ￥{{ valueNoteOf(field) }}<template v-if="valueQtyNoteOf(field)">（{{ valueQtyNoteOf(field) }}）</template>
         </span>
 
-        <span v-if="sideNoteOf(field)" class="field-side">{{ sideNoteOf(field) }}</span>
+        <!--
+          「不可修改」：数量是按剩余带出来的（全部接收就是这个语义），不说一句的话，
+          看上去跟能改的输入框没差别 —— 用户会点进去发现打不了字。
+        -->
+        <span v-if="isLockedToCap(field)" class="field-side field-lock">
+          <v-icon icon="mdi-lock-outline" size="11" />
+          不可修改
+        </span>
+
       </div>
 
       <!-- 多行文本 -->
-      <div v-else-if="field.control === 'textarea'" class="field-row">
+      <!-- <div v-else-if="field.control === 'textarea'" class="field-row">
         <v-textarea
           class="field-input"
           density="compact"
@@ -37,7 +45,7 @@
           variant="outlined"
           @update:model-value="v => setValue(field.key, v)"
         />
-      </div>
+      </div> -->
 
       <!-- 下拉 / 单选（auto = 选项 ≤ 3 用单选，与办理页同口径） -->
       <div v-else-if="field.control === 'select' || field.control === 'radio' || field.control === 'auto'" class="field-row">
@@ -98,10 +106,6 @@
 
       <div v-if="field.hint" class="field-hint">{{ field.hint }}</div>
     </template>
-
-    <div v-if="visibleFields.length === 0" class="field-empty">
-      这个结论不额外要东西：只填备注 / 附件（它们对所有结论都有）
-    </div>
   </div>
 </template>
 
@@ -226,7 +230,6 @@
 
   const stockQtyText = computed(() => String(props.context?.stockQty ?? '').trim())
   const remainingQtyText = computed(() => String(props.context?.remainingQty ?? '').trim())
-  const receivedQtyText = computed(() => String(props.context?.receivedQty ?? '').trim())
   const stockAmountText = computed(() => String(props.context?.stockAmount ?? '').trim())
 
   /** 「价值」按哪个数量算：与上限同口径（剩余优先，没有剩余退回总库存） */
@@ -249,6 +252,24 @@
   function valueTitleOf (): string {
     const name = remainingQtyText.value ? '剩余数量' : '总库存数量'
     return `价值 = 总库存金额 ÷ 总库存数量 × ${name} = ${stockAmountText.value} ÷ ${stockQtyText.value} × ${valueBaseQtyText.value}`
+  }
+
+  /**
+   * 「价值」后面括号里的数量：**按哪个数量算的就标哪个**（与 valueBaseQtyText 同源）。
+   *
+   * 为什么要把数量贴在金额后面：件数本身说明不了轻重，金额又要靠数量才读得出含义
+   *（价值 ￥8,000（100 件）），分开摆时办理人得来回对照两次。
+   * 取不到数量就返回空串（模板里整对括号都不渲染，不会出现「价值 ￥8,000（）」）。
+   */
+  function valueQtyNoteOf (field: TypeField): string {
+    if (field.limit !== 'receive_cap') {
+      return ''
+    }
+    const qty = String(valueBaseQtyText.value ?? '').trim()
+    if (!qty) {
+      return ''
+    }
+    return `${qty} ${field.unit || '件'}`
   }
 
   /** 上限数值：认不出来 = undefined（那就没有上限） */
@@ -274,26 +295,49 @@
     return field.limit === 'stock_amount' ? '元' : '件'
   }
 
-  /** 取到上限 → 只读（改造前"接收"的行为） */
-  function isReadonly (field: TypeField): boolean {
-    if (props.readonly) return true
-    if (!field.readonlyWhenFull) return false
-    return limitValueOf(field) !== undefined
+  /**
+   * 「按上限带出、且**不可修改**」的字段：模板开了 `readonlyWhenFull`、且上限取得到
+   * （「全部接收」就是这一类：数量 = 剩余，不由人填）。
+   *
+   * 预览里的整表只读（`props.readonly`）不算这一类 —— 那种情况下每一格都不可改，
+   * 逐格标「不可修改」只是噪音。
+   */
+  function isLockedToCap (field: TypeField): boolean {
+    if (props.readonly) return false
+    return field.readonlyWhenFull === true && limitValueOf(field) !== undefined
   }
 
-  /** 数字框旁边的提示：剩余多少 / 价值多少 —— 只为预览像真的，不参与计算 */
-  function sideNoteOf (field: TypeField): string {
-    if (field.limit !== 'receive_cap' || !stockQtyText.value) {
-      return ''
-    }
-    const cap = remainingQtyText.value
-    const total = stockQtyText.value
-    const got = receivedQtyText.value
-    if (!cap || cap === total) {
-      return got ? `（总 ${total}，已接收 ${got}）` : ''
-    }
-    return `剩余 ${cap} 件（总 ${total}，已接收 ${got || 0}）`
+  /** 取到上限 → 只读（改造前"接收"的行为） */
+  function isReadonly (field: TypeField): boolean {
+    return props.readonly || isLockedToCap(field)
   }
+
+  /**
+   * 输入框**显示**什么：锁死的字段永远显示上限值。
+   *
+   * 为什么不直接绑 `valueOf(key)`：那个值要靠预填写进表单（页面数据晚到时可能还没写）。
+   * 一旦"只读"先生效、预填还没跑，框就是**空着的**，看上去像坏了 ——
+   * 而这一格的语义是"数量已经定死为剩余多少"，空着本身就不对。
+   * 这里兜住显示，预填那边仍会把值写进表单（提交时 extra.qty 不能缺）。
+   */
+  function displayValueOf (field: TypeField): unknown {
+    const raw = valueOf(field.key)
+    if (String(raw ?? '').trim() !== '') {
+      return raw
+    }
+    if (!isLockedToCap(field)) {
+      return raw
+    }
+    const cap = limitValueOf(field)
+    return cap === undefined ? raw : String(cap)
+  }
+
+  /*
+   * 「（总 12869，已接收 110）」这段**不在这里画了**：
+   * 整单的总件数 / 已接收 / 总金额已经统一摆在**办理表单开头**（ApprovalHandleForm 的 approval-total），
+   * 这里再写一遍，同一个数在同一个弹窗里会出现两次，反而分不清哪个是整单、哪个是本环。
+   * 本环的口径只留「价值 ￥…（剩余 N 件）」（见 valueQtyNoteOf）。
+   */
 
   // ===== 校验（文案与办理页逐字一致）=====
 
@@ -304,6 +348,18 @@
   }
 
   function rulesFor (field: TypeField): Array<(v: unknown) => true | string> {
+    /*
+     * 按上限带出、**不可修改**的字段（「全部接收」的数量）一律不校验。
+     *
+     * 那个值是系统按剩余算出来的，不是人填的：它天然**等于**上限，而这条上限规则
+     * （没配 limitInclusive 时）要求"必须小于上限" —— 于是每次提交都被自己拦下，
+     * 报「必须小于剩余接收数量」，怎么点都提不上去（现场反馈）。
+     * 「必须小于上限」本来约束的是**部分接收**那种手填场景，锁死的格子上不适用。
+     */
+    if (isLockedToCap(field)) {
+      return []
+    }
+
     const rules: Array<(v: unknown) => true | string> = []
     if (field.required) {
       rules.push(v => String(v ?? '').trim() !== '' || '请填写')
@@ -368,15 +424,31 @@
     setValue(key, next)
   }
 
+  /**
+   * 上限的"快照串"（剩余 / 总库存 / 总金额）。
+   *
+   * 预填必须**跟着它一起重跑**：页面上的产品数据（库存 / 剩余）是异步到的，
+   * 渲染器先挂载时上限还是空的 —— 只盯 `visibleFields` 的话，那一次预填就永远补不上了，
+   * 框里空着；而只读判定又按"有上限"算，于是空框还被锁住，表现就是"无法输入接收数量"。
+   */
+  const limitSignature = computed(() => [remainingQtyText.value, stockQtyText.value, stockAmountText.value].join('|'))
+
   /*
    * 「按上限预填」：改造前的"接收"会把数量框预填成剩余上限（只读）。
    * 渲染器不该在渲染中途改数据，所以放在 watch 里、且只在空值时写一次 —— 用户删掉后不会再被他顶回来。
    */
-  watch(visibleFields, list => {
+  watch([visibleFields, limitSignature], ([list]) => {
     if (props.prefill === false || props.readonly) return
     let next: Record<string, unknown> | null = null
     for (const field of list) {
-      if (!field.prefillFromLimit || String(valueOf(field.key) ?? '').trim() !== '') continue
+      /*
+       * 要带出的两类：
+       *   · `prefillFromLimit`（改造前的"接收"：预填剩余，可改）；
+       *   · `readonlyWhenFull`（锁死的上限，**也必须写进表单值** —— 只显示不写的话，
+       *     提交时 `extra.qty` 会缺这一项，接收台账就算不出"已接收 / 剩余"，后一组会重复收货）。
+       */
+      if (field.prefillFromLimit !== true && field.readonlyWhenFull !== true) continue
+      if (String(valueOf(field.key) ?? '').trim() !== '') continue
       const cap = limitValueOf(field)
       if (cap === undefined) continue
       next = { ...(next ?? values.value), [field.key]: String(cap) }
@@ -405,14 +477,34 @@
 /*
  * 控件里的字号统一 12px（= 这一页其它小字）：
  * Vuetify 默认 1rem（16px）在这套 12-13px 的界面里明显偏大，也会把旁注挤成"两块不同大小的字"。
- * 输入框里的文字是 .v-field__input（下拉显示已选项用的也是它），标签是 .v-label，后缀是 .v-field__suffix。
+ * 输入框里的文字是 .v-field__input（下拉显示已选项用的也是它），标签是 .v-label，后缀是 .v-text-field__suffix。
+ *
+ * ⚠️ 后缀的类名是 **`v-text-field__suffix`**，不是 `v-field__suffix` —— Vuetify 4 里没有后者，
+ *    写错**不报错、只是不生效**（实测：改了字号界面没反应就是这个原因）。
+ *    旧写法一并留着，只为了跨版本时不至于完全失效。
  * ⚠️ 下拉的**弹层选项**被 teleport 到 body，不在本组件作用域里，这里管不到（要一起变小得配
  * menu-props 的 contentClass + 一段全局样式）。
  */
 .option-form-renderer :deep(.v-field__input),
 .option-form-renderer :deep(.v-field__suffix),
+.option-form-renderer :deep(.v-text-field__suffix),
 .option-form-renderer :deep(.v-label) {
   font-size: 12px;
+}
+
+/*
+ * 后缀单位（件 / ￥）比输入内容**再小一档**：它只是个量纲，跟数字同大时会抢视线
+ * （数量框里「100」和「件」一样大，第一眼分不清哪个才是要看的数）。
+ * 必须写在上一条**之后**：两者特异性相同，靠顺序覆盖。
+ *
+ * `opacity` 那一条是有意的：Vuetify 默认把后缀设成 `opacity: 0`、只在字段激活（聚焦）时
+ * 才显示 —— 数量框的「件」是个固定量纲，不该"点进去才看得到"，所以这里让它常态可见、
+ * 只是压暗一档（0.7，避免与数字抢注意力）。
+ */
+.option-form-renderer :deep(.v-text-field__suffix),
+.option-form-renderer :deep(.v-field__suffix) {
+  font-size: 10px;
+  opacity: 0.7;
 }
 
 .field-input {
@@ -424,9 +516,14 @@
  * 数量 / 文本框限宽（与 textarea / select 同一档）：
  * 不限宽时它会吃掉整行，右侧的旁注（价值 / 剩余）只能换行掉到框下面 ——
  * 现场反馈的"价值跑到框下方".
+ *
+ * `min-width` 是后补的：右侧旁注（价值 ￥…（剩余 … 件））变长后，
+ * 这里的 `flex:1 + width:0` 会把输入框压到几十像素 —— 标签被截成「接收…」、
+ * 数也看不清，看着就像"不能输入"。给个下限，挤不下时让旁注换行（.field-row 本来就是 wrap）。
  */
 .field-number {
   flex:1;
+  min-width: 150px;
   width: 0;
 }
 
@@ -443,6 +540,16 @@
 .field-side {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+}
+
+/*
+ * 「不可修改」：小锁 + 文字，与旁注同一档字色（它不是操作入口，别做得像个按钮）。
+ */
+.field-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.8;
 }
 
 .field-hint {

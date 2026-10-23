@@ -10,7 +10,11 @@ import { fetchBiToken, runBiSync, uploadRows } from './biSync'
 import { assertRequiredKeys, config, configSummary, optionalWarnings } from './config'
 // 本次实际加载到的 env 文件列表：启动日志打出来，省得"我改了怎么没生效"要靠猜
 import { loadedEnvFiles } from './env'
+// 「我的审批」按 tab 懒加载：判据复用前端那套纯逻辑，见 server/mineOrders.ts
+import { readMineOrders } from './mineOrders'
 import { deleteApprovalOrder, deleteHistoryOrders } from './orderDelete'
+// 人员配置（团队 → 默认审批人）的落盘读写：数据只有一份 data/people.json，见 server/people.ts
+import { addPerson, PEOPLE_FILE_PATH, readPeople } from './people'
 import { purgeBiData as runPurgeBiData } from './purgeData'
 // 跑批执行日志（进程内环形缓冲）：「提醒设置」页的「执行日志」板块读它，见 server/reminderLog.ts
 import { readReminderRuns, recordReminderRun, type ReminderTrigger } from './reminderLog'
@@ -1129,6 +1133,50 @@ http.createServer(async (req, res) => {
       return
     }
 
+    // ─── 我的审批（按 tab 懒加载）────────────────
+    // GET /api/mine/orders?tab=pending|approved|cc|created|history
+    //   请求头：Authorization: <调用者的 PB token>（服务端据此问 PB「这是谁」，不采信前端字段）
+    //   返回 { tab, counts: 五档条数, rows: 该档整单 }：左栏角标要五档全量，所以一起算。
+    //
+    // 为什么不在前端算：四档都要按 flow + decisions 重算链路，PB 的 filter 表达不了；
+    // 前端算就必须先把全部单拉回来 —— 那正是这次要改掉的"一次性拉全量"。
+    if (pathname === '/api/mine/orders' && req.method === 'GET') {
+      try {
+        const data = await readMineOrders({
+          token: String(req.headers.authorization ?? ''),
+          tab: url.searchParams.get('tab') ?? 'pending',
+        })
+        json(res, 200, { code: 0, data })
+      } catch (error: any) {
+        console.error('[mineOrders] 读取失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || '读取失败' })
+      }
+      return
+    }
+
+    // ─── 人员配置（data/people.json）─────────────
+    // GET  /api/people —— 读整份清单。前端**启动时**拉一次，覆盖打包里那份快照 ——
+    //   否则"别人新增的团队"要等重新构建才看得见（打包快照是死的）。
+    // POST /api/people —— 新增一行并落盘（「角色设置 → 人员配置 → 新增团队」走这里）。
+    //   浏览器写不了仓库里的文件，必须由服务端落盘；校验与前端共用 types/people 的纯函数。
+    if (pathname === '/api/people' && req.method === 'GET') {
+      json(res, 200, { code: 0, data: await readPeople() })
+      return
+    }
+
+    if (pathname === '/api/people' && req.method === 'POST') {
+      try {
+        const body = await readBody(req)
+        const rows = await addPerson(body)
+        console.log(`[People] 新增团队「${String(body?.group ?? '')}」（共 ${rows.length} 条）`)
+        json(res, 200, { code: 0, data: rows })
+      } catch (error: any) {
+        // 400 而不是 500：绝大多数是"没填全 / 重名"，属于用户输入问题，前端要把原因原样弹出来
+        json(res, 400, { code: -1, msg: error?.message || '保存失败' })
+      }
+      return
+    }
+
     // ─── 健康检查 ──────────────────────────────
     res.writeHead(200, { 'Content-Type': 'text/plain;charset=utf-8' })
     res.end('feishu ws running')
@@ -1160,6 +1208,8 @@ http.createServer(async (req, res) => {
   console.log(`  企业部门: GET /api/feishu/user-org?open_id=xxx`)
   console.log(`  发送卡片: POST /api/feishu/send-card`)
   console.log(`  BI 同步: POST /api/bi/sync（?dryRun=1 只校验不写库，?prune=1 顺带删除多余行）`)
+  console.log(`  人员配置: GET /api/people（读） / POST /api/people（新增）→ ${PEOPLE_FILE_PATH}`)
+  console.log(`  我的审批: GET /api/mine/orders?tab=pending（按档懒加载，需登录 token）`)
   console.log(`  超时提醒: POST /api/reminders/run（默认 dry-run；?send=1 真发）`)
   console.log(`  执行日志: GET /api/reminders/log（「提醒设置」页的「执行日志」板块读它；只记本次启动以来的轮次）`)
 })

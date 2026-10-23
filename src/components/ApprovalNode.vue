@@ -16,6 +16,8 @@
     <div v-if="inDiscardSegment === 0" class="discard-flag">
       <v-icon icon="mdi-archive-arrow-down-outline" size="13" />
       <span>进入弃置流程</span>
+      <!-- 这一段要弃掉多少、值多少：跟着标题一起给，省得再去产品卡里翻 -->
+      <span v-if="discardRemainingText" class="discard-flag__remaining">{{ discardRemainingText }}</span>
     </div>
 
     <div class=" d-flex align-center justify-space-between">
@@ -305,7 +307,8 @@
   import { type ApprovalNextStep, mainOf } from '@/utils/approvalRuntime'
   import { buildColorScale, discardColorStep, hexToRgb, pickColorStep } from '@/utils/color'
   import { ensurePinyin, pinyinInitials } from '@/utils/pinyin'
-  import { formatDate, formatTimeDiff } from '@/utils/utils'
+  // shareValueText：按「总金额 ÷ 总数量 × 数量」折算货值（口径与办理表单里的「价值」同一份）
+  import { formatDate, formatTimeDiff, shareValueText } from '@/utils/utils'
   // 表单主体：本项目没有「组件自动导入」，模板里用到的组件必须显式 import，
   // 否则编译成 resolveComponent 后运行时解析不到（控制台警告 + 表单整块不渲染）
   import ApprovalHandleForm from './approval/ApprovalHandleForm.vue'
@@ -467,6 +470,25 @@
       // 右边留一点内边距，文字/时间不会贴到面板边缘（左边沿用 Vuetify 给圆点让位的 24px）
       '--discard-body-pad-inline-end': '12px',
     }
+  })
+
+  /**
+   * 弃置段段首那句「进入弃置流程」旁边带的产品余量：
+   *   剩余数量 = 本环节还能接多少（`remainingQty`；页面没下发时退回总库存数量）；
+   *   剩余金额 = 按「总库存金额 ÷ 总库存数量 × 剩余数量」折算（**与办理表单里的「价值」同一份实现**，
+   *              见 utils/number 的 shareValueText）—— 两处口径必须一致，否则同一条时间线里
+   *              弃置标题写一个数、办理框里写另一个数。
+   *
+   * 取不到数量 → 整句不显示；算不出金额（没关联产品 / 总数量为 0）→ 只显示数量那半截。
+   * 宁可少显示，也不显示「剩余 0 件 / ￥0」这种会误导判断的值。
+   */
+  const discardRemainingText = computed(() => {
+    const qty = String(props.remainingQty ?? '').trim() || String(props.stockQty ?? '').trim()
+    if (!qty) {
+      return ''
+    }
+    const amount = shareValueText(props.stockAmount, props.stockQty, qty)
+    return amount ? `剩余 ${qty} 件 · ￥${amount}` : `剩余 ${qty} 件`
   })
 
   const colorScale = computed(() => buildColorScale(props.length))
@@ -887,6 +909,19 @@
   line-height: 18px;
   color: rgba(var(--v-theme-on-surface), 0.9);
   background: rgba(var(--v-theme-warning), 0.35);
+}
+
+/*
+ * 标签里那半句「剩余 118 件 · ￥1,807.76」：
+ *   · 比标题轻一档（它是补充信息，标题才是"从这里起是弃置流程"）；
+ *   · 用一条细竖线跟标题隔开 —— 不然「进入弃置流程剩余 118 件」会读成一句话。
+ */
+.discard-flag__remaining {
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+  font-weight: 500;
+  opacity: 0.85;
 }
 
 /*

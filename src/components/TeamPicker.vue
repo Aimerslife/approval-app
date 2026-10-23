@@ -55,7 +55,7 @@
 
       <template v-else-if="team">仅显示「{{ team }}」部门下的团队</template>
 
-      <template v-else>候选来自团队表（共 {{ TEAM_GROUP_COUNT }} 个团队）</template>
+      <template v-else>候选来自团队表（共 {{ teamGroupCount() }} 个团队）</template>
     </div>
   </div>
 </template>
@@ -67,7 +67,7 @@
     groupsOfTeam,
     type ParentTeamRow,
     parentTeams,
-    TEAM_GROUP_COUNT,
+    teamGroupCount,
     type TeamGroupRow,
     teamGroups,
   } from '@/utils/organazation'

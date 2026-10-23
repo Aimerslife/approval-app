@@ -1,3 +1,4 @@
+import type { ApprovalOrder } from '@/types/approval'
 import pb from '@/pocketbase.ts'
 // 查询条件的纯逻辑（列名翻译 / 转义 / filter 拼装）在 @/utils/biQuery ——
 // 那里不依赖 PocketBase 客户端，能被 tsx 直接跑单测
@@ -588,6 +589,39 @@ export async function deleteHistoryOrders (dryRun = false): Promise<DeleteHistor
     throw new Error(payload?.msg || `删除失败：HTTP ${res.status}`)
   }
   return payload.data as DeleteHistorySummary
+}
+
+/* ==================== 我的审批（按档懒加载） ==================== */
+
+/** 左栏的五档（与 server/mineOrders.ts 的 MineTab 一一对应，改一处要同时改） */
+export type MineOrderTab = 'pending' | 'approved' | 'cc' | 'created' | 'history'
+
+export interface MineOrdersResult {
+  /** 本次返回的是哪一档（服务端会把非法值纠正成 pending） */
+  tab: MineOrderTab
+  /** 五档各自的条数：左栏角标要显示全部五档，而每次只回来一档，所以服务端一起算 */
+  counts: Record<MineOrderTab, number>
+  /** 该档的整单（含 expand.relation，卡片/表格要拿产品信息） */
+  rows: ApprovalOrder[]
+}
+
+/**
+ * 取某一档「我的审批」。
+ *
+ * ⚠️ 走 **app server**（`/api/mine` 前缀由 vite 代理到它），并带上调用者自己的 PB token：
+ *    四档的判据（待办 / 已审批 / 抄送 / 我发起）都要按 flow + decisions **重算链路**，
+ *    PocketBase 的 filter 表达不了 —— 放前端算就只能先把全部单拉回来（见 server/mineOrders.ts）。
+ *    服务端拿这个 token 去问 PB"你是谁"，前端传什么身份都不作数。
+ */
+export async function fetchMineOrders (tab: MineOrderTab): Promise<MineOrdersResult> {
+  const res = await fetch(`/api/mine/orders?tab=${encodeURIComponent(tab)}`, {
+    headers: { Authorization: pb.authStore.token },
+  })
+  const payload = await res.json().catch(() => null)
+  if (!res.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.msg || `读取失败：HTTP ${res.status}`)
+  }
+  return payload.data as MineOrdersResult
 }
 
 /* ==================== 从 bi_rows 读数据 ==================== */

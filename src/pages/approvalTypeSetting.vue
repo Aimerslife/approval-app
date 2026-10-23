@@ -833,11 +833,13 @@ onMounted(() => {
  *
  * 为什么必须写 `:deep()`：字号不在组件根元素上，而在 Vuetify 内部的
  * `.v-field__input`（输入框里的字，下拉显示已选项用的也是它）/ `.v-label`（浮动标签）/
- * `.v-field__suffix`（后缀）上，它们不带本组件的 scope 属性。
+ * `.v-text-field__suffix`（后缀，**Vuetify 4 里没有 `.v-field__suffix`**，写错只是静默不生效）上，
+ * 它们不带本组件的 scope 属性。
  * 只管字号，不动内边距/高度 —— 输入框里的文字位置由 variant 决定（见 OptionFormRenderer）。
  */
 .page-bg :deep(.v-field__input),
 .page-bg :deep(.v-field__suffix),
+.page-bg :deep(.v-text-field__suffix),
 .page-bg :deep(.v-label) {
   font-size: 12px;
 }

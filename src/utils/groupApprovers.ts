@@ -7,7 +7,8 @@ import { deptOfTeam, groupManage, parentManagerOf } from '@/utils/organazation'
  * 变量名与 PB 字段仍沿用 `group`（表结构不动，见 utils/collection）。
  *
  * 两个来源合并成一张表：
- *   1. **默认值**：`utils/organazation.ts` 里人工维护的 `groupManage`（改它即刻生效）；
+ *   1. **默认值**：`data/people.json`（经 utils/organazation 的 `groupManage` 进来）；
+ *      页面上的「新增团队」写的就是这份 JSON，改它即刻生效；
  *   2. **覆盖值**：在「角色设置」里通过通讯录换过的人（PocketBase `group_approvers` 表）。
  *
  * 合并口径一句话：覆盖值按 `group` 匹配就顶掉默认值并标成 `custom`，
@@ -22,6 +23,9 @@ export interface GroupManagerDefault {
   parent: string
   group: string
   manager: string
+  /** 从通讯录选人时记下的联系方式（可缺：手工写进 JSON 的行往往只有名字） */
+  managerEmail?: string
+  managerAvatar?: string
 }
 
 /** 覆盖记录：`group_approvers` 的一行 */
@@ -56,8 +60,9 @@ export function defaultGroupApproverRows (
     parent: d.parent,
     group: d.group,
     manager: d.manager,
-    email: '',
-    avatar: '',
+    // 新增团队时从通讯录选的人会带着邮箱/头像，JSON 里也存了 —— 这里直接用，表格才有得显示
+    email: d.managerEmail ?? '',
+    avatar: d.managerAvatar ?? '',
     department: '',
     departmentPath: '',
     source: 'default' as const,

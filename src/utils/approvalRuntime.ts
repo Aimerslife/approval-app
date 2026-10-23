@@ -118,6 +118,10 @@ export function orderPendingOn (order: ApprovalOrder, who?: ApprovalChainItem | 
  * 只认**已办**的环节（有结论 / 办理时间）：未办环节上挂着的是"接下来该谁办"，不算经手；
  * **只认审批人（type='manager'）**：抄送（cc）与飞书提醒环上挂的人并没有对这张单做决定，
  * 认进来会让"我办过的单"里混进一堆只是被通知过的记录。
+ *
+ * ⚠️ 与 orderPendingOn **不互斥**：一张单他在第 1 环办过、现在又轮到他办第 5 环时，
+ *    「已审批」与「待办」**都该出现**（办过是既成事实，不会因为单子转回来就抹掉）。
+ *    以前把它们当补集（`!pending && handled`），结果这类单从"已审批"里整块消失。
  */
 export function orderHandledBy (order: ApprovalOrder, who?: ApprovalChainItem | null): boolean {
   if (!who) {

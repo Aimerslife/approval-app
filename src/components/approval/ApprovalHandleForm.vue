@@ -43,6 +43,18 @@
 
     <v-form v-if="radios == 'deal'" ref="handleForm" @submit.prevent="handleConfirm">
 
+      <!--
+        单子的总量**只在开头说一次**（总件数 / 已接收 / 总金额）：
+        以前它散在「接收数量」右侧（（总 12869，已接收 110））和「回收」结论文案里各一份，
+        同一个数在同一个弹窗里出现两三次，反而看不出哪个是整单的、哪个是本环的。
+        本环还能接多少仍然标在数量框旁边（价值 …（剩余 12759 件）），两者分工明确。
+      -->
+      <div v-if="stockQtyText || stockAmountText" class="approval-total mb-3 text-[11px] text-medium-emphasis">
+        <span v-if="stockQtyText">总件数 <b>{{ stockQtyText }}</b> 件</span>
+        <span v-if="receivedQtyText">已接收 <b>{{ receivedQtyText }}</b> 件</span>
+        <span v-if="stockAmountText">总金额 <b>￥{{ stockAmountText }}</b></span>
+      </div>
+
       <template v-if="!hasNodeLevelTree">
         <div class="d-flex align-center ga-3">
           <span class="field-label shrink-0">选择处理方式</span>
@@ -133,14 +145,12 @@
         />
       </div>
 
-      <!-- 回收类：把"这批货总共多少"摆出来，办理人不用去翻上一环 -->
-      <div v-if="needRecycle" class="remark-row text-[11px] text-medium-emphasis mb-2">
-        总件数 {{ stockQtyText || '—' }} 件<template v-if="stockAmountText">，总金额 ￥{{ stockAmountText }}</template>
-      </div>
-
       <!--
         「价值 ￥xx」不在这里画了：它属于「接收数量」那个框，已经挪到渲染器里紧跟数量框右侧
         （见 OptionFormRenderer 的 valueNoteOf）—— 挂在结论外面时，选个原因也会冒出来一句与结论无关的金额。
+
+        「总件数 / 总金额」也搬走了：现在只在表单开头说一次（见上面的 approval-total）——
+        回收类这里再写一遍，同一个数就会出现两次。
       -->
 
       <!-- 选接收方：渲染器只画"按钮 + 已选 chip"，面板由这里给（候选是团队表，不是整棵通讯录） -->
@@ -157,13 +167,17 @@
 
     <!-- 备注 / 审批意见：与上方「label + 控件」同一栅格（左边空出 label 列，右边撑满） -->
     <div class="mt-2  d-flex align-center ga-3">
-      <span class="field-label shrink-0 self-start">意见/备注</span>
+      <span class="field-label shrink-0 self-start">意见/备注<span v-if="opinionRequired" class="text-error"> *</span></span>
 
       <v-textarea
         v-model="opinion"
         class="remark-input"
         :counter="300"
         density="compact"
+        :error-messages="opinionError"
+        :hint="opinionRequired ? '选择「外部环境」类原因时必填' : ''"
+        :persistent-hint="opinionRequired"
+        :required="opinionRequired"
         rows="2"
         variant="outlined"
       />
@@ -263,7 +277,7 @@
   // 环节负责人口径（mainOf）与「连续同人环节」的类型都来自这里，别在组件里另写一套
   import { type ApprovalNextStep, mainOf } from '@/utils/approvalRuntime'
   // REASON_OPTIONS：选项树的叶子就是「原因」本身，办理时按同一份候选补出 reason_* / 分类
-  import { isFieldVisible, REASON_OPTIONS, typeTemplateFromSnapshot } from '@/utils/approvalTypes'
+  import { isFieldVisible, REASON_OPTIONS, SECOND_REASON_OPTIONS, typeTemplateFromSnapshot } from '@/utils/approvalTypes'
   // 「选择接收组别」的候选：团队表（utils/organazation）——不是整棵飞书通讯录，见组件说明
   import TeamPicker from '../TeamPicker.vue'
   // 表单字段的**唯一渲染器**：审批类型页预览、沙盒、办理页三处共用同一份实现
@@ -337,6 +351,8 @@
    * 只在控制台留一条 warn，现场只能靠猜。
    */
   const formError = ref('')
+  /** 「意见/备注」这条的校验红字（与 formError 分开：要贴在输入框下面，不能只在按钮上方说） */
+  const opinionError = ref('')
   const attachment = ref<File | null>(null)
   const fileInputRef = ref<{ click: () => void } | null>(null)
 
@@ -656,12 +672,18 @@
   /**
    * 这一环要填的字段（数量 / 金额 / 原因 / 选接收方…，全部由模板给）。
    *
-   * 选项树已经选定了原因时去掉重复的「原因」下拉：同一个东西问两遍，用户填的那一份还会被叶子覆盖
-   * （见 collectResult），现场最容易把这当成"选项错了"。
+   * 选项树已经问过的东西**不再问第二遍**（同一个问题出现两个控件，现场最容易当成"选项错了"）：
+   *   · 叶子本身就是原因 → 去掉「原因」下拉（值由叶子镜像，见 collectResult）；
+   *   · 叶子带二级、且那一串就是「二级原因」候选 → 去掉「二级原因」下拉
+   *     （值由「二级选项」镜像，见下面的 seedSecondReason）。否则会出现两个"二级…"下拉。
    */
-  const typeFields = computed(() => (leafReasonOption.value
-    ? typeTemplate.value.fields.filter(f => f.key !== 'reason')
-    : typeTemplate.value.fields))
+  const typeFields = computed(() => {
+    const dropReason = !!leafReasonOption.value
+    const dropSecondReason = childIsSecondReason.value
+    return typeTemplate.value.fields.filter(f =>
+      !(dropReason && f.key === 'reason') && !(dropSecondReason && f.key === 'second_reason'),
+    )
+  })
 
   /** 渲染器要的上限 / 旁注数值（口径与改造前的 receiveCapText / stockQtyText 一致） */
   const typeContext = computed(() => ({
@@ -670,6 +692,43 @@
     receivedQty: receivedQtyText.value,
     stockAmount: stockAmountText.value,
   }))
+
+  /**
+   * 本次选中的原因属于哪个分类（候选的 data 带出来的 `reason_belong`）。
+   *
+   * 两个来路都会写进表单值：
+   *   · 模板里直接有「原因」下拉 → 渲染器选中时写入（见 OptionFormRenderer.setValue）；
+   *   · 选项树的叶子本身就是原因 → 上面的 leafReasonOption 镜像进来。
+   */
+  const reasonBelong = computed(() => {
+    const direct = String(typeValues.value.reason_belong ?? '').trim()
+    if (direct) {
+      return direct
+    }
+    /*
+     * 兜底：叶子本身就是原因、但这个结论的模板没有「原因」字段（如 link=cat_env 的模板），
+     * 表单值里就没有 reason_belong —— 按叶子文案回查一次，别让"必填"在这类模板上失效。
+     */
+    const leaf = pickedLeaf.value
+    return leaf ? String(REASON_OPTIONS.find(o => o.value === leaf.text)?.data?.reason_belong ?? '') : ''
+  })
+
+  /**
+   * 「外部环境」类：**意见/备注必填**。
+   *
+   * 这一类的原因（政策与法规变化 / 自然灾害…）说不清具体影响，业务上要求必须写清楚说明；
+   * 而类型模板里**不再给它单独的「补充说明」框**（见 utils/approvalTypes 的说明），
+   * 说明统一写在下方共用的「意见/备注」里 —— 所以这里把那一栏设成必填。
+   *
+   * 两种落法都算：选了**外部环境类的某个原因**（reason_belong），
+   * 或模板把「外部环境类」直接做成结论（码表里的 `cat_env`）。
+   */
+  const opinionRequired = computed(() =>
+    reasonBelong.value === '外部环境' || selectedResult.value === 'cat_env',
+  )
+
+  /** 意见/备注必填时的提示语（watcher 里要按它清 formError，抽出来避免两处文案漂） */
+  const OPINION_REQUIRED_HINT = '选择「外部环境」类原因时，意见/备注必填'
 
   /**
    * 换结论就把整份表单清空：上一个结论的值不能带进下一个
@@ -816,6 +875,27 @@
   const pickedChild = ref('')
 
   /**
+   * 选项树的「二级选项」是不是**就是「二级原因」那一套**（开发类的原因要再细分到部门）。
+   *
+   * 判断按候选文案比对（忽略空白）：模板里两处都配了时，界面上会并排出两个"二级…"下拉 ——
+   * 现场反馈的"选了开发原因，出现两个二级原因的选项"就是这个。
+   * 只有对得上才敢合并：万一某张模板的二级是别的分类，就仍由类型模板那个字段来问。
+   *
+   * 另外要求当前结论的模板**确实有** second_reason 字段：否则没必要镜像。
+   */
+  const childIsSecondReason = computed(() => {
+    if (!typeTemplate.value.fields.some(f => f.key === 'second_reason')) {
+      return false
+    }
+    const kids = leafChildren.value
+    if (kids.length === 0) {
+      return false
+    }
+    const known = new Set(SECOND_REASON_OPTIONS.map(o => String(o.value).trim()))
+    return kids.some(k => known.has(String(k).trim()))
+  })
+
+  /**
    * 处理方式一变（或它带的树变了）就**清空**一级 / 二级，避免留下上一棵树里的选择。
    *
    * ⚠️ 这里以前是"默认选树里的第一个叶子（连二级也取第一个）"—— 那等于替办理人做了决定：
@@ -840,9 +920,61 @@
     pickedChild.value = leaf?.children?.[0] ?? ''
   })
 
+  /** 上一轮是不是把「二级选项」镜像成了 typeValues.second_reason（换叶子时要撤掉，别留残余） */
+  let seededSecondReason = false
+
+  /**
+   * 把「二级选项」镜像成 `second_reason` / `second_reason_target`。
+   *
+   * 为什么要镜像而不是各存各的：分支条件里配的键是 `second_reason`（见 utils/conditionFields），
+   * 记录明细里展示的也是它；只存 `option_child` 的话，选路与明细都会缺这一项。
+   * 镜像之后界面只留一个二级下拉（另一个被 typeFields 滤掉），两边数据仍然一致。
+   */
+  watch([pickedChild, childIsSecondReason], () => {
+    if (!childIsSecondReason.value) {
+      if (!seededSecondReason) {
+        return
+      }
+      // 换成不带二级的原因 / 换结论：把上次镜像的值撤掉
+      const next = { ...typeValues.value }
+      delete next.second_reason
+      delete next.second_reason_target
+      typeValues.value = next
+      seededSecondReason = false
+      return
+    }
+
+    const hit = SECOND_REASON_OPTIONS.find(o => String(o.value).trim() === String(pickedChild.value).trim())
+    const next = { ...typeValues.value }
+    delete next.second_reason
+    delete next.second_reason_target
+    if (hit) {
+      next.second_reason = hit.value
+      Object.assign(next, hit.data ?? {})
+      seededSecondReason = true
+    }
+    typeValues.value = next
+  }, { immediate: true })
+
   /** 选项一改就把上一次的拦截提示收掉（那是针对上一次选择的） */
   watch([selectedOptionKey, pickedLeaf, pickedChild], () => {
     formError.value = ''
+  })
+
+  /**
+   * 「意见/备注」补上之后立刻收掉红字；换成非外部环境的原因也一并收掉 ——
+   * 改完了还红着，用户会以为校验没生效。
+   */
+  watch([opinion, opinionRequired], () => {
+    if (!opinionError.value) {
+      return
+    }
+    if (opinion.value.trim() !== '' || !opinionRequired.value) {
+      opinionError.value = ''
+      if (formError.value === OPINION_REQUIRED_HINT) {
+        formError.value = ''
+      }
+    }
   })
 
   /* ==================== 表单重置 ==================== */
@@ -862,6 +994,7 @@
     opinion.value = ''
     attachment.value = null
     formError.value = ''
+    opinionError.value = ''
     // 下一环的数据到了（或已经没得办）：解除"等待中"，按钮恢复可用
     waitingNext.value = false
     // 表单校验状态一并清掉：连续多环时上一环的红字不能留在下一环的输入框上
@@ -1045,6 +1178,7 @@
      * （result 为空 → 流程里没有分支命中 → 停在原地），所以先拦下来说清楚。
      */
     formError.value = ''
+    opinionError.value = ''
     if (hasNodeLevelTree.value && !pickedLeaf.value) {
       formError.value = '请选择「办理选项」后再提交'
       return
@@ -1053,6 +1187,16 @@
     if (handleForm.value) {
       const { valid } = await handleForm.value.validate()
       if (!valid) return
+    }
+
+    /*
+     * 「外部环境」类必须写意见/备注（见 opinionRequired 的说明）。
+     * 放在渲染器校验**之后**：先解决字段本身的问题，再补这段说明，两处红字不会一起炸。
+     */
+    if (opinionRequired.value && opinion.value.trim() === '') {
+      opinionError.value = OPINION_REQUIRED_HINT
+      formError.value = OPINION_REQUIRED_HINT
+      return
     }
     const { result, result_label, extra } = collectResult()
     // 兜底的同一件事：没有有效结论就别发请求（空结论会让单据卡在本环节）
@@ -1094,6 +1238,27 @@
 // 「label + 控件」这套栅格的两段尺寸：抽成变量，备注行要按同一套数值缩进，免得两处各改一份
 $label-col: 88px;
 $label-gap: 12px;
+
+/*
+ * 表单开头的整单总量（总件数 / 已接收 / 总金额）：
+ * 一条浅色摘要行 —— 它不是输入项，用底色与下面的表单项区分；数值加粗一档，扫一眼就能读到。
+ * 底色用 on-surface 的低透明度（跟着深浅色主题走），不写死灰色。
+ */
+.approval-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+
+  b {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(var(--v-theme-on-surface), 0.87);
+  }
+}
 
 .field-label {
   font-size: 12px;

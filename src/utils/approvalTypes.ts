@@ -154,7 +154,6 @@ export const TYPE_EFFECTS: ReadonlyArray<{ value: string, title: string, hint: s
 export const TYPE_CONTROL_OPTIONS: ReadonlyArray<{ value: TypeControl, title: string, hint: string }> = [
   { value: 'number', title: '数字输入', hint: '只填数字，可配整数 / 小数位 / 上限来源' },
   { value: 'text', title: '单行文本', hint: '一行文本' },
-  { value: 'textarea', title: '多行文本', hint: '补充说明这类，可配行数' },
   { value: 'select', title: '下拉选择', hint: '选项多、或要分组时用' },
   { value: 'radio', title: '单选按钮', hint: '选项少（≤3）时更直观' },
   { value: 'auto', title: '自动（少用单选、多则下拉）', hint: '与改造前的口径一致：选项 ≤3 用单选，否则下拉' },
@@ -330,7 +329,7 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
    *
    * 「外部环境」类**不给「补充说明」框**（原先这里有一个 showWhen=外部环境的 remark 字段，已按业务口径去掉）：
    * 那一类的说明直接写在办理栏下方共用的「意见/备注」里，且该框在这一类下**必填** ——
-   * 见 components/approval/ApprovalHandleForm 的 externalReason / opinionRequired。
+   * 见 components/approval/ApprovalHandleForm 的 opinionRequired（reason_belong === '外部环境'）。
    */
   other_reason: {
     fields: [

@@ -145,6 +145,20 @@ export default defineConfig({
         target: 'http://127.0.0.1:3002',
         changeOrigin: true,
       },
+      // 人员配置（data/people.json 的读写）也在 app server（3002）上 ——
+      // 同上面几条，**必须声明在下面的 '/api' 之前**，否则会被转给 PocketBase(8091) 而 404：
+      // 表现就是「人员配置」表空、新增团队保存失败。
+      '/api/people': {
+        target: 'http://127.0.0.1:3002',
+        changeOrigin: true,
+      },
+      // 「我的审批」按档懒加载（/api/mine/orders）也在 app server 上 ——
+      // 同上面几条，**必须声明在下面的 '/api' 之前**，否则会被转给 PocketBase(8091) 而 404：
+      // 表现是 mine 页每一档都报"读取失败"。
+      '/api/mine': {
+        target: 'http://127.0.0.1:3002',
+        changeOrigin: true,
+      },
       '/api': 'http://127.0.0.1:8091',
       'files': 'http://127.0.0.1:8091',
       /*
