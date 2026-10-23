@@ -19,7 +19,7 @@
         <div class="d-flex align-center ga-2">
           <template v-if="topTab === 'template'">
             <!-- 导入 / 导出 JSON：用来在环境之间搬模板（文件格式见 utils/templateJson） -->
-            <v-btn class="me-2 text-none" prepend-icon="mdi-import" variant="tonal" @click="openImport">
+            <v-btn class="me-2 text-none" prepend-icon="mdi-file-import-outline" variant="tonal" @click="openImport">
               导入 JSON
             </v-btn>
             <v-btn class="me-2 text-none" color="primary" prepend-icon="mdi-plus" variant="flat"
@@ -104,9 +104,9 @@
                 </v-icon-btn>
 
                 <!-- 导出成 JSON：文件里只有名字 + 启停 + 三要素，拿去别的环境用「导入 JSON」还原 -->
-                <v-icon-btn icon="mdi-export-variant" size="24" title="导出为 JSON" variant="plain"
+                <v-icon-btn icon="mdi-file-export-outline" size="24" title="导出为 JSON" variant="plain"
                   @click="exportOne(item)">
-                  <v-icon  size="16" />
+                  <v-icon color="#1055C9" size="16" />
                 </v-icon-btn>
               </td>
             </tr>

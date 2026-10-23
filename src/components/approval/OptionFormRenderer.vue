@@ -17,9 +17,9 @@
           @update:model-value="v => setValue(field.key, v)"
         />
 
-        <!-- 剩余数量紧跟在数量框右侧（排头）：框宽受限时它会跟着换行，但不会掉到框下面单独成行 -->
-        <span v-if="remainingNoteOf(field)" class="field-side" :title="remainingTitleOf()">
-          剩余数量 {{ remainingNoteOf(field) }}<template v-if="field.unit"> {{ field.unit }}</template>
+        <!-- 价值紧跟在数量框右侧（排头）：框宽受限时它会跟着换行，但不会掉到框下面单独成行 -->
+        <span v-if="valueNoteOf(field)" class="field-side" :title="valueTitleOf()">
+          价值 ￥{{ valueNoteOf(field) }}
         </span>
 
         <span v-if="sideNoteOf(field)" class="field-side">{{ sideNoteOf(field) }}</span>
@@ -108,6 +108,8 @@
 <script lang="ts" setup>
   import type { TypeField, TypeFieldOption } from '@/utils/approvalTypes'
   import { isFieldVisible } from '@/utils/approvalTypes'
+  // 数量框右侧的「价值」：总金额 ÷ 总数量 × 数量（纯函数，零依赖，见 utils/number）
+  import { shareValueText } from '@/utils/number'
 
   /**
    * 办理表单渲染器（见模板里的说明）。
@@ -227,28 +229,26 @@
   const receivedQtyText = computed(() => String(props.context?.receivedQty ?? '').trim())
   const stockAmountText = computed(() => String(props.context?.stockAmount ?? '').trim())
 
-  /** 「剩余数量」按哪个数取：与上限同口径（剩余优先，没有剩余退回总库存） */
-  const remainingBaseQtyText = computed(() => remainingQtyText.value || stockQtyText.value)
+  /** 「价值」按哪个数量算：与上限同口径（剩余优先，没有剩余退回总库存） */
+  const valueBaseQtyText = computed(() => remainingQtyText.value || stockQtyText.value)
 
   /**
-   * 数量框右侧的「剩余数量」：这一环还能接多少 —— 与上限**同一个数**，
-   * 办理人不用自己拿总库存减（口径见 limitValueOf）。
+   * 数量框右侧的「价值」：这批货还值多少钱（口径见 utils/number 的 shareValueText）。
    *
-   * 只跟 `limit = 'receive_cap'`（接收类数量框）一起出现：回收 / 金额类没有"剩余多少件"这回事。
-   * （这里原先显示的是折算出来的「价值 ￥xx」，已按业务口径换成剩余数量。）
+   * 只跟 `limit = 'receive_cap'`（接收类数量框）一起出现 —— 别的地方谈"值多少钱"没有依据，
+   * 也不该像改造前那样"只要单据带库存金额就在表单里单独占一行"。
    */
-  function remainingNoteOf (field: TypeField): string {
-    return field.limit === 'receive_cap' ? remainingBaseQtyText.value : ''
+  function valueNoteOf (field: TypeField): string {
+    if (field.limit !== 'receive_cap') {
+      return ''
+    }
+    return shareValueText(stockAmountText.value, stockQtyText.value, valueBaseQtyText.value)
   }
 
-  /** 「剩余数量」的悬浮说明：把总库存 / 已接收摊开，办理人能核对这个数是怎么来的 */
-  function remainingTitleOf (): string {
-    const total = stockQtyText.value || '—'
-    const got = receivedQtyText.value
-    const left = remainingBaseQtyText.value || '—'
-    return got
-      ? `剩余数量 = 总库存数量 − 已接收数量 = ${total} − ${got} = ${left}`
-      : `总库存数量 ${total}（还没有接收记录，剩余即总量）`
+  /** 「价值」的悬浮说明：把算式写出来，办理人能核对（与改造前那句 title 同一口径） */
+  function valueTitleOf (): string {
+    const name = remainingQtyText.value ? '剩余数量' : '总库存数量'
+    return `价值 = 总库存金额 ÷ 总库存数量 × ${name} = ${stockAmountText.value} ÷ ${stockQtyText.value} × ${valueBaseQtyText.value}`
   }
 
   /** 上限数值：认不出来 = undefined（那就没有上限） */
@@ -281,19 +281,18 @@
     return limitValueOf(field) !== undefined
   }
 
-  /**
-   * 数字框旁边的补充提示：总库存多少 / 已经接收了多少 —— 只为预览像真的，不参与计算。
-   *
-   * 不带「剩余」二字：剩余数量已经由 remainingNoteOf 单独摆在前面的旁注里，
-   * 两处都写会变成"剩余 5 件，剩余 5 件（总 10，已接收 5）"。
-   */
+  /** 数字框旁边的提示：剩余多少 / 价值多少 —— 只为预览像真的，不参与计算 */
   function sideNoteOf (field: TypeField): string {
     if (field.limit !== 'receive_cap' || !stockQtyText.value) {
       return ''
     }
+    const cap = remainingQtyText.value
     const total = stockQtyText.value
     const got = receivedQtyText.value
-    return got ? `（总 ${total}，已接收 ${got}）` : `（总 ${total}）`
+    if (!cap || cap === total) {
+      return got ? `（总 ${total}，已接收 ${got}）` : ''
+    }
+    return `剩余 ${cap} 件（总 ${total}，已接收 ${got || 0}）`
   }
 
   // ===== 校验（文案与办理页逐字一致）=====
@@ -395,7 +394,7 @@
   gap: 8px;
 }
 
-/* 一行控件 + 右侧旁注（剩余数量 / 总库存与已接收）：居中，旁注跟控件的中线对齐 */
+/* 一行控件 + 右侧旁注（剩余多少 / 价值多少）：居中，旁注跟控件的中线对齐 */
 .field-row {
   display: flex;
   align-items: center;
@@ -406,19 +405,13 @@
 /*
  * 控件里的字号统一 12px（= 这一页其它小字）：
  * Vuetify 默认 1rem（16px）在这套 12-13px 的界面里明显偏大，也会把旁注挤成"两块不同大小的字"。
- * 输入框里的文字是 .v-field__input（下拉显示已选项用的也是它），标签是 .v-label。
- *
- * 后缀（field.unit，如「件」「￥」）在 Vuetify 4 里是 `.v-text-field__suffix > .v-text-field__suffix__text`
- * —— 以前这里写的是 `.v-field__suffix`，那个类在 v4 的表单里已经不存在，等于没设（后缀一直是 16px）。
- * 内层 __text 一并写上：字号继承虽然能生效，但别指望某天外层再包一层时继承链断掉。
- *
+ * 输入框里的文字是 .v-field__input（下拉显示已选项用的也是它），标签是 .v-label，后缀是 .v-field__suffix。
  * ⚠️ 下拉的**弹层选项**被 teleport 到 body，不在本组件作用域里，这里管不到（要一起变小得配
  * menu-props 的 contentClass + 一段全局样式）。
  */
 .option-form-renderer :deep(.v-field__input),
-.option-form-renderer :deep(.v-label),
-.option-form-renderer :deep(.v-text-field__suffix),
-.option-form-renderer :deep(.v-text-field__suffix__text) {
+.option-form-renderer :deep(.v-field__suffix),
+.option-form-renderer :deep(.v-label) {
   font-size: 12px;
 }
 
@@ -429,8 +422,8 @@
 
 /*
  * 数量 / 文本框限宽（与 textarea / select 同一档）：
- * 不限宽时它会吃掉整行，右侧的旁注（剩余数量 / 总库存）只能换行掉到框下面 ——
- * 现场反馈的"旁注跑到框下方".
+ * 不限宽时它会吃掉整行，右侧的旁注（价值 / 剩余）只能换行掉到框下面 ——
+ * 现场反馈的"价值跑到框下方".
  */
 .field-number {
   flex:1;

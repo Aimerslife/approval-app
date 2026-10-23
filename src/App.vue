@@ -8,15 +8,9 @@
             <v-icon size="16">mdi-menu</v-icon>
           </v-icon-btn>
 
-          <span
-            class="brand-name text-[14px] font-bold cursor-pointer"
-            @click="routerGo('/')">🆈🅰🅽🆇🆄🅽</span>
-          <div
-            v-if="canOpenPbAdmin"
-            class="brand-name font-bold cursor-pointer"
-            title="打开 PocketBase 后台（Collection）"
-            @click="openPbAdmin"
-          >
+          <span class="brand-name text-[14px] font-bold cursor-pointer" @click="routerGo('/')">🆈🅰🅽🆇🆄🅽</span>
+          <div v-if="canOpenPbAdmin" class="brand-name font-bold cursor-pointer" title="打开 PocketBase 后台（Collection）"
+            @click="openPbAdmin">
             Collection
             <v-icon color="#ffffff" size="18">mdi-database-outline</v-icon>
           </div>
@@ -25,7 +19,7 @@
         <v-spacer />
         <!-- 右侧：设置 / 主题 + 窗口控制 -->
         <div class="d-flex align-center ga-1">
-           <v-icon-btn size="24" title="提醒设置" variant="text" @click="routerGo('/alarmSetting')">
+          <v-icon-btn size="24" title="提醒设置" variant="text" @click="routerGo('/alarmSetting')">
             <v-icon size="15">mdi-alarm-check</v-icon>
           </v-icon-btn>
           <v-icon-btn size="24" title="审批说明" variant="text" @click="routerGo('/knowledge')">
@@ -36,14 +30,10 @@
             <v-icon size="15">mdi-cog-outline</v-icon>
           </v-icon-btn>
 
-          <v-icon-btn
-            size="24"
-            :title="theme.global.name.value === 'light' ? '切换到深色' : '切换到浅色'"
-            variant="text"
-            @click="onClick"
-          >
+          <v-icon-btn size="24" :title="theme.global.name.value === 'light' ? '切换到深色' : '切换到浅色'" variant="text"
+            @click="onClick">
             <v-icon size="15">{{ theme.global.name.value === 'light' ? 'mdi-white-balance-sunny' : 'mdi-weather-night'
-            }}</v-icon>
+              }}</v-icon>
           </v-icon-btn>
 
           <v-divider class="win-divider mx-1" vertical />
@@ -67,23 +57,12 @@
           <div class="relative">
             <!-- v-menu 必须由 #activator 提供锚点元素，否则 location / offset 全部失效，菜单会飘在默认位置。
                  这里把 v-avatar 作为锚点，菜单就会定位在头像正下方。 -->
-            <v-menu
-              v-model="menu"
-              class="rounded-[15px]"
-              :close-on-content-click="false"
-              :disabled="!userStore.isLoggedIn"
-              location="top right"
-              :offset="[-50, -60]"
-            >
+            <v-menu v-model="menu" class="rounded-[15px]" :close-on-content-click="false"
+              :disabled="!userStore.isLoggedIn" location="top right" :offset="[-50, -60]">
               <template #activator="{ props }">
                 <!-- 菜单锚点必须是真实元素（见上面的说明），所以这里把头像本身当锚点。
                      v-bind="props" 照旧：菜单的定位/键盘交互都靠它。 -->
-                <UserAvatar
-                  class="mb-2"
-                  interactive
-                  :size="50"
-                  v-bind="props"
-                />
+                <UserAvatar class="mb-2" interactive :size="50" v-bind="props" />
               </template>
 
               <v-card min-width="200">
@@ -147,25 +126,13 @@
         </v-sheet>
         <v-divider />
         <v-list nav>
-          <v-list-item
-            v-for="(item, index) in links"
-            :key="item.icon"
-            active-class="text-[#3378FF]"
-            link
-            rounded="15px"
-            :to="item.to"
-          >
+          <v-list-item v-for="(item, index) in links" :key="item.icon" active-class="text-[#3378FF]" link rounded="15px"
+            :to="item.to">
             <template #prepend>
               <v-icon :icon="item.icon" size="20" />
-              <v-badge
-                v-if="item.to === '/mine' && pending.count > 0"
-                bordered
-                color="error"
-                :content="pending.count > 99 ? '99+' : String(pending.count)"
-                location="top right"
-                :offset-x="-100"
-                :offset-y="-10"
-              />
+              <v-badge v-if="item.to === '/mine' && pending.count > 0" bordered color="error"
+                :content="pending.count > 99 ? '99+' : String(pending.count)" location="top right" :offset-x="-100"
+                :offset-y="-10" />
             </template>
 
             <v-list-item-title class="text-[12px]" v-text="item.text" />
@@ -176,13 +143,7 @@
           <div class="pa-2">
             <v-footer class="d-flex flex-column" color="teal" rounded="lg">
               <div class="d-flex ga-2 ms-auto w-100 justify-center">
-                <v-btn
-                  v-for="icon in icons"
-                  :key="icon"
-                  :icon="icon"
-                  size="small"
-                  variant="plain"
-                />
+                <v-btn v-for="icon in icons" :key="icon" :icon="icon" size="small" variant="plain" />
               </div>
 
               <div class="text-center w-100 rounded-lg text-[11px] text-[#999]">
@@ -201,109 +162,109 @@
 </template>
 
 <script lang="ts" setup>
-  import { useTheme } from 'vuetify'
-  import logo from '@/assets/logo_.png'
-  import UserAvatar from '@/components/UserAvatar.vue'
-  import { drawerSet, isEditorFullscreen } from '@/composables/useEditorFullscreen'
-  // PB 后台地址（顶栏「Collection」用）—— 与数据 API 同一个 PB 实例，只是路径不同，见该文件说明
-  import { PB_ADMIN_URL } from '@/pocketbase'
-  import { usePendingStore } from '@/stores/pending'
-  import { useUserStore } from '@/stores/user'
-  import { canAccess, canAct } from '@/utils/permissions'
+import { useTheme } from 'vuetify'
+import logo from '@/assets/logo_.png'
+import UserAvatar from '@/components/UserAvatar.vue'
+import { drawerSet, isEditorFullscreen } from '@/composables/useEditorFullscreen'
+// PB 后台地址（顶栏「Collection」用）—— 与数据 API 同一个 PB 实例，只是路径不同，见该文件说明
+import { PB_ADMIN_URL } from '@/pocketbase'
+import { usePendingStore } from '@/stores/pending'
+import { useUserStore } from '@/stores/user'
+import { canAccess, canAct } from '@/utils/permissions'
 
-  // 主题跟随 createVuetify 的 light/dark 主题，并记住用户上次的选择
-  const theme = useTheme()
-  const savedTheme = localStorage.getItem('app-theme')
-  if (savedTheme === 'light' || savedTheme === 'dark') {
-    theme.global.name.value = savedTheme
-  }
-  const userStore = useUserStore()
-  const menu = ref(false)
-  userStore.init()
-  // 再从服务端拉一次最新记录覆盖 cookie 快照。
-  // 必须做：PB 登录态是 base64 塞进单个 cookie 的（浏览器上限 4096 字节），
-  // 带上 preferences 后必然超限、cookie 被静默丢弃，读到的就是旧记录 → 设置"下次重置"。
-  userStore.refreshFromServer()
-  // 偏好存在独立集合 user_preferences 里（不再挂在 users 上，否则登录 cookie 会超 4096 字节被丢），
-  // 所以要在启动时单独读一次；两个用到偏好的页面都 watch 着它。
-  userStore.loadPreferences()
-  /** 侧边栏的**全部**菜单项（不过滤）；过滤后的 links 见下面 */
-  const allLinks = [
-    { icon: 'mdi-view-list', text: '所有审批单', to: '/home' },
-    { icon: 'mdi-arrange-send-backward', text: '我的审批单', to: '/mine' },
-    { icon: 'mdi-chart-areaspline', text: '分析', to: '/analyze' },
-    { icon: 'mdi-creation', text: '任务', to: '/workStream' },
-    { icon: 'mdi-file-table-box', text: '数据', to: '/setDatas' },
-    { icon: 'mdi-tag-check', text: '审批模板', to: '/approvalModel' },
-    { icon: 'mdi-flask-outline', text: '流程沙盒', to: '/sandbox' },
-    { icon: 'mdi-account-group-outline', text: '角色设置', to: '/roleSetting' },
-  ]
-  /**
-   * 侧边栏菜单：**按角色过滤**。
-   * 用的是与路由守卫同一张表（utils/permissions.ts），所以"能看见的"与"进得去的"必然一致。
-   */
-  const links = computed(() => allLinks.filter(item => canAccess(userStore.appRole, item.to)))
-  const drawer = computed(() => !isEditorFullscreen.value && drawerSet.value)
-  const icons = [
-    'mdi-vuetify',
-    'mdi-language-typescript',
-    'mdi-aws',
-    'mdi-vuejs',
-  ]
-  const router = useRouter()
-  async function handleLogout () {
-    await userStore.logout()
-    router.push('/login')
-  }
+// 主题跟随 createVuetify 的 light/dark 主题，并记住用户上次的选择
+const theme = useTheme()
+const savedTheme = localStorage.getItem('app-theme')
+if (savedTheme === 'light' || savedTheme === 'dark') {
+  theme.global.name.value = savedTheme
+}
+const userStore = useUserStore()
+const menu = ref(false)
+userStore.init()
+// 再从服务端拉一次最新记录覆盖 cookie 快照。
+// 必须做：PB 登录态是 base64 塞进单个 cookie 的（浏览器上限 4096 字节），
+// 带上 preferences 后必然超限、cookie 被静默丢弃，读到的就是旧记录 → 设置"下次重置"。
+userStore.refreshFromServer()
+// 偏好存在独立集合 user_preferences 里（不再挂在 users 上，否则登录 cookie 会超 4096 字节被丢），
+// 所以要在启动时单独读一次；两个用到偏好的页面都 watch 着它。
+userStore.loadPreferences()
+/** 侧边栏的**全部**菜单项（不过滤）；过滤后的 links 见下面 */
+const allLinks = [
+  { icon: 'mdi-view-list', text: '所有审批单', to: '/home' },
+  { icon: 'mdi-arrange-send-backward', text: '我的审批单', to: '/mine' },
+  { icon: 'mdi-chart-areaspline', text: '分析', to: '/analyze' },
+  { icon: 'mdi-creation', text: '任务', to: '/workStream' },
+  { icon: 'mdi-file-table-box', text: '数据', to: '/setDatas' },
+  { icon: 'mdi-tag-check', text: '审批模板', to: '/approvalModel' },
+  { icon: 'mdi-flask-outline', text: '流程沙盒', to: '/sandbox' },
+  { icon: 'mdi-account-group-outline', text: '角色设置', to: '/roleSetting' },
+]
+/**
+ * 侧边栏菜单：**按角色过滤**。
+ * 用的是与路由守卫同一张表（utils/permissions.ts），所以"能看见的"与"进得去的"必然一致。
+ */
+const links = computed(() => allLinks.filter(item => canAccess(userStore.appRole, item.to)))
+const drawer = computed(() => !isEditorFullscreen.value && drawerSet.value)
+const icons = [
+  'mdi-vuetify',
+  'mdi-language-typescript',
+  'mdi-aws',
+  'mdi-vuejs',
+]
+const router = useRouter()
+async function handleLogout() {
+  await userStore.logout()
+  router.push('/login')
+}
 
-  /**
-   * 顶栏「Collection」入口**要不要显示**：只给超级管理员。
-   *
-   * 走 `utils/permissions` 的动作表（`pb:admin`），不在这里拿角色字符串比较 ——
-   * 那张表是权限的唯一事实源，改口径只改一处（侧边栏菜单的 canAccess 就是这么用的）。
-   */
-  const canOpenPbAdmin = computed(() => canAct(userStore.appRole, 'pb:admin'))
+/**
+ * 顶栏「Collection」入口**要不要显示**：只给超级管理员。
+ *
+ * 走 `utils/permissions` 的动作表（`pb:admin`），不在这里拿角色字符串比较 ——
+ * 那张表是权限的唯一事实源，改口径只改一处（侧边栏菜单的 canAccess 就是这么用的）。
+ */
+const canOpenPbAdmin = computed(() => canAct(userStore.appRole, 'pb:admin'))
 
-  /**
-   * 顶栏「Collection」：新标签页打开 PocketBase 自带后台。
-   *
-   * `noopener`：后台是另一套应用，没必要让它拿到本页的 `window` 引用
-   * （不加的话新窗口能通过 `window.opener` 反操作本页，安全评审里这条是常规要求）。
-   */
-  function openPbAdmin () {
-    window.open(PB_ADMIN_URL, '_blank', 'noopener')
+/**
+ * 顶栏「Collection」：新标签页打开 PocketBase 自带后台。
+ *
+ * `noopener`：后台是另一套应用，没必要让它拿到本页的 `window` 引用
+ * （不加的话新窗口能通过 `window.opener` 反操作本页，安全评审里这条是常规要求）。
+ */
+function openPbAdmin() {
+  window.open(PB_ADMIN_URL, '_blank', 'noopener')
+}
+const route = useRoute()
+const isPublic = computed(() => route.meta.public === true)
+const pending = usePendingStore()
+watch(() => userStore.isLoggedIn, logged => {
+  if (logged) {
+    void pending.refresh()
+    pending.start()
+  } else {
+    pending.stop()
   }
-  const route = useRoute()
-  const isPublic = computed(() => route.meta.public === true)
-  const pending = usePendingStore()
-  watch(() => userStore.isLoggedIn, logged => {
-    if (logged) {
-      void pending.refresh()
-      pending.start()
-    } else {
-      pending.stop()
-    }
-  }, { immediate: true })
+}, { immediate: true })
 
-  watch(() => route.path, () => {
-    if (userStore.isLoggedIn) {
-      void pending.refresh()
-    }
-  })
+watch(() => route.path, () => {
+  if (userStore.isLoggedIn) {
+    void pending.refresh()
+  }
+})
 
-  onBeforeUnmount(() => pending.stop())
-  function setDrawer () {
-    drawerSet.value = !drawerSet.value
-  }
-  function onClick () {
-    const next = theme.global.name.value === 'light' ? 'dark' : 'light'
-    theme.global.name.value = next
-    localStorage.setItem('app-theme', next)
-  }
+onBeforeUnmount(() => pending.stop())
+function setDrawer() {
+  drawerSet.value = !drawerSet.value
+}
+function onClick() {
+  const next = theme.global.name.value === 'light' ? 'dark' : 'light'
+  theme.global.name.value = next
+  localStorage.setItem('app-theme', next)
+}
 
-  function routerGo (path: string) {
-    router.push(path)
-  }
+function routerGo(path: string) {
+  router.push(path)
+}
 </script>
 
 <style lang="scss" scoped>
