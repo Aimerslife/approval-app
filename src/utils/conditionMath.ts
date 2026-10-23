@@ -210,12 +210,25 @@ function analyze (expr: string, resolve?: (name: string) => number | null): Arit
       const t = peek()
       if (!t || t.kind !== 'op' || (t.value !== '*' && t.value !== '/')) break
       pos++
+      const divisorStart = pos
       const right = parseFactor()
       if (right === null) return null
       if (t.value === '/') {
         // 除零：直接判错，别让 Infinity 混进比较（Infinity > 任何数都成立，会静默走错分支）
-        if (right === 0) return fail('除数不能为 0')
-        left = left / right
+        if (right === 0) {
+          /*
+           * ⚠️ 只做语法检查（没给 resolve）时，字段的值是 0 占位（见 parseFactor），
+           * 于是 `剩余接收数量 * 总库存金额 / 总库存数量` 这种"分母是字段"的写法会被误判成除零 ——
+           * 分母此时压根还没取值，不能算错。
+           * 只有分母里**不含任何字段**（就是老老实实写了个字面量 0）才是真的写法错误。
+           * 真求值时（resolve 有值）分母为 0 依旧判错 → evalArithmetic 返回 null → 条件不命中。
+           */
+          const literalZero = !tokens.slice(divisorStart, pos).some(tk => tk.kind === 'field')
+          if (resolve || literalZero) return fail('除数不能为 0')
+          // 语法检查阶段：跳过这一次除法（等于除以 1），继续把后面的语法查完
+        } else {
+          left = left / right
+        }
       } else {
         left = left * right
       }
@@ -279,6 +292,9 @@ function analyze (expr: string, resolve?: (name: string) => number | null): Arit
 /**
  * 只做**语法检查**（不取值）：编辑器里没有行数据，能查的只有"写得对不对"。
  * 返回的 `fields` 供面板提示"有没有不在候选清单里的字段"。
+ *
+ * ⚠️ 字段在这一步是 0 占位，所以「除数为 0」**只在分母是字面量 0 时**才报
+ * （分母含字段 = 还没取值，不算错）；真求值时见 `evalArithmetic`。
  */
 export function parseArithmetic (expr: string): ArithmeticCheck {
   return analyze(expr)
