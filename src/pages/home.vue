@@ -29,7 +29,7 @@
           />
           <v-divider class="mt-3" />
           <!-- 首屏 / 刷新时：一条细进度条（表格自带的 loading 遮罩只盖住表体，顶部这条更显眼） -->
-          <v-progress-linear v-if="loading" class="mt-2" color="primary" height="2" indeterminate />
+          <!-- <v-progress-linear v-if="loading" class="mt-2" color="primary" height="2" indeterminate /> -->
           <v-data-table
             v-model:page="page"
             border

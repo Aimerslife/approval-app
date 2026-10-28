@@ -182,7 +182,8 @@ export function parseTemplateJson (raw: string): TemplatePayload {
     chain: {
       chain: chain as ApprovalChain,
       ...(Array.isArray(flow) && flow.length > 0 ? { flow: flow as ApprovalFlow } : {}),
-      ...(graphBox ? { graph: graphBox as FlowGraph } : {}),
+      // asRecord 给的是 Record<string, unknown>，与 FlowGraph 没有结构重叠 —— 先过 unknown 再断言
+      ...(graphBox ? { graph: graphBox as unknown as FlowGraph } : {}),
     },
   }
 }
