@@ -28,11 +28,16 @@ import { type AdminCaller, adminToken, assertSuperAdmin, PB_URL } from './pbAdmi
  * 单子已经被删掉（404）时**返回成功**、`deleted: false` —— 连点两下、或两个人同时删，
  * 第二个人看到的应该是"已删除"，而不是一个红色报错。
  *
- * ## 两个入口
+ * ## 三个入口
  *
  *   1. `deleteApprovalOrder`  —— 删**一张**（表格「操作」栏的删除按钮）；
- *   2. `deleteHistoryOrders`  —— 删**全部历史审批单**（已办结的，见下面的 HISTORY_FILTER）。
- * 除了规模，两者的口径（身份校验、先附件后单、幂等）是同一套，别只改其中一个。
+ *   2. `deleteHistoryOrders`  —— 删**全部历史审批单**（已办结的，见下面的 HISTORY_FILTER）；
+ *   3. `deletePendingOrders`  —— 清空**全部进行中的单**（见 PENDING_FILTER，首页「清空」按钮用）。
+ * 除了规模与范围，三者的口径（身份校验、先附件后单、幂等）是同一套，别只改其中一个。
+ *
+ * ⚠️ 清空「进行中」比清空历史危险得多：这些单还在流转，删掉之后当前办理人一提交
+ *    就会写到一条不存在的单上。所以界面上必须二次确认（输入「删除」），服务端这里
+ *    也只是"按 status 精确筛"，绝不做"删全部 approval_chain"。
  */
 
 export interface DeleteOrderSummary {
@@ -147,10 +152,29 @@ async function deleteFilesOfOrder (orderId: string, token: string): Promise<numb
  */
 const HISTORY_FILTER = `status != ${APPROVAL_STATUS.PENDING}`
 
+/**
+ * 「进行中」的判定：`status = PENDING`（0）。
+ *
+ * 与 HISTORY_FILTER 严格互补 —— 两个"清空"按钮合起来正好覆盖全库，
+ * 但各自只碰自己那一半（不能写成 `status >= 0` 这种，等于删全部）。
+ */
+const PENDING_FILTER = `status = ${APPROVAL_STATUS.PENDING}`
+
+/** 批量删除的范围（见文件头的三入口说明） */
+export type OrderDeleteScope = 'history' | 'pending'
+
+/** scope → (PB filter, 界面文案用的名字, 权限失败时的动作名) */
+const SCOPE_META: Record<OrderDeleteScope, { filter: string, name: string, action: string }> = {
+  history: { filter: HISTORY_FILTER, name: '历史审批单', action: '删除历史审批单' },
+  pending: { filter: PENDING_FILTER, name: '进行中的审批单', action: '清空进行中的审批单' },
+}
+
 export interface DeleteHistorySummary {
   /** 这次调用有没有真删（dryRun 只统计） */
   dryRun: boolean
-  /** 命中「历史审批单」的单数 —— dryRun 时它就是"将要删掉多少" */
+  /** 本次清的是哪一类 */
+  scope: OrderDeleteScope
+  /** 命中该范围的单数 —— dryRun 时它就是"将要删掉多少" */
   targeted: number
   /** 真的删掉的单数（多人同时点时会小于 targeted） */
   deletedOrders: number
@@ -161,7 +185,11 @@ export interface DeleteHistorySummary {
 }
 
 /**
- * 删除**全部历史审批单**（含它们的附件）。只有超级管理员能调。
+ * 删掉**某一类**审批单（含它们的附件）。只有超级管理员能调。
+ *
+ * `scope`：
+ *   · `history`（默认入口 deleteHistoryOrders）—— 已办结的；
+ *   · `pending`（deletePendingOrders）—— 还在流转的。
  *
  * 单条删除走 deleteApprovalOrder，这里是批量版，两者的"先删附件再删单"顺序、
  * 幂等（已经不在 = 成功）、身份校验（assertSuperAdmin）完全一致 —— 差别只在规模，
@@ -170,17 +198,19 @@ export interface DeleteHistorySummary {
  * `dryRun` 只数不删：界面上的确认框先用它把"将要删掉多少张"摆出来再让人确认
  * （与 /api/bi/sync、清空 BI 数据同一套老规矩）。
  */
-export async function deleteHistoryOrders (
-  opts: { token: string, dryRun?: boolean },
+export async function deleteOrdersByScope (
+  opts: { token: string, scope?: OrderDeleteScope, dryRun?: boolean },
 ): Promise<DeleteHistorySummary> {
   const dryRun = opts.dryRun === true
-  const by = await assertSuperAdmin(opts.token, '删除历史审批单')
+  const scope: OrderDeleteScope = opts.scope === 'pending' ? 'pending' : 'history'
+  const meta = SCOPE_META[scope]
+  const by = await assertSuperAdmin(opts.token, meta.action)
   const admin = await adminToken()
 
   // ① 先把目标单的 id 全部取出来再动手：边翻页边删会让游标错位、漏掉记录
-  const ids = await listHistoryOrderIds(admin)
+  const ids = await listOrderIds(admin, meta.filter)
   if (dryRun || ids.length === 0) {
-    return { dryRun, targeted: ids.length, deletedOrders: 0, filesDeleted: 0, by }
+    return { dryRun, scope, targeted: ids.length, deletedOrders: 0, filesDeleted: 0, by }
   }
 
   // ② 附件先删（与单条删除同理：中途失败留下的是"单还在、附件缺了几条"，重跑一次即可；
@@ -191,21 +221,31 @@ export async function deleteHistoryOrders (
   const deletedOrders = await deleteRecords('approval_chain', ids, admin)
 
   console.log(
-    `[orderDelete] 历史审批单清理完成：命中 ${ids.length} 张 → 删除 ${deletedOrders} 张、附件 ${filesDeleted} 个`
+    `[orderDelete] ${meta.name}清理完成：命中 ${ids.length} 张 → 删除 ${deletedOrders} 张、附件 ${filesDeleted} 个`
     + `（${by.email ?? by.id}）`,
   )
-  return { dryRun, targeted: ids.length, deletedOrders, filesDeleted, by }
+  return { dryRun, scope, targeted: ids.length, deletedOrders, filesDeleted, by }
 }
 
-/** 分页取「历史审批单」的 id（只取 id，别把整条 chain 拉下来） */
-async function listHistoryOrderIds (token: string): Promise<string[]> {
+/** 删除全部历史审批单（已办结）。保留这个入口：调用方与文案都不必知道 scope 参数 */
+export function deleteHistoryOrders (opts: { token: string, dryRun?: boolean }): Promise<DeleteHistorySummary> {
+  return deleteOrdersByScope({ ...opts, scope: 'history' })
+}
+
+/** 清空全部进行中的审批单 */
+export function deletePendingOrders (opts: { token: string, dryRun?: boolean }): Promise<DeleteHistorySummary> {
+  return deleteOrdersByScope({ ...opts, scope: 'pending' })
+}
+
+/** 分页取某类审批单的 id（只取 id，别把整条 chain 拉下来） */
+async function listOrderIds (token: string, filter: string): Promise<string[]> {
   const ids: string[] = []
   for (let page = 1; ; page++) {
     const url = new URL('/api/collections/approval_chain/records', PB_URL)
     url.searchParams.set('page', String(page))
     url.searchParams.set('perPage', '500')
     url.searchParams.set('fields', 'id')
-    url.searchParams.set('filter', HISTORY_FILTER)
+    url.searchParams.set('filter', filter)
 
     const res = await fetch(url.toString(), { headers: { Authorization: token } })
     if (!res.ok) {

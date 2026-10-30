@@ -10,19 +10,27 @@
   -->
   <v-dialog v-model="open" max-width="560" persistent>
     <v-card>
-      <v-card-title class="text-error text-[15px] mt-5 mb--6">删除全部历史审批单</v-card-title>
+      <v-card-title class="text-error text-[15px] mt-5 mb--6">{{ meta.title }}</v-card-title>
       <v-card-text class="text-[13px]">
         <p class="mb-2">
-          将<strong>永久删除全部已办结</strong>的审批单（通过 / 驳回）及其附件。
-          <strong>进行中的单不会被删</strong>，但删掉的记录<strong>不可恢复</strong>。
+          <template v-if="scope === 'pending'">
+            将<strong>永久删除全部「进行中」</strong>的审批单及其附件。
+            这些单还在流转，删除后<strong>当前办理人一提交就会写到不存在的单上</strong>，
+            且记录<strong>不可恢复</strong>。
+          </template>
+
+          <template v-else>
+            将<strong>永久删除全部已办结</strong>的审批单（通过 / 驳回）及其附件。
+            <strong>进行中的单不会被删</strong>，但删掉的记录<strong>不可恢复</strong>。
+          </template>
         </p>
         <!-- 数字来自服务端的 dry-run 统计：删的是这一类，与表格上的筛选、当前页都无关 -->
         <div v-if="counting" class="text-[12px] text-medium-emphasis">正在统计…</div>
         <div v-else-if="targeted === 0" class="text-[12px] text-medium-emphasis">
-          库里没有已办结的审批单，无需删除。
+          库里没有{{ meta.name }}，无需删除。
         </div>
         <div v-else-if="targeted !== null" class="text-[12px]">
-          当前共 <strong class="text-error">{{ targeted }}</strong> 张历史审批单会被删除
+          当前共 <strong class="text-error">{{ targeted }}</strong> 张{{ meta.name }}会被删除
           （统计的是全库，不受表格上的筛选影响）
         </div>
 
@@ -48,9 +56,27 @@
 
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
-import { deleteHistoryOrders, type DeleteHistorySummary } from '@/api/api'
+import { deleteOrdersByScope, type DeleteHistorySummary, type OrderDeleteScope } from '@/api/api'
 import { useUserStore } from '@/stores/user'
 import { canAct } from '@/utils/permissions'
+
+/**
+ * 批量清空确认框：**只提供弹窗，不带触发按钮**（触发点由页面自己摆）。
+ *
+ * `scope` 决定清哪一类：
+ *   · `history`（默认）—— 已办结的单（通过 / 驳回）；
+ *   · `pending` —— 还在流转的单（首页「当前审批单」的清空按钮）。
+ *
+ * ⚠️ 这里的权限判断只是界面礼貌，不是权限：`approval_chain` / `approval_files`
+ * 在 PocketBase 里的 deleteRule 是空的（只有 superuser 能删），真正拦住人的是服务端
+ * （server/orderDelete.ts 拿调用者的 token 去问 PB 的 role）。绕过界面也删不掉东西。
+ */
+const props = withDefaults(defineProps<{
+  /** 清空范围，默认历史审批单 */
+  scope?: OrderDeleteScope
+}>(), {
+  scope: 'history',
+})
 
 const emit = defineEmits<{
   /** 删完了（含"本来就一张都没有"）—— 页面据此重新取数 */
@@ -63,6 +89,11 @@ const userStore = useUserStore()
 
 /** 能不能删：走权限判定表，不在这里写死角色比较（与 DeleteOrderButton 同一档） */
 const canDelete = computed(() => canAct(userStore.appRole, 'approval:delete'))
+
+/** 按范围切换的文案（标题 / 数量说明 / 权限提示），避免三处各写一份三元 */
+const meta = computed(() => (props.scope === 'pending'
+  ? { title: '清空进行中的审批单', name: '进行中的审批单', action: '清空进行中的审批单' }
+  : { title: '删除全部历史审批单', name: '历史审批单', action: '删除历史审批单' }))
 
 /**
  * 必须手动输入这两个字才能点确认。
@@ -87,7 +118,7 @@ const targeted = ref<number | null>(null)
 async function openDialog() {
   // 图标点了才判权限（按钮在页面上，这里拦不住它被点到）
   if (!canDelete.value) {
-    emit('error', '只有超级管理员可以删除历史审批单')
+    emit('error', `只有超级管理员可以${meta.value.action}`)
     return
   }
   confirmText.value = ''
@@ -95,7 +126,7 @@ async function openDialog() {
   counting.value = true
   open.value = true
   try {
-    targeted.value = (await deleteHistoryOrders(true)).targeted
+    targeted.value = (await deleteOrdersByScope(props.scope, true)).targeted
   } catch (error) {
     open.value = false
     emit('error', error instanceof Error ? error.message : String(error))
@@ -111,7 +142,7 @@ async function confirmDelete() {
   }
   deleting.value = true
   try {
-    const summary = await deleteHistoryOrders(false)
+    const summary = await deleteOrdersByScope(props.scope, false)
     open.value = false
     emit('deleted', summary)
   } catch (error) {

@@ -65,6 +65,9 @@
       <v-col ref="leftColRef" class="relative" cols="4">
         <!-- 底部留白跟固定办理面板的实测高度走（展开时面板变高，留白同步增加） -->
         <v-container class="pb-10" :style="{ paddingBottom: timelinePaddingBottom }">
+          <!-- 轮询各团队已接多少（只读；没有轮询环时组件自己不渲染） -->
+          <RotationReceipts class="mb-3" :items="rotationReceipts" label="轮询接收情况" />
+
           <v-timeline density="compact" side="end" truncate-line="both" width="100%">
             <ApprovalNode
               v-for="(g, gi) in stepGroups"
@@ -142,7 +145,6 @@
             :stock-qty="stockQty"
             @submit="onNodeSubmit"
           >
-            <!-- 抄送 / 转办：审批页单独有这一入口（抽屉里没有） -->
             <template #extra>
               <SelectNode @select="handleSelect" />
             </template>
@@ -194,6 +196,8 @@
   import { proxyAvatar, sendFeishuCard } from '@/api/api'
   // 底部办理面板：三处办理入口共用同一份实现（内含 ApprovalHandleForm）
   import HandleDock from '@/components/approval/HandleDock.vue'
+  // 轮询各团队的接收汇总（与办理面板 / 首页详情同一份展示口径）
+  import RotationReceipts from '@/components/approval/RotationReceipts.vue'
   import ApprovalNode from '@/components/ApprovalNode.vue'
   // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
   import FlowEndNote from '@/components/FlowEndNote.vue'
@@ -220,6 +224,7 @@
     mainOf,
     nextStepsOf,
     queueCursorOf,
+    rotationReceiptsOf,
     runtimeOf,
     stepStartTimesOf,
   } from '@/utils/approvalRuntime'
@@ -389,6 +394,12 @@
   const runtime = computed(() => (orderDatas.value
     ? runtimeOf(orderDatas.value)
     : { chain: [], stepIds: [], currentStep: -1, done: false, outcome: 'pending' as const, end: undefined }))
+
+  /**
+   * 「组间轮询」里各团队已接多少（只读，口径见 utils/approvalRuntime 的 rotationReceiptsOf）。
+   * 放在时间线上方：打开单据就能看到各组分了多少，不必先点开办理面板。
+   */
+  const rotationReceipts = computed(() => rotationReceiptsOf(runtime.value.chain))
 
   const stepResultOptions = computed(() => {
     const flow = orderDatas.value?.chain?.flow

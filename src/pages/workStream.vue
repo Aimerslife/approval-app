@@ -849,6 +849,21 @@ const DEAD_COLUMN = biColumnOf('是否属于待评估库存') ?? 'is_dead'
 const DEAD_VALUE = '待评估'
 const FIXED_EQUALS: Record<string, string> = { [DEAD_COLUMN]: DEAD_VALUE }
 
+/**
+ * 本页固定排除「总库存数量 或 总库存金额 为 0」的行。
+ *
+ * 为什么是**查询条件**而不是前端过滤：
+ *   · 分页的总行数、翻页、Excel 导出、勾选建单都来自同一次 PB 查询 ——
+ *     前端过滤会让"共 N 行"与看得见的行数对不上，导出的还会把 0 库存带出去；
+ *   · PB 的 number 字段未填时是 null，`> 0` 一并排除（没有库存数字的行同样没有处理意义）。
+ *
+ * 列名走 biColumnOf 翻译（中文 key → ASCII 列名），不要手写列名：
+ * 字段改过名时会走别名表，手写字面量会在改名后静默变成"字段不存在"。
+ */
+const POSITIVE_COLUMNS = ['总库存数量', '总库存金额']
+  .map(biColumnOf)
+  .filter((c): c is string => !!c)
+
 const SELECT_CONFIGS: { key: FilterKey, field: string, mode: 'eq' | 'includes' }[] = [
   { key: 'sale', field: '供应商', mode: 'eq' },
   // { key: 'model', field: '主MODEL', mode: 'eq' },
@@ -886,6 +901,8 @@ function currentQuery(extra: Partial<BiRowQuery> = {}): BiRowQuery {
     ...(sortBy.value ? { sort: sortBy.value } : {}),
     equals,
     contains,
+    // 零库存（或库存为空）的行不进任务列表，见 POSITIVE_COLUMNS
+    positive: POSITIVE_COLUMNS,
     search: { columns: searchColumns, value: f.search },
     range: {
       column: biColumnOf(DATE_FILTER_FIELD) ?? 'first_sale_date',

@@ -2368,6 +2368,24 @@ async function saveStream() {
     showMsg('请输入审批流名称', 'warning')
     return
   }
+  /*
+   * 选项树里「实际链路」为空的一级项会在编译时被**静默丢掉**
+   * （normalizeOptionGroups：没有链路就无法决定走向，整组项都空时连类别一起消失），
+   * 表现是"画布上配了、办理下拉里没有"且不报任何错 —— 在这里提前拦下，逼着当场补。
+   */
+  interface OptionGroupLike { title?: string, items?: Array<{ text?: string, link?: string }> }
+  const dangling = nodes.value.flatMap(n => {
+    const groups = (n.data as { optionGroups?: OptionGroupLike[] } | undefined)?.optionGroups ?? []
+    const title = String(n.data?.title ?? '').trim() || String(n.id)
+    return groups.flatMap(g =>
+      (g.items ?? [])
+        .filter(i => String(i?.text ?? '').trim() && !String(i?.link ?? '').trim())
+        .map(i => `环节「${title}」的「${String(g.title ?? '未分类')}」分类：${String(i.text)} 没选实际链路`))
+  })
+  if (dangling.length > 0) {
+    showMsg(`有 ${dangling.length} 个办理选项没配「实际链路」，保存后它们不会出现在办理下拉里（如：${dangling[0]}）`, 'warning')
+    return
+  }
   const { flow: rawFlow, error, errorNodeId, errorEdgeId } = graphToFlow()
   if (error) {
     saveError.value = { message: error, ...(errorNodeId ? { nodeId: errorNodeId } : {}), ...(errorEdgeId ? { edgeId: errorEdgeId } : {}) }

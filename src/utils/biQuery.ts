@@ -52,6 +52,14 @@ export interface BiRowQuery {
   /** 闭区间。日期列存的是 'YYYY-MM-DD' 文本，字典序即时间序 */
   range?: { column: string, from?: string, to?: string }
   /**
+   * 数值列**必须大于 0**：`(col1 > 0 && col2 > 0)`。
+   *
+   * 用在"没有库存就没有处理意义"的行上（任务列表排除总库存 / 总库存金额为 0 的数据）。
+   * 为什么不用 `!= 0`：PB 的 number 字段未填时是 null，`!= 0` 对 null 的语义依赖实现，
+   * 而 `> 0` 语义明确 —— 0 和空值都不进结果集。
+   */
+  positive?: string[]
+  /**
    * **命中任一**即算匹配（跨列 OR）：`(col1 = v1 || col1 = v2 || col2 = v3)`。
    *
    * 用在「按关联单据的状态筛数据行」上：状态存在 `approval_chain`，`bi_rows` 里没有这一列，
@@ -83,6 +91,15 @@ export function buildBiFilter (q: BiRowQuery): string {
     if (v !== '') {
       parts.push(`${col} = ${pbQuote(v)}`)
     }
+  }
+
+  /*
+   * 必须为正的数值列（见 BiRowQuery 的 positive）：
+   * 用 `&&` 连起来逐个比较，不能写成 `col1 > 0 || col2 > 0` ——
+   * 那是"任一为正即可"，与"两个都要有"是两回事（会漏进一半零库存的行）。
+   */
+  for (const col of q.positive ?? []) {
+    parts.push(`${col} > 0`)
   }
   for (const [col, v] of Object.entries(q.contains ?? {})) {
     if (v !== '') {

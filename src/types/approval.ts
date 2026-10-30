@@ -402,6 +402,26 @@ export interface ApprovalFlowStep {
    */
   afterLoop?: { stepId: string }
   /**
+   * type='loop' 的**跳出条件**：每办完一环求值一次，命中就跳过**后面还没轮的组**。
+   *
+   * 典型用法：「剩余接收数量 = 0」—— 前面的组已经把货接完了，后面的组不必再办。
+   * 与「某一组选了接收就跳出」（环内 `branch.exitTo`）的分工：
+   *   · 那个是**办理人按结论**决定跳不跳；
+   *   · 这个是**按数据条件**自动算 —— 不论这一环选了什么，条件成立就跳出。
+   *
+   * `conditions` 为空 = 没配跳出条件（老卡片行为，完全不受影响）。
+   * 求值上下文与分支条件完全相同（含派生字段「剩余接收数量」「已接收数量」）。
+   */
+  breakWhen?: ConditionExpr[]
+  /**
+   * 跳出后去哪（建单期展开时用；保存期解析出**轮完走向**那条路的终点）。
+   *
+   * 为什么单独存一份而不让展开期自己看 `afterLoop`：卡片不配「轮完走向」时，
+   * "轮完去哪"是画布上那条出线的目标（编译期才知道，见 utils/approvalFlow 的 readLoopOuts）——
+   * 展开期只看 `afterLoop` 会拿不到目标，跳出条件就无处可去。
+   */
+  breakTo?: { stepId: string }
+  /**
    * type='ref'（引用模板）指向的**源模板 id**（`app_chain` 记录的 id）。
    *
    * 与 `loop` 卡片一样是"**一段被搬过来的子流程**"，但内容**不**存在本模板里 ——
@@ -1055,6 +1075,10 @@ export interface ApprovalFlowLoopNode {
    * 详见 ApprovalFlowStep.afterLoop 的说明 —— 两种形态共用同一个字段语义。
    */
   afterLoop?: { stepId: string }
+  /** 卡片级**跳出条件**（每环之后求值，命中就跳过后面的组）：详见 ApprovalFlowStep.breakWhen */
+  breakWhen?: ConditionExpr[]
+  /** 跳出后去哪（保存期解析：轮完走向的终点） */
+  breakTo?: { stepId: string }
 }
 
 /**
@@ -1160,6 +1184,17 @@ export interface LoopNodeData {
    * 只有一条出线时它照旧是"改这条去路"的入口（老行为，没配 = 走那条线）。
    */
   afterLoop?: string
+  /**
+   * 轮询的**跳出条件**（画布配置，单条件）：每办完一环求值一次，命中就**跳过后面还没轮的组**，
+   * 直接走「轮完」那条路（见下面的 `afterLoop` / 卡片出线）。
+   *
+   * 典型用法：「剩余接收数量 = 0」—— 前面几组已经把货接完了，后面的组不必再办。
+   * 与卡片内部连线的「提前结束轮询」分工：那个是办理人按结论决定，这个是按数据自动判断。
+   *
+   * 空 = 没配（老卡片行为不变）；转成 flow 时包成 `breakWhen: [条件]` + `breakTo`，
+   * 由建单期展开成"每环后面的判断分支"（见 utils/approvalRotation 的 breakBranchGroup）。
+   */
+  breakWhen?: BranchCondition
 }
 
 /**

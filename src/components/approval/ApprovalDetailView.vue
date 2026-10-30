@@ -63,6 +63,9 @@
 
         <GoodsInfo :product="order.expand?.relation" />
 
+        <!-- 轮询各团队已接多少（只读；没有轮询环时组件自己不渲染） -->
+        <RotationReceipts class="mt-2" :items="rotationReceipts" label="轮询接收情况" />
+
         <div class="d-flex align-center ga-2 mt-1 mb-1">
           <span class="text-[13px] font-bold">审批流程</span>
           <v-chip label size="x-small" variant="tonal">{{ stepGroups.length }} 个环节</v-chip>
@@ -112,6 +115,8 @@ import type { ApprovalChainItem, ApprovalOrder, NodeSubmitPayload } from '@/type
 import { useRouter } from 'vue-router'
 // 办理面板：与审批页共用（内含 ApprovalHandleForm）
 import HandleDock from '@/components/approval/HandleDock.vue'
+// 轮询各团队的接收汇总（与办理面板 / 审批页同一份展示口径）
+import RotationReceipts from '@/components/approval/RotationReceipts.vue'
 import ApprovalNode from '@/components/ApprovalNode.vue'
 // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
 import FlowEndNote from '@/components/FlowEndNote.vue'
@@ -134,6 +139,7 @@ import {
   lastHandledOf,
   mainOf,
   nextStepsOf,
+  rotationReceiptsOf,
   runtimeOf,
   stepStartTimesOf,
 } from '@/utils/approvalRuntime'
@@ -202,6 +208,14 @@ const chain = computed<ApprovalChainItem[][]>(() => runtime.value?.chain ?? [])
 const stepIds = computed(() => runtime.value?.stepIds ?? [])
 const currentStep = computed(() => runtime.value?.currentStep ?? -1)
 const flowEnd = computed(() => runtime.value?.end)
+
+/**
+ * 「组间轮询」里各团队已接多少（只读展示，与办理面板同一个口径）。
+ *
+ * 放在详情里而不只在办理弹窗：审批人打开一张单先判断"要不要接、还能接多少"，
+ * 这一步往往发生在点「办理」之前 —— 只在办理面板里给出，等于要先点开才知道。
+ */
+const rotationReceipts = computed(() => rotationReceiptsOf(chain.value))
 
 const startTimes = computed(() =>
   props.order ? stepStartTimesOf(props.order, chain.value) : [],

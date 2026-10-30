@@ -12,7 +12,7 @@ import { assertRequiredKeys, config, configSummary, optionalWarnings } from './c
 import { loadedEnvFiles } from './env'
 // 「我的审批」按 tab 懒加载：判据复用前端那套纯逻辑，见 server/mineOrders.ts
 import { readMineOrders } from './mineOrders'
-import { deleteApprovalOrder, deleteHistoryOrders } from './orderDelete'
+import { deleteApprovalOrder, deleteOrdersByScope } from './orderDelete'
 // 人员配置（团队 → 默认审批人）的落盘读写：数据只有一份 data/people.json，见 server/people.ts
 import { addPerson, PEOPLE_FILE_PATH, readPeople } from './people'
 import { purgeBiData as runPurgeBiData } from './purgeData'
@@ -1097,6 +1097,32 @@ http.createServer(async (req, res) => {
         json(res, 200, { code: 0, data: summary })
       } catch (error: any) {
         console.error('[orderDelete] 删除失败:', error?.message ?? error)
+        json(res, 500, { code: -1, msg: error?.message || String(error) })
+      }
+      return
+    }
+
+    // ─── 批量清空审批单（仅超级管理员） ─────────────
+    // DELETE /api/approval/orders?scope=history   清空已办结的单（默认）
+    // DELETE /api/approval/orders?scope=pending   清空**进行中**的单（首页「当前审批单」的清空）
+    // DELETE /api/approval/orders?scope=...&dryRun=1   只统计数量（确认框先用它把数字摆出来）
+    //   请求头：Authorization: <调用者的 PB token>
+    //
+    // 权限、按 scope 取 id、先删附件再删单、幂等全部在 server/orderDelete.ts；
+    // 这里只负责读参数并回执（前端文案里的"命中多少 / 删了多少"就是它）。
+    if (pathname === '/api/approval/orders' && req.method === 'DELETE') {
+      try {
+        const token = String(req.headers.authorization ?? '')
+        const scopeParam = url.searchParams.get('scope')
+        const scope = scopeParam === 'pending' ? 'pending' as const : 'history' as const
+        const dryRun = url.searchParams.get('dryRun') === '1' || url.searchParams.get('dryRun') === 'true'
+        const summary = await deleteOrdersByScope({ token, scope, dryRun })
+        if (!dryRun) {
+          console.log(`[orderDelete] ${summary.by.email ?? summary.by.id} 清空${summary.scope === 'pending' ? '进行中' : '历史'}审批单 ${summary.deletedOrders} 张（附件 ${summary.filesDeleted} 个）`)
+        }
+        json(res, 200, { code: 0, data: summary })
+      } catch (error: any) {
+        console.error('[orderDelete] 批量清空失败:', error?.message ?? error)
         json(res, 500, { code: -1, msg: error?.message || String(error) })
       }
       return

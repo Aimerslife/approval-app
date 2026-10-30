@@ -147,6 +147,48 @@
         <span v-else class="rotation-note">画布上还没有可跳的环节</span>
       </div>
 
+      <!--
+        「跳出条件」：每办完一环判断一次，命中就**跳过后面还没轮的组**，直接走「轮完」那条路。
+
+        典型用法：剩余接收数量 = 0 —— 前面几组已经把货接完了，后面的组不必再办。
+        与卡片内部连线的「提前结束轮询」分工：那个是办理人**按结论**决定跳不跳，
+        这个是**按数据**自动判断（不论这一环选了什么，条件成立就跳出）。
+
+        不配 = 一直轮到最后一组（老卡片行为不变）。字段留空即清除条件。
+      -->
+      <div class="rotation-row">
+        <span class="role-tag role-rotate">跳出</span>
+
+        <input
+          class="rotation-input nodrag"
+          list="loop-break-field-options"
+          placeholder="条件字段 如 剩余接收数量"
+          title="跳出条件：每办完一环判断一次，命中就跳过后面还没轮的组（不配 = 一直轮到最后一组）。常用：剩余接收数量 / 已接收数量"
+          :value="breakWhenField"
+          @input="onBreakField"
+        >
+      </div>
+
+      <div v-if="breakWhenField" class="rotation-row">
+        <span class="role-tag role-rotate">条件</span>
+
+        <select class="rotation-select nodrag" title="比较方式" :value="breakWhen?.op ?? 'eq'" @change="onBreakOp">
+          <option v-for="o in BREAK_OPS" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+
+        <input
+          class="rotation-input nodrag"
+          placeholder="值 如 0"
+          title="比较值（纯数字按数值比较，否则按文本）"
+          :value="breakWhen?.value ?? ''"
+          @input="onBreakValue"
+        >
+      </div>
+
+      <datalist id="loop-break-field-options">
+        <option v-for="f in breakFieldOptions" :key="f.value" :value="f.value">{{ f.label }}</option>
+      </datalist>
+
       <div v-if="!rotationOf.rowFilter" class="rotation-row">
         <span class="role-tag role-rotate">范围</span>
 
@@ -205,8 +247,10 @@
 </template>
 
 <script lang="ts" setup>
-  import type { LoopNodeData, RotationSpec } from '@/types/approval'
+  import type { BranchCondition, LoopNodeData, RotationSpec } from '@/types/approval'
   import { Handle, Position } from '@vue-flow/core'
+  // 跳出条件的字段候选：与流程条件共用同一份（含派生字段「剩余接收数量」「已接收数量」）
+  import { CONDITION_FIELD_OPTIONS } from '@/utils/conditionFields'
 
   /**
    * 画布上的「组间轮询」卡片 —— **轮询条件就在卡片上直接配**（与旧轮询面板同一套控件），
@@ -314,6 +358,67 @@
       return
     }
     dataRef().afterLoop = v
+  }
+
+  /* ===== 跳出条件（每环之后判断，命中就跳过后面的组） ===== */
+
+  /** 操作符候选：与 BranchCondition 的 op 一一对应，顺序按"常用在前" */
+  const BREAK_OPS: Array<{ value: BranchCondition['op'], label: string }> = [
+    { value: 'eq', label: '等于' },
+    { value: 'ne', label: '不等于' },
+    { value: 'lte', label: '小于等于' },
+    { value: 'gte', label: '大于等于' },
+    { value: 'lt', label: '小于' },
+    { value: 'gt', label: '大于' },
+    { value: 'contains', label: '包含' },
+  ]
+
+  /** 字段候选（datalist）：带派生字段「剩余接收数量」「已接收数量」 */
+  const breakFieldOptions = CONDITION_FIELD_OPTIONS
+
+  const breakWhen = computed(() => props.data?.breakWhen)
+  const breakWhenField = computed(() => String(breakWhen.value?.field ?? '').trim())
+
+  /**
+   * 写回跳出条件：字段清空 = **删掉整个条件**（与 afterLoop / 枚举项同一口径：
+   * "没配"只有一种表示，别留一个 `{ field: '', op: 'eq', value: '' }` 的空壳）。
+   * 其余字段沿用已有值，避免改字段时把操作符和值一起清掉。
+   */
+  function onBreakField (e: Event) {
+    const field = (e.target as HTMLInputElement).value.trim()
+    if (!field) {
+      delete dataRef().breakWhen
+      return
+    }
+    const cur = dataRef().breakWhen
+    dataRef().breakWhen = {
+      field,
+      op: cur?.op ?? 'eq',
+      value: cur?.value ?? '',
+    }
+  }
+
+  function onBreakOp (e: Event) {
+    const cur = dataRef().breakWhen
+    if (!cur) {
+      return
+    }
+    cur.op = (e.target as HTMLSelectElement).value as BranchCondition['op']
+  }
+
+  /**
+   * 比较值：纯数字写成 **number**（求值时按数值比较，`"0"` 与 `0` 在多数场景等价，
+   * 但写成数字最不容易在序列化/比较里出岔子）；否则按原文存。
+   * 空串照写 —— 保存期会报"没填比较值"，让配置者当场补，而不是静默恒不命中。
+   */
+  function onBreakValue (e: Event) {
+    const cur = dataRef().breakWhen
+    if (!cur) {
+      return
+    }
+    const raw = (e.target as HTMLInputElement).value.trim()
+    const n = Number(raw)
+    cur.value = raw !== '' && Number.isFinite(n) ? n : raw
   }
 
   /**

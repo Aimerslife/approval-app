@@ -16,7 +16,14 @@
     <v-tabs-window-item value="home">
       <v-container class="h-[calc(100vh-80px)] bg-app" fluid>
         <v-sheet class="overflow-hidden mt-3 p-4 card-border" rounded="15">
-          <div class="block-title">审批信息</div>
+          <div class="d-flex align-center justify-space-between">
+            <div class="block-title">审批信息</div>
+            <!-- 清空**进行中**的单：确认框里要先输入「删除」，权限由服务端校验 -->
+            <v-btn v-if="canDelete" color="error" prepend-icon="mdi-delete-sweep-outline" size="small"
+              variant="text" @click="pendingClearDialog?.open()">
+              清空
+            </v-btn>
+          </div>
           <!-- 当前审批单：同一个 `approver` 字段在在办单里是「当前审批人」（表格已不摆这一列，筛选仍可按它挑单） -->
           <ApprovalFilterBar
             :dirty="filtersDirty"
@@ -80,7 +87,14 @@
     <v-tabs-window-item value="history">
       <v-container class="h-[calc(100vh-80px)] bg-app" fluid>
         <v-sheet class="p-3 mt-3 card-border" rounded="15">
-          <div class="block-title">历史审批单</div>
+          <div class="d-flex align-center justify-space-between">
+            <div class="block-title">历史审批单</div>
+            <!-- 清空**已办结**的单（通过 / 驳回）；进行中的单不在此列，见服务端的 HISTORY_FILTER -->
+            <v-btn v-if="canDelete" color="error" prepend-icon="mdi-delete-sweep-outline" size="small"
+              variant="text" @click="historyClearDialog?.open()">
+              清空
+            </v-btn>
+          </div>
 
           <ApprovalFilterBar
             :dirty="filtersDirty"
@@ -165,6 +179,16 @@
       @submit="onDrawerSubmit"
     />
   </v-navigation-drawer>
+
+  <!--
+    两个「清空」确认框：同一个组件、只换 scope（清的是哪一类由服务端按 status 精确筛）。
+    实例分开挂（而不是一个实例切 scope）：一起打开时状态不会互相串。
+  -->
+  <DeleteAllOrdersDialog ref="pendingClearDialog" scope="pending" @deleted="onOrdersCleared"
+    @error="onDeleteFailed" />
+  <DeleteAllOrdersDialog ref="historyClearDialog" scope="history" @deleted="onOrdersCleared"
+    @error="onDeleteFailed" />
+
   <!-- 抽屉里提交办理后要有反馈（原先这个页面没有 snackbar，写库成功/失败都看不见） -->
   <v-snackbar
     v-model="snackbar.show"
@@ -178,11 +202,16 @@
 </template>
 
 <script setup lang="ts">
-  import type { DeleteOrderSummary } from '@/api/api'
+  import type { DeleteHistorySummary, DeleteOrderSummary } from '@/api/api'
   import type { ApprovalChainItem, NodeSubmitPayload } from '@/types/approval'
   // 与「我的审批单」右栏**共用同一个组件**：头部 / 单据信息 / 时间线 / 办理栏都在里面
   import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
   import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
+  // 批量清空确认框（同一个组件按 scope 清「进行中」或「历史」，见其文件头）
+  import DeleteAllOrdersDialog from '@/components/DeleteAllOrdersDialog.vue'
+  // 权限判定（清空按钮只给能删的角色看；真正拦住人的是服务端）
+  import { useUserStore } from '@/stores/user'
+  import { canAct } from '@/utils/permissions'
   // 操作栏的「删除审批单」：按钮内置权限判断与确认框（两个页面共用同一个组件）
   import DeleteOrderButton from '@/components/DeleteOrderButton.vue'
   // 抄送 / 转办的落库逻辑，与审批页共用同一份
@@ -358,6 +387,39 @@
   /** 删除失败（多为权限或网络）：把服务端给的原因原样弹出来 */
   function onDeleteFailed (message: string) {
     showMsg(message, 'error')
+  }
+
+  /* ==================== 批量清空（当前 / 历史） ==================== */
+
+  /** 两个「清空」确认框的实例：点区块标题右侧的按钮时调它们的 open() */
+  const pendingClearDialog = ref<{ open: () => void } | null>(null)
+  const historyClearDialog = ref<{ open: () => void } | null>(null)
+
+  const userStore = useUserStore()
+  /** 清空按钮只给能删的角色看（界面礼貌；真正拦住人的是服务端的 assertSuperAdmin） */
+  const canDelete = computed(() => canAct(userStore.appRole, 'approval:delete'))
+
+  /**
+   * 批量清空之后：**整批**重新取数，并关掉抽屉。
+   *
+   * 为什么连抽屉一起关：正在看的那一单很可能就在被清掉的那一类里 ——
+   * 留下一个指向"已删除记录"的抽屉最迷惑人（时间线还在、点办理会写到不存在的单上）。
+   * 与单条删除 onOrderDeleted 的口径一致，只是这里无法逐条判断，整批关更稳。
+   */
+  async function onOrdersCleared (summary: DeleteHistorySummary) {
+    selectedNode.value = null
+    open.value = false
+    await load()
+    const label = summary.scope === 'pending' ? '进行中的审批单' : '历史审批单'
+    if (summary.deletedOrders < summary.targeted) {
+      showMsg(
+        `${label}清空了 ${summary.deletedOrders}/${summary.targeted} 张（部分已被删除或被拒绝），列表已刷新`,
+        'warning',
+      )
+      return
+    }
+    const files = summary.filesDeleted > 0 ? `（附件 ${summary.filesDeleted} 个）` : ''
+    showMsg(`已清空 ${summary.deletedOrders} 张${label}${files}`, 'success')
   }
 
   const { submitNode } = useNodeSubmit({

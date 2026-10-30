@@ -18,7 +18,9 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "gen:flow": "tsx scripts/gen-inventory-flow.ts",
-    "backfill:company": "tsx scripts/backfillCompanyName.ts"
+    "backfill:company": "tsx scripts/backfillCompanyName.ts",
+    "fix:stuck": "tsx scripts/fixStuckOrders.ts",
+    "fix:supply-link": "tsx scripts/fixSupplyChainLink.ts"
   },
   "dependencies": {
     "@fontsource/roboto": "^5.2.10",

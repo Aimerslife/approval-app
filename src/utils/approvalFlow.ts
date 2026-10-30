@@ -220,6 +220,37 @@ export function graphToFlowFrom (
   /** 读卡片下拉里的「轮完走向」（`LoopNodeData.afterLoop`） */
   const readAfterLoop = (raw: unknown, label: string) => readExitTarget(raw, label, '轮完走向')
 
+  /** 跳出条件支持的操作符（与 BranchCondition 同一份；写了别的按"没选"报错） */
+  const BREAK_OPS = new Set(['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'])
+
+  /**
+   * 读卡片上的「跳出条件」（`LoopNodeData.breakWhen`）。
+   *
+   * 空 = 没配（老卡片行为不变）；**配了一半**（有字段没操作符 / 没比较值）当场报错：
+   * 半截条件进流程后，求值要么恒不命中（看起来像"配了但没生效"），
+   * 要么把 `undefined` 当字符串比 —— 两种都极难从现象反推回配置。
+   */
+  const readBreakWhen = (raw: unknown, label: string): { value?: ConditionExpr[], error?: string } => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {}
+    }
+    const c = raw as BranchCondition
+    const field = String(c.field ?? '').trim()
+    if (!field) {
+      return {}
+    }
+    const op = String(c.op ?? '').trim()
+    if (!BREAK_OPS.has(op)) {
+      return { error: `卡片「${label}」的「跳出条件」还没选比较方式（等于 / 大于…）` }
+    }
+    const value = c.value
+    const empty = value === undefined || value === null || (typeof value === 'string' && value.trim() === '')
+    if (empty) {
+      return { error: `卡片「${label}」的「跳出条件」还没填比较值（如 0）` }
+    }
+    return { value: [{ field, op: op as BranchCondition['op'], value }] }
+  }
+
   /**
    * 把一张「组间轮询」卡片的出线按**走向**拆开（见 `FlowGraphEdge.data.loopExit`）：
    *   · 「轮完」（没标 / 标 `'done'`）= 所有组都轮完、一直没人跳出轮询 → 卡片的**后继**，
@@ -1109,6 +1140,27 @@ export function graphToFlowFrom (
         if (inner.error) {
           return { steps, territory, error: `卡片「${title}」内部：${inner.error}`, errorNodeId: p }
         }
+        const breakWhen = readBreakWhen(d?.breakWhen, title)
+        if (breakWhen.error) {
+          return { steps, territory, error: breakWhen.error, errorNodeId: p }
+        }
+        /*
+         * 跳出后去哪 = 「轮完」那条路：配了「轮完走向」就用它，否则用卡片那条「轮完」出线的目标。
+         * 目标必须是**本图里的环节**（白名单见 outerExitIds）：卡片出线直接连到「结束」时，
+         * 跳出无处可去 —— 那种情况本来也没有"后面的组"要跳过，提示去掉条件或改接线。
+         */
+        const breakTarget = breakWhen.value
+          ? (afterLoop.value?.stepId
+            ?? (loopOuts.next && outerExitIds.has(loopOuts.next) ? loopOuts.next : undefined))
+          : undefined
+        if (breakWhen.value && !breakTarget) {
+          return {
+            steps,
+            territory,
+            error: `卡片「${title}」配了跳出条件，但不知道跳出后去哪：请给卡片接一条「轮完」出线到后续环节，或填「轮完走向」`,
+            errorNodeId: p,
+          }
+        }
         steps.push({
           id: pn.id,
           type: 'loop',
@@ -1116,6 +1168,7 @@ export function graphToFlowFrom (
           rotation: d.rotation,
           steps: inner.steps,
           ...(afterLoop.value ? { afterLoop: afterLoop.value } : {}),
+          ...(breakWhen.value && breakTarget ? { breakWhen: breakWhen.value, breakTo: { stepId: breakTarget } } : {}),
         })
         p = loopOuts.next
         continue
@@ -1416,6 +1469,22 @@ export function graphToFlowFrom (
           errorNodeId: cur,
         }
       }
+      const breakWhen = readBreakWhen(d?.breakWhen, name)
+      if (breakWhen.error) {
+        return { flow: [], error: breakWhen.error, errorNodeId: cur }
+      }
+      // 跳出后去哪：同分支内那处（见上面 breakTarget 的说明）
+      const breakTarget = breakWhen.value
+        ? (afterLoop.value?.stepId
+          ?? (loopOuts.next && outerExitIds.has(loopOuts.next) ? loopOuts.next : undefined))
+        : undefined
+      if (breakWhen.value && !breakTarget) {
+        return {
+          flow: [],
+          error: `卡片「${name}」配了跳出条件，但不知道跳出后去哪：请给卡片接一条「轮完」出线到后续环节，或填「轮完走向」`,
+          errorNodeId: cur,
+        }
+      }
       flow.push({
         id: node.id,
         type: 'loop',
@@ -1423,6 +1492,7 @@ export function graphToFlowFrom (
         rotation: d?.rotation as RotationSpec,
         steps: inner.steps,
         ...(afterLoop.value ? { afterLoop: afterLoop.value } : {}),
+        ...(breakWhen.value && breakTarget ? { breakWhen: breakWhen.value, breakTo: { stepId: breakTarget } } : {}),
       })
       cur = loopOuts.next
       continue

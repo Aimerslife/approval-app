@@ -440,6 +440,10 @@ function prefixFlow (nodes: any[], prefix: string): any[] {
       if (out.afterLoop?.stepId) {
         out.afterLoop = { stepId: prefix + String(out.afterLoop.stepId) }
       }
+      // 跳出条件的目标也在源模板内部：同一个前缀（漏了会在展开时报「目标环节不存在」）
+      if (out.breakTo?.stepId) {
+        out.breakTo = { stepId: prefix + String(out.breakTo.stepId) }
+      }
     }
     return out
   }
@@ -528,10 +532,17 @@ function remapRefTargets (nodes: any[], targets: Map<string, string>): void {
       return
     }
     if (n?.type === 'loop') {
-      // 「轮完走向」（卡片级，存的是目标节点 id）：目标正是本层的引用卡片时换掉（理由见函数说明）
-      const after = String(n.afterLoop ?? '')
+      /*
+       * 「轮完走向」与「跳出条件」的目标（flow 里存的是 `{ stepId }`，画布上才是裸 id）：
+       * 目标正是本层的引用卡片时换掉（理由见函数说明）。
+       */
+      const after = String(n.afterLoop?.stepId ?? '')
       if (after && targets.has(after)) {
-        n.afterLoop = targets.get(after)!
+        n.afterLoop = { stepId: targets.get(after)! }
+      }
+      const breakTo = String(n.breakTo?.stepId ?? '')
+      if (breakTo && targets.has(breakTo)) {
+        n.breakTo = { stepId: targets.get(breakTo)! }
       }
       for (const s of n.steps ?? []) {
         visitStep(s)

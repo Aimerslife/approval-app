@@ -1,5 +1,5 @@
 import type { ApprovalBranch, ApprovalChain, ApprovalChainItem, ApprovalFlow, ApprovalNodeOption, ApprovalOrder, FlowEndInfo } from '@/types/approval'
-import { APPROVAL_STATUS, branchTerminalMapOf, CLOSE_FLOW_RESULTS, firstResultValueOf, mainOf, mergeExtraMembers, rebuildChain, sameApprover } from '@/types/approval'
+import { APPROVAL_RESULTS, APPROVAL_STATUS, branchTerminalMapOf, CLOSE_FLOW_RESULTS, firstResultValueOf, mainOf, mergeExtraMembers, rebuildChain, sameApprover } from '@/types/approval'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 
 /*
@@ -412,6 +412,78 @@ export function stepStartTimesOf (order: ApprovalOrder, chain: ApprovalChainItem
     }
     return from
   })
+}
+
+/**
+ * 「组间轮询」里**每个组**办下来的接收信息（组名 + 数量 + 结论）。
+ *
+ * 场景：轮询卡片后面接的审批环节，审批人需要知道"前面各团队各接了多少"——
+ * 只看合计（已接收数量）看不出是谁接的，而业务判断往往取决于具体哪个组、接了多少。
+ *
+ * ## 怎么认出"这一环是轮询展开出来的"
+ *
+ * 轮询展开后，每环成员带 `role.dept = 组名`（见 utils/approvalRotation 的 splitMembers / stampRing），
+ * 这是**唯一**可靠的标记：
+ *   · 固定审批人也有 `department`（他自己的部门），不能拿它当组名（会误报）；
+ *   · 环节名不可靠（模板作者可以随便命名）。
+ *
+ * ## 为什么要去重
+ *
+ * 驳回回退后同一组会再走一遍（chain 里出现两次），办理记录以**最后一次**为准 ——
+ * 与 receivedQuantities "同一环节多次办理以最后一次为准"是同一口径，否则数量会算两遍。
+ *
+ * @param chain 运行期链路（`runtimeOf(order).chain`）
+ * @returns 已办过的轮询组，按链路顺序；没填数量的环（如「不接收」）qty 为 undefined
+ */
+export interface RotationReceipt {
+  /** 组名（轮询展开时写进 `role.dept` 的那个值） */
+  group: string
+  /** 该组接收的数量；结论不是接收类 / 没填数量（如「不接收」）时 undefined */
+  qty?: number
+  /** 结论码 */
+  result: string
+  /** 结论文案（优先用落库时记的 result_label） */
+  resultLabel: string
+  /** 办理人姓名 */
+  byName?: string
+  /** 办理时间（ISO） */
+  at?: string
+}
+
+export function rotationReceiptsOf (chain: ApprovalChainItem[][]): RotationReceipt[] {
+  const byGroup = new Map<string, RotationReceipt>()
+  for (const step of chain ?? []) {
+    // 轮询环：组名在**成员**的 role.dept 上（不是 department —— 那是解析后的部门名）
+    const group = String((step ?? []).find(m => String(m?.role?.dept ?? '').trim())?.role?.dept ?? '').trim()
+    if (!group) {
+      continue
+    }
+    const who = mainOf(step)
+    // 还没办（没有结论）：不列 —— 那说明轮询还没走到这一环
+    if (!who?.result) {
+      continue
+    }
+    const qty = qtyOf(who.extra?.qty)
+    byGroup.set(group, {
+      group,
+      ...(qty !== undefined ? { qty } : {}),
+      result: String(who.result),
+      resultLabel: who.result_label || APPROVAL_RESULTS.find(r => r.value === who.result)?.label || String(who.result),
+      ...(who.name ? { byName: who.name } : {}),
+      ...(who.handled_at ? { at: who.handled_at } : {}),
+    })
+  }
+  return [...byGroup.values()]
+}
+
+/** 数量入参 → 数字：空 / 认不出返回 undefined（口径同 types/approval 的 qtyNum，避免 '' 被当成 0） */
+function qtyOf (value: unknown): number | undefined {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return undefined
+  }
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : undefined
 }
 
 /**

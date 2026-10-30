@@ -5,6 +5,7 @@ import type {
   ApprovalFlowLoopNode,
   ApprovalFlowNode,
   ApprovalFlowStep,
+  ConditionExpr,
   RotationSpec,
 } from '../types/approval'
 import { RECEIVED_QTY_FIELD, REMAINING_QTY_FIELD } from '../types/approval'
@@ -604,6 +605,12 @@ export function expandRotations (
             issues.push(`${label}：卡片内部的「${bad.name || '未命名环节'}」没有审批人（第 ${ring} 环），这一环没人能办`)
           }
           out.push(...ringSteps)
+          // 跳出条件：这一环办完就判断一次，命中则跳过后面的组（见 breakBranchGroup）
+          if (s.breakWhen?.length && s.breakTo?.stepId) {
+            const g = breakBranchGroup(s.id, ring, s.breakWhen, s.breakTo.stepId)
+            injectedExits.push(g)
+            out.push({ id: g.id, type: 'branch', branches: g.branches })
+          }
         }
         // 「轮完走向」紧跟在**所有环之后**（见 loopEndBranchGroup 的说明）
         if (s.afterLoop?.stepId) {
@@ -760,6 +767,12 @@ export function expandRotations (
           }
           nodes.push(n)
         }
+        // 跳出条件：这一环办完就判断一次，命中则跳过后面的组（见 breakBranchGroup）
+        if (node.breakWhen?.length && node.breakTo?.stepId) {
+          const g = breakBranchGroup(node.id, ring, node.breakWhen, node.breakTo.stepId)
+          injectedExits.push(g)
+          nodes.push({ id: g.id, type: 'branch', branches: g.branches })
+        }
       }
       // 「轮完走向」紧跟在**所有环之后**（见 loopEndBranchGroup 的说明）
       if (node.afterLoop?.stepId) {
@@ -830,6 +843,50 @@ function loopEndBranchGroup (
       exitTo,
     }],
     // 交给调用方登记后处理重映射（上面那趟循环）
+    exitTo,
+  }
+}
+
+/**
+ * 「跳出条件」判断分支组：插在**每一环之后**，条件命中就跳过后面的组。
+ *
+ * 形态与「轮完走向」同一套（条件命中 + `exitTo`），只是条件来自卡片的 `breakWhen`：
+ *   · 命中 → 跳到卡片「轮完」那条路的终点（后面的组不再办）；
+ *   · 不命中 → 兜底分支（`conditions: []`）继续顺序推进，也就是下一环。
+ *
+ * 为什么可以放在**每环**之后（包括最后一环）：最后一环之后命中等于"走轮完那条路"，
+ * 不命中继续到「轮完」分支组 —— 两条路终点相同，不会出现分叉。
+ *
+ * 为什么在**建单期**注入而不是保存期：卡片展开成几环是建单时才定的，
+ * "每一环之后"这个位置在模板里并不存在；保存期注入还会被 `ensureRejectLoopBack`
+ * 当成审批环节后面的分支组去补「驳回」分支（同 loopEndBranchGroup 的说明）。
+ */
+function breakBranchGroup (
+  cardId: string,
+  ring: number,
+  when: ConditionExpr[],
+  target: string,
+): { id: string, branches: ApprovalBranch[], exitTo: { stepId: string } } {
+  const exitTo = { stepId: target }
+  return {
+    id: `${cardId}:break:${ring}`,
+    branches: [
+      {
+        id: `${cardId}:break:${ring}:hit`,
+        name: `提前跳出轮询（第 ${ring} 环后）`,
+        conditions: when,
+        steps: [],
+        isEnd: false,
+        exitTo,
+      },
+      {
+        id: `${cardId}:break:${ring}:next`,
+        name: '继续下一组',
+        conditions: [],
+        steps: [],
+        isEnd: false,
+      },
+    ],
     exitTo,
   }
 }

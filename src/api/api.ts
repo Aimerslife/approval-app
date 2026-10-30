@@ -560,7 +560,9 @@ export async function deleteApprovalOrder (id: string): Promise<DeleteOrderSumma
  */
 export interface DeleteHistorySummary {
   dryRun: boolean
-  /** 命中的历史审批单数（dryRun 时 = 将要删掉多少） */
+  /** 本次清的是哪一类：history = 已办结 / pending = 进行中（与服务端 orderDelete 的 scope 一致） */
+  scope: OrderDeleteScope
+  /** 命中该范围的单数（dryRun 时 = 将要删掉多少） */
   targeted: number
   /** 真删掉的单数 */
   deletedOrders: number
@@ -569,18 +571,26 @@ export interface DeleteHistorySummary {
   by: { id: string, role: string, name?: string, email?: string }
 }
 
+/** 批量清空的范围（与 server/orderDelete.ts 的 OrderDeleteScope 一一对应，改一处要同时改） */
+export type OrderDeleteScope = 'history' | 'pending'
+
 /**
- * 删除**全部历史审批单**（已办结的：通过 / 驳回）。
+ * 清空**某一类**审批单（连同附件）。只有超级管理员能调（服务端校验）。
  *
- * ⚠️ 删的是"一类"，不看页面上的筛选、也不限于当前页 —— 进行中的单不在此列
- *    （口径与 useApprovalTable 的 historyRows 一致，判定在服务端）。
- *    `dryRun = true` 只统计不删。
+ * ⚠️ 删的是"一类"，不看页面上的筛选、也不限于当前页：
+ *    · `history` = 已办结（通过 / 驳回）；
+ *    · `pending` = 还在流转的单 —— 删掉后当前办理人一提交就会写到不存在的单上，
+ *      所以界面必须二次确认（见 DeleteAllOrdersDialog 的输入确认词）。
+ *    `dryRun = true` 只统计不删，确认框先用它把"将要删掉多少"摆出来。
  *
- * 权限、批量删除与附件清理都在服务端（见 server/orderDelete.ts 的 deleteHistoryOrders）：
- * 前端藏按钮只是界面礼貌。
+ * 权限、按 scope 取 id、附件清理都在服务端（见 server/orderDelete.ts 的 deleteOrdersByScope）。
  */
-export async function deleteHistoryOrders (dryRun = false): Promise<DeleteHistorySummary> {
-  const res = await fetch(`/api/approval/orders${dryRun ? '?dryRun=1' : ''}`, {
+export async function deleteOrdersByScope (scope: OrderDeleteScope, dryRun = false): Promise<DeleteHistorySummary> {
+  const qs = new URLSearchParams({ scope })
+  if (dryRun) {
+    qs.set('dryRun', '1')
+  }
+  const res = await fetch(`/api/approval/orders?${qs}`, {
     method: 'DELETE',
     headers: { Authorization: pb.authStore.token },
   })
@@ -589,6 +599,16 @@ export async function deleteHistoryOrders (dryRun = false): Promise<DeleteHistor
     throw new Error(payload?.msg || `删除失败：HTTP ${res.status}`)
   }
   return payload.data as DeleteHistorySummary
+}
+
+/** 删除全部历史审批单（已办结） */
+export function deleteHistoryOrders (dryRun = false): Promise<DeleteHistorySummary> {
+  return deleteOrdersByScope('history', dryRun)
+}
+
+/** 清空全部进行中的审批单 */
+export function deletePendingOrders (dryRun = false): Promise<DeleteHistorySummary> {
+  return deleteOrdersByScope('pending', dryRun)
 }
 
 /* ==================== 我的审批（按档懒加载） ==================== */

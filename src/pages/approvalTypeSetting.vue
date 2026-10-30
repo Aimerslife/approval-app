@@ -3,7 +3,7 @@
     <!-- 页头：作用域（默认 / 某张审批模板）+ 是否已自定义 -->
     <div class="d-flex align-start justify-space-between flex-wrap ga-3 mb-4 px-1">
       <div>
-         <BackNode title="审批类型" />
+        <BackNode title="审批类型" />
         <div class="text-[12px] text-medium-emphasis mt-1">
           每种审批结论"**选中之后要填什么**"在这里配：控件（下拉 / 单选 / 数量 / 文本…）、字段、必填与校验。
         </div>

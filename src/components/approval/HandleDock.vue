@@ -123,7 +123,7 @@
   // 办理选项条件（offerWhen）的求值上下文：三处办理入口必须同一口径
   import { optionContextOf } from '@/utils/approvalFlow'
   // 组内第 2..N 环 → 表单的 next-steps；口径与 ApprovalNode 完全一致
-  import { type ApproverStepGroup, nextStepsOf } from '@/utils/approvalRuntime'
+  import { type ApproverStepGroup, nextStepsOf, rotationReceiptsOf } from '@/utils/approvalRuntime'
   import ApprovalHandleForm from './ApprovalHandleForm.vue'
 
   /**
@@ -242,6 +242,15 @@
     ? optionContextOf(props.order, props.chain, pendingGroup.value.indexes[0])
     : {}))
 
+  /**
+   * 前面「组间轮询」里各团队接收了多少 —— 交给表单在开头展示。
+   *
+   * 为什么在抽屉这一层算：`chain` 只有这里有（表单组件只拿到当前环节的成员），
+   * 而三处办理入口都收敛到本组件，算一次三处同口径。
+   * 没有轮询环时返回空数组，表单那一行自然不显示。
+   */
+  const rotationReceipts = computed(() => rotationReceiptsOf(props.chain))
+
   /** 两种呈现方式传给表单的是同一组属性，避免两处写两遍后悄悄漂掉 */
   const formProps = computed(() => ({
     allowedOptions: allowedOptions.value,
@@ -257,6 +266,8 @@
     stockQty: props.stockQty,
     // 审批类型：从单据快照里取（建单期冻结，办理期只读）。老单没有 → 表单回落内置默认
     typeTemplates: props.order?.chain?.types,
+    // 轮询卡片后面接的审批：开头列出前面各团队接了多少（见 rotationReceiptsOf）
+    rotationReceipts: rotationReceipts.value,
     showCancel: true,
   }))
 
