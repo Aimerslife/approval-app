@@ -726,16 +726,24 @@ export interface ReceiverTeam extends ApprovalChainItem {
    * ⚠️ 这两个字符串是模板快照里的值，不能改（`team` 现在选的是部门）。
    */
   pick?: 'group' | 'team'
+  /**
+   * 这个团队**接多少件**（「选择接收团队」一次选多个团队时，每个团队各填一个）。
+   * 历史单 / 选部门没有这个字段。
+   */
+  qty?: string | number
 }
 
 /**
- * 取「选择接收团队 / 选择接收部门」的办理结果（接收方），用于在时间线上**单独渲染一个节点**。
+ * 取「选择接收团队 / 选择接收部门」的办理结果（接收方列表），用于在时间线上**单独渲染节点**。
  *
  * 为什么单独取：命中 CLOSE_FLOW_RESULTS 的结论会终止流程，接收方**不是**任何一个
  * chain 环节的审批人（它不在 chain 里），所以只能从办理流水里取出来单独展示。
  * 同一单可能被驳回重审过，取**最后一条**这类结论；两条结论都认（粒度不同，见 PICK_TEAM_RESULT）。
+ *
+ * 为什么返回数组：一批货可以**同时交给几个团队**（各自接一部分，数量记在成员的 `qty` 上）。
+ * 老单据落的是单个对象，这里统一成一元数组 —— 展示层只认数组一种形状。
  */
-export function receiverOf (order: ApprovalOrder | null | undefined): ReceiverTeam | undefined {
+export function receiversOf (order: ApprovalOrder | null | undefined): ReceiverTeam[] {
   const decisions = order?.chain?.decisions ?? []
   for (let i = decisions.length - 1; i >= 0; i--) {
     const d = decisions[i]
@@ -743,14 +751,22 @@ export function receiverOf (order: ApprovalOrder | null | undefined): ReceiverTe
       continue
     }
     const raw = d.extra?.members
-    const one = Array.isArray(raw) ? raw[0] : raw
-    if (one && typeof one === 'object') {
-      const item = one as ReceiverTeam
+    const list = (Array.isArray(raw) ? raw : (raw ? [raw] : []))
+      .filter((m): m is ReceiverTeam => !!m && typeof m === 'object')
+    if (list.length > 0) {
       // 粒度以**结论码**为准（历史单里没有 pick 字段）：pick_team 才是团队级
-      return { ...item, pick: item.pick ?? (d.result === PICK_TEAM_RESULT ? 'team' : 'group') }
+      return list.map(item => ({ ...item, pick: item.pick ?? (d.result === PICK_TEAM_RESULT ? 'team' : 'group') }))
     }
   }
-  return undefined
+  return []
+}
+
+/**
+ * 单个接收方（兼容老调用方）：多团队时取第一个。
+ * 新代码要展示全部接收方时用 `receiversOf`。
+ */
+export function receiverOf (order: ApprovalOrder | null | undefined): ReceiverTeam | undefined {
+  return receiversOf(order)[0]
 }
 
 /** 分支：一条命名的走向，可以挂直属审批人 + 顺序步骤（步骤里可再嵌分支组，即分支内的分支） */
@@ -1929,6 +1945,21 @@ export function collectStepOptionItems (
     return s.endsWith(':exits') || s.endsWith(':bound')
   }
 
+  /**
+   * 「组间轮询」卡片在**建单展开期**注入的分支组（见 utils/approvalRotation）：
+   *   · `<卡片id>:break:<环号>` —— 跳出条件（提前跳出轮询 / 继续下一组），插在**每一环之后**；
+   *   · `<卡片id>:after-loop`  —— 轮完走向（轮询走完），插在**所有环之后**。
+   *
+   * 它们**不是某一环的办理结论**。如果按"分支组归属于紧邻的前一个审批环节"去算，
+   * 就会把这一环真正的四结论组（全部接收 / 部分接收 / 不接收 / 回退上一级，
+   * id 形如 `<卡片id>:result#<环号>`）整个盖掉 —— 办理端只剩一条「继续下一组」，
+   * 表现出来就是"不管选哪个结论，一律继续下一组"。
+   */
+  function isLoopInjectedGroup (id: unknown) {
+    const s = String(id ?? '')
+    return s.endsWith(':after-loop') || /:break:\d+$/.test(s)
+  }
+
   /** 分支内的步骤序列：branch 步骤归属于它前面那个审批步骤 */
   function collectSteps (steps: ApprovalFlowStep[] | undefined) {
     let prev: ApprovalFlowStep | undefined
@@ -1946,6 +1977,9 @@ export function collectStepOptionItems (
               map[prev.id] = nodeLevelOptionsOf(shared, [])
             }
           }
+          prev = undefined
+        } else if (isLoopInjectedGroup(s.id)) {
+          // 轮询注入的跳出组 / 轮完组：不参与上一环的结论推导，且不把后续分支组算到上一环头上
           prev = undefined
         } else if (prev) {
           map[prev.id] = optionsOfApproval(prev, s.branches)
@@ -1975,6 +2009,9 @@ export function collectStepOptionItems (
             map[prevTop.id] = nodeLevelOptionsOf(shared, [])
           }
         }
+        prevTop = undefined
+      } else if (isLoopInjectedGroup(node.id)) {
+        // 同上：轮询展开期注入的跳出组 / 轮完组不是上一环的办理结论
         prevTop = undefined
       } else if (prevTop) {
         map[prevTop.id] = optionsOfApproval(prevTop, node.branches)

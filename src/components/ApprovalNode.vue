@@ -17,7 +17,9 @@
     </div>
 
     <div class=" d-flex align-center justify-space-between">
-      <div class="d-flex align-center gap-2">
+      <!-- flex-wrap + 可收缩宽度：结论胶囊文案很长（一次分给多个团队时尤其长），
+           不放开换行就会被卡片右边界裁掉（见 .result-chip 的说明） -->
+      <div class="node-head-left d-flex align-center flex-wrap gap-2">
         <span v-if="deptName" class="text-[12px]">[{{ deptName }}]</span>
 
         <!-- 飞书提醒环节：没人可办，头部显示**提醒名称**（不是某人姓名），也没有头像 -->
@@ -51,7 +53,7 @@
         </v-chip>
 
         <template v-if="resultChips.length > 0">
-          <v-chip v-for="(c, ci) in resultChips" :key="ci" class="ms-0" color="primary" label size="x-small">
+          <v-chip v-for="(c, ci) in resultChips" :key="ci" class="ms-0 result-chip" color="primary" label size="x-small">
             {{ c }}
           </v-chip>
         </template>
@@ -104,12 +106,12 @@
         </template>
       </div>
 
-      <div class="ml-auto">
-        <div v-if="manager?.handled_at" class="mt-1 text-[12px] text-medium-emphasis">
+      <div class="ml-[10px]">
+        <div v-if="manager?.handled_at" class="mt-1 text-[11px] text-medium-emphasis">
           {{ formatDate(manager?.handled_at) }}
         </div>
 
-        <span v-if="durationText" class="text-[12px] ml-auto ml-1">
+        <span v-if="durationText" class="text-[11px] ml-auto ml-1">
           {{ durationLabel }}：{{ durationText }}
         </span>
       </div>
@@ -135,23 +137,30 @@
         <span class="text-[12px]">{{ optionPath }}</span>
       </div>
 
-      <div v-if="pickedReceiver" class="mt-2 d-flex align-center gap-2">
-        <v-chip class="mr-1" color="primary" label size="x-small" variant="flat">
-          <span class="text-[9px]">{{ pickedReceiver.pick === 'team' ? '接收部门' : '接收团队' }}</span>
-        </v-chip>
+      <!-- 接收方：一批货可能同时交给几个团队 → 一个团队一行（各自带接了多少件） -->
+      <div v-if="pickedReceivers.length > 0" class="mt-2 d-flex flex-column ga-1">
+        <div v-for="(r, ri) in pickedReceivers" :key="ri" class="d-flex align-center gap-2">
+          <!-- 第 2 行起把同款胶囊留成透明占位：头像与名字才对得起竖线 -->
+          <v-chip class="mr-1" :class="{ 'receiver-kind-hidden': ri > 0 }" color="primary" label size="x-small"
+            variant="flat">
+            <span class="text-[9px]">{{ r.pick === 'team' ? '接收部门' : '接收团队' }}</span>
+          </v-chip>
 
-        <v-avatar class="mr-1" size="22">
-          <v-img v-if="pickedReceiver.avatar" cover :src="proxyAvatar(pickedReceiver.avatar)" />
-          <v-icon v-else size="13">mdi-account</v-icon>
-        </v-avatar>
+          <v-avatar class="mr-1" size="22">
+            <v-img v-if="r.avatar" cover :src="proxyAvatar(r.avatar)" />
+            <v-icon v-else size="13">mdi-account</v-icon>
+          </v-avatar>
 
-        <span class="text-[10px] text-medium-emphasis">{{ pickedReceiver.name }}</span>
-        <!-- 接收方 = 团队名/部门名 + 负责人；历史单（那时选的是人）退回显示邮箱 -->
-        <span v-if="pickedReceiver.manager" class="text-[10px] text-high-emphasis">
-          {{ pickedReceiver.pick === 'team' ? '部门负责人' : '团队负责人' }} {{ pickedReceiver.manager }}
-        </span>
+          <span class="text-[10px] text-medium-emphasis">{{ r.name }}</span>
+          <!-- 接收方 = 团队名/部门名 + 负责人；历史单（那时选的是人）退回显示邮箱 -->
+          <span v-if="r.manager" class="text-[10px] text-high-emphasis">
+            {{ r.pick === 'team' ? '部门负责人' : '团队负责人' }} {{ r.manager }}
+          </span>
 
-        <span v-else-if="pickedReceiver.email" class="text-[10px] text-high-emphasis">{{ pickedReceiver.email }}</span>
+          <span v-else-if="r.email" class="text-[10px] text-high-emphasis">{{ r.email }}</span>
+
+          <span v-if="receiverQtyOf(r)" class="text-[10px] text-medium-emphasis">接 <b>{{ receiverQtyOf(r) }}</b> 件</span>
+        </div>
       </div>
 
       <div v-if="extraItems.length > 0" class="mt-1 d-flex flex-wrap align-center ga-2">
@@ -171,7 +180,7 @@
 
     <div v-for="(r, ri) in nextStepResults" :key="ri" class="mt-1">
       <div class="d-flex align-center flex-wrap gap-2">
-        <v-chip color="primary" label size="x-small">{{ r.label }}</v-chip>
+        <v-chip class="result-chip" color="primary" label size="x-small">{{ r.label }}</v-chip>
 
         <span v-if="r.path" class="text-[11px] text-medium-emphasis">{{ r.path }}</span>
         <span v-if="r.opinion" class="text-[11px] text-medium-emphasis">意见：{{ r.opinion }}</span>
@@ -227,7 +236,7 @@ import { proxyAvatar } from '@/api/api'
 import { useAvatarDirectory } from '@/stores/avatarDirectory'
 // 头像地址的逐级降级（代理 → 原地址 → 首字）：见 composables/useAvatarSrc 的文件头
 import { useAvatarSrc } from '@/composables/useAvatarSrc'
-// 「选择接收团队」的结论码：历史单的 members 没记 pick，按结论码补粒度（见 pickedReceiver）
+// 「选择接收团队」的结论码：历史单的 members 没记 pick，按结论码补粒度（见 pickedReceivers）
 import { PICK_TEAM_RESULT } from '@/types/approval'
 // 环节负责人口径（mainOf）与「连续同人环节」的类型都来自这里，别在组件里另写一套
 import { type ApprovalNextStep, mainOf, type RotationReceipt } from '@/utils/approvalRuntime'
@@ -652,17 +661,24 @@ function optionPathOf(extra?: Record<string, unknown>) {
     .join(' / ')
 }
 
-const pickedReceiver = computed<ReceiverTeam | undefined>(() => {
+/**
+ * 本次办理选定的接收方（可能是**多个团队**，见 extra.members 的两种形状）。
+ * 只取第一个是改造前的口径，多团队时会漏掉后面几个团队，这里统一按数组返回。
+ */
+const pickedReceivers = computed<ReceiverTeam[]>(() => {
   const raw = manager.value?.extra?.members
-  const one = Array.isArray(raw) ? raw[0] : raw
-  if (!one || typeof one !== 'object') {
-    return undefined
-  }
-  const item = one as ReceiverTeam
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : []
   // 粒度：本环节的结论码说了算（历史单没有 pick 字段，按结论补上；再退一步按组别）
   const kind = manager.value?.result
-  return { ...item, pick: item.pick ?? (kind === PICK_TEAM_RESULT ? 'team' : 'group') }
+  return list
+    .filter((x): x is ReceiverTeam => !!x && typeof x === 'object')
+    .map(item => ({ ...item, pick: item.pick ?? (kind === PICK_TEAM_RESULT ? 'team' : 'group') }))
 })
+
+/** 该接收方接了多少件（老单 / 选部门没有这个字段 → 空串，不渲染） */
+function receiverQtyOf(r: ReceiverTeam): string {
+  return String(r.qty ?? '').trim()
+}
 
 /**
  * 成员对象（接收方 / 办理人）的展示文案：名字 +（有负责人就带上）负责人。
@@ -845,6 +861,44 @@ const emit = defineEmits<{
 :deep(.v-timeline-item__body) {
   justify-self: stretch;
   width: 100%;
+}
+
+/*
+ * 节点头部左侧（部门 / 头像 / 姓名 / 结论胶囊 / 账目）：
+ * 必须给一个**能收缩的上限**。flex 子项默认 min-width:auto，里面的结论胶囊又是 nowrap，
+ * 文案一长就把整行顶出卡片 —— 右侧时间被挤走、文字在边界处被裁断（看着像丢了几个团队）。
+ */
+.node-head-left {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * 结论胶囊：一次把货分给多个团队时，文案会串成
+ * 「选择接收团队：美2组（团队负责人 周开胜）100 件、美3组（…）200 件、…」，上百个字符。
+ * v-chip 默认单行 nowrap，长到超出宽度就被直接裁掉。
+ * 这里放开换行、高度随内容长；内层 .v-chip__content 也带一层 nowrap，得一起放开。
+ */
+.result-chip {
+  height: auto;
+  min-height: 20px;
+  min-width: 0;
+  max-width: 100%;
+  padding-block: 2px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+/* 内层的 inline-flex 会让文字整块不折行，改成块级后按宽度自然换行 */
+.result-chip :deep(.v-chip__content) {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 多接收方时，第 2 行起的「接收团队」胶囊只作占位（让头像与名字对齐），不显示文字 */
+.receiver-kind-hidden {
+  visibility: hidden;
 }
 
 /*

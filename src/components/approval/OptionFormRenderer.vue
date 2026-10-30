@@ -77,31 +77,77 @@
         </v-radio-group>
       </div>
 
-      <!-- 选接收方（组别 / 团队）：点开选人面板，选中即记为接收方 -->
-      <div v-else-if="field.control === 'team'" class="field-row">
-        <v-btn
-          class="text-none"
-          color="primary"
-          :disabled="props.readonly"
-          prepend-icon="mdi-account-search-outline"
-          size="small"
-          variant="tonal"
-          @click="emit('pick', field)"
-        >{{ field.label }}</v-btn>
+      <!--
+        选接收方分两种粒度，交互完全不同：
 
-        <v-chip
-          v-for="(m, i) in pickedList(field.key)"
-          :key="i"
-          closable
-          label
-          size="small"
-          variant="tonal"
-          @click:close="removePicked(field.key, i)"
-        >{{ pickedTextOf(m) }}</v-chip>
+        · 「选择接收团队」—— 把**所有候选团队直接平铺**出来，每个团队后面跟一个接收数量框。
+          为什么要摊开：一批货分给几个团队时，逐个"点按钮 → 面板里挑一个"既慢又容易漏
+          （面板一关就看不见还剩哪些团队没分配），摊成一张清单才能一眼核对"谁接多少、还有谁没填"。
+        · 「选择接收部门」—— 整批交给某一个部门，仍保持"点按钮 → 面板里挑一个"的一对一交接。
+      -->
+      <div v-else-if="field.control === 'team'" class="field-row field-team">
+        <template v-if="qtyEditableOf(field)">
+          <div class="team-matrix">
+            <template v-for="section in teamSections" :key="section.parent">
+              <!-- 退回"全部部门"时按部门分组标个标题；限定了部门就只剩一栏，不用再写一遍 -->
+              <div v-if="showDeptTitle" class="team-matrix__dept">{{ section.parent }}</div>
 
-        <span v-if="pickedList(field.key).length === 0" class="field-side">
-          还没有选{{ field.pick === 'team' ? '部门' : '团队' }}
-        </span>
+              <div v-for="row in section.rows" :key="row.group" class="team-matrix__row flex-row items-center">
+                <span class="team-matrix__name">{{ row.group }}</span>
+                <div class="flex-1">
+                  <v-chip color="info" size="x-small">{{ row.manager || '（未维护负责人）' }}</v-chip>
+                </div>
+                <v-text-field
+                  class="picked-qty"
+                  density="compact"
+                  :model-value="qtyOfTeam(field.key, row.group)"
+                  :readonly="props.readonly"
+                  :rules="qtyRulesOf(field)"
+                  suffix="件"
+                  variant="underlined"
+                  @update:model-value="v => setTeamQty(field.key, row, v)"
+                >
+                  <template #label>
+                    <span class="text-[11px]">数量</span>
+                  </template>
+                </v-text-field>
+              </div>
+            </template>
+
+            <div v-if="teamSections.length === 0" class="field-side">
+              团队表里还没有团队，先让管理员维护「人员配置」
+            </div>
+          </div>
+
+          <!-- 清单末尾对一次账：填了几个团队、一共多少件（留空的团队不算接收方） -->
+          <span class="field-side">
+            已填 <b>{{ chosenCountOf(field.key) }}</b> 个团队 · 合计 <b>{{ totalQtyTextOf(field.key) }}</b> 件
+          </span>
+        </template>
+
+        <template v-else>
+          <v-btn
+            class="text-none shrink-0"
+            color="primary"
+            :disabled="props.readonly"
+            prepend-icon="mdi-account-search-outline"
+            size="small"
+            variant="tonal"
+            @click="emit('pick', field)"
+          >{{ field.label }}</v-btn>
+
+          <v-chip
+            v-for="(m, i) in pickedList(field.key)"
+            :key="i"
+            closable
+            label
+            size="small"
+            variant="tonal"
+            @click:close="removePicked(field.key, i)"
+          >{{ pickedTextOf(m) }}</v-chip>
+
+          <span v-if="pickedList(field.key).length === 0" class="field-side">还没有选部门</span>
+        </template>
       </div>
 
       <div v-if="field.hint" class="field-hint">{{ field.hint }}</div>
@@ -114,6 +160,8 @@
   import { isFieldVisible } from '@/utils/approvalTypes'
   // 数量框右侧的「价值」：总金额 ÷ 总数量 × 数量（纯函数，零依赖，见 utils/number）
   import { shareValueText } from '@/utils/number'
+  // 「选择接收团队」的候选 = 团队表（与 TeamPicker 同一个来源，别在这里另抄一份）
+  import { teamRowsForReceiver, type TeamGroupRow } from '@/utils/organazation'
 
   /**
    * 办理表单渲染器（见模板里的说明）。
@@ -140,6 +188,11 @@
     readonly?: boolean
     /** 空值时是否按上限预填（改造前的"接收"就是这个行为）；预览里可关掉 */
     prefill?: boolean
+    /**
+     * 本单所属**部门**（团队表口径，办理页从数据行的团队名反查得到）。
+     * 给了就只平铺该部门下的团队；没给 / 该部门没有团队 → 退回全部部门的团队（见 teamRowsForReceiver）。
+     */
+    receiverTeam?: string
   }>()
 
   const emit = defineEmits<{
@@ -424,6 +477,83 @@
     setValue(key, next)
   }
 
+  /** 这个字段要不要平铺「全部团队 + 接收数量」：只有"选择接收团队"（pick='group'）要，选部门不要 */
+  function qtyEditableOf (field: TypeField): boolean {
+    return field.control === 'team' && field.pick !== 'team'
+  }
+
+  /** 候选团队（本单所属部门下的团队；识别不出部门时退回全部，见 teamRowsForReceiver） */
+  const teamRows = computed<TeamGroupRow[]>(() => teamRowsForReceiver(props.receiverTeam))
+
+  /** 按部门分组（只为了在"退回全部部门"时插一个小标题，方便找） */
+  const teamSections = computed(() => {
+    const byDept = new Map<string, TeamGroupRow[]>()
+    for (const row of teamRows.value) {
+      byDept.set(row.parent, [...(byDept.get(row.parent) ?? []), row])
+    }
+    return [...byDept].map(([parent, rows]) => ({ parent, rows }))
+  })
+
+  /** 限定了部门就只剩一栏，不必再写一遍部门标题 */
+  const showDeptTitle = computed(() => !String(props.receiverTeam ?? '').trim())
+
+  /** 该团队已填的数量（空 = 这个团队不接收） */
+  function qtyOfTeam (key: string, team: string): string {
+    const hit = pickedList(key).find(m => String(m.name ?? '') === team)
+    const raw = hit?.qty
+    return raw === undefined || raw === null ? '' : String(raw)
+  }
+
+  /**
+   * 改某个团队的接收数量。**数量 > 0 = 这个团队算接收方**；清空 / 填 0 = 从接收方里去掉。
+   *
+   * 为什么用"数量决定是否选中"：清单里摊着全部团队，再加一列勾选框就得多一次点击，
+   * 而且会出现"勾上了却没填数量"的半截记录（提交后台账算不出各接多少）。
+   * 数量存在**成员对象自己身上**（`{ name, manager, qty }`），不另开一张「团队 → 数量」的表。
+   */
+  function setTeamQty (key: string, row: TeamGroupRow, value: unknown) {
+    const text = String(value ?? '').trim()
+    const keep = new Map<string, Record<string, unknown>>()
+    for (const m of pickedList(key)) {
+      keep.set(String(m.name ?? ''), m)
+    }
+    if (!text || !/^\d+$/.test(text) || Number(text) <= 0) {
+      keep.delete(row.group)
+    } else {
+      keep.set(row.group, {
+        name: row.group,
+        ...(row.manager ? { manager: row.manager } : {}),
+        type: 'manager',
+        pick: 'group',
+        qty: text,
+      })
+    }
+    // 按团队表的顺序写回：结论文案里的团队顺序就不会随"谁先被填"跳来跳去
+    const order = teamRows.value.map(r => r.group)
+    const next = [...keep.values()].sort((a, b) => order.indexOf(String(a.name)) - order.indexOf(String(b.name)))
+    setValue(key, next)
+  }
+
+  /** 填了数量的团队个数（清单末尾对账用） */
+  function chosenCountOf (key: string): number {
+    return pickedList(key).filter(m => Number(String(m.qty ?? '').trim()) > 0).length
+  }
+
+  /** 数量的校验与办理页同口径：空着不管，填了就得是整数 */
+  function qtyRulesOf (field: TypeField): Array<(v: unknown) => true | string> {
+    if (!qtyEditableOf(field)) return []
+    return [v => v === '' || v === undefined || /^\d+$/.test(String(v)) || '只能填正整数']
+  }
+
+  /** 已填团队的合计件数（还没填的按 0 算，别把空串拼成 NaN） */
+  function totalQtyTextOf (key: string): string {
+    const total = pickedList(key).reduce((sum, m) => {
+      const n = Number(String(m.qty ?? '').trim())
+      return sum + (Number.isFinite(n) ? n : 0)
+    }, 0)
+    return String(total)
+  }
+
   /**
    * 上限的"快照串"（剩余 / 总库存 / 总金额）。
    *
@@ -510,6 +640,66 @@
 .field-input {
   max-width: 220px;
   flex: none;
+}
+
+/* 选接收方：整体顶对齐（团队清单是多行块，跟着中线对齐会整体偏下） */
+.field-team {
+  align-items: flex-start;
+}
+
+/*
+ * 「选择接收团队」的平铺清单：全部候选团队各占一行，行尾一个接收数量框。
+ *
+ * `max-height` + 滚动：一个部门十几个人是常态，全摊开会把下面的「意见/备注」「提交按钮」
+ * 顶到屏幕外；限高又保留"能一眼扫完"的优点（不折叠、不藏进下拉）。
+ * 团队表里没有团队时由模板里的空态文案兜住，这里不用管。
+ */
+.team-matrix {
+  width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 部门小标题：只在"没识别出部门、列了全部"时出现，起分组作用 */
+.team-matrix__dept {
+  padding: 4px 2px 2px;
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+}
+
+.team-matrix__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-matrix__name {
+  flex: none;
+  min-width: 88px;
+  font-size: 12px;
+}
+
+.team-matrix__mgr {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * 每个团队的接收数量框：窄一点，靠右对齐成一列，扫一眼就能比大小。
+ * 不限宽时 v-text-field 会吃掉整行（团队名被挤到左边一行、框占满右边），
+ * 也看不出"这是哪个团队的数量"。`min-width` 兜住标签「接收数量」不被压没。
+ */
+.picked-qty {
+  margin-top: 5px;
+  flex: none;
+  min-width: 104px;
+  max-width: 132px;
 }
 
 /*

@@ -125,6 +125,26 @@ export function groupsOfTeam (team: string): TeamGroupRow[] {
   return (groupManage as TeamGroupRow[]).filter(r => r.parent.replace(/\s+/g, '') === key)
 }
 
+/**
+ * 「选择接收团队」的**平铺候选清单**：办理页把全部团队一次性摊开、每队后面跟一个接收数量，
+ * 不再是"点开面板挑一个"（一批货分给几个团队时，那样要反复点开、还会漏掉本来该给的团队）。
+ *
+ *   · 给了部门（单据数据行里的团队反查出来的 `parent`）→ 只列该部门下的团队；
+ *   · 没给 / 该部门在表里一个团队都没有 → 退回**全部部门**的团队：
+ *     宁可多列几个，也不要出现"一个人都选不了"的办理页。
+ *
+ * 顺序沿用团队表的书写顺序（同一个部门的人排在一起），界面按 `parent` 分组展示时不会跳来跳去。
+ */
+export function teamRowsForReceiver (dept?: string): TeamGroupRow[] {
+  const key = String(dept ?? '').replace(/\s+/g, '')
+  const all = groupManage as TeamGroupRow[]
+  if (!key) {
+    return [...all]
+  }
+  const hit = groupsOfTeam(key)
+  return hit.length > 0 ? hit : [...all]
+}
+
 /* ==================== 团队负责人 / 部门负责人（动态审批人的取值口径） ==================== */
 
 /**

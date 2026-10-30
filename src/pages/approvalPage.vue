@@ -92,32 +92,37 @@
               @submit="onNodeSubmit"
             />
 
-            <v-timeline-item v-if="receiver" class="mb-6" dot-color="#1055C9" size="small">
+            <v-timeline-item v-if="receivers.length > 0" class="mb-6" dot-color="#1055C9" size="small">
               <template #icon>
                 <v-icon color="white" size="14">mdi-inbox-arrow-down</v-icon>
               </template>
 
-              <div class="d-flex align-center gap-2">
-                <v-chip color="primary" label size="x-small" variant="flat">
-                  <span class="text-[9px]">{{ receiver.pick === 'team' ? '接收部门' : '接收团队' }}</span>
-                </v-chip>
+              <!-- 一批货可能同时交给几个团队：一个团队一行，各带自己接的数量 -->
+              <div class="d-flex flex-column ga-1">
+                <div v-for="(r, i) in receivers" :key="i" class="d-flex align-center gap-2">
+                  <v-chip v-if="i === 0" color="primary" label size="x-small" variant="flat">
+                    <span class="text-[9px]">{{ r.pick === 'team' ? '接收部门' : '接收团队' }}</span>
+                  </v-chip>
 
-                <v-avatar class="mr-1" size="22">
-                  <v-img v-if="receiver.avatar" cover :src="proxyAvatar(receiver.avatar)" />
-                  <v-icon v-else size="13">mdi-account</v-icon>
-                </v-avatar>
+                  <v-avatar class="mr-1" size="22">
+                    <v-img v-if="r.avatar" cover :src="proxyAvatar(r.avatar)" />
+                    <v-icon v-else size="13">mdi-account</v-icon>
+                  </v-avatar>
 
-                <span class="text-[12px]">{{ receiver.name }}</span>
+                  <span class="text-[12px]">{{ r.name }}</span>
 
-                <span v-if="receiver.manager" class="text-[11px] text-medium-emphasis">
-                  {{ receiver.pick === 'team' ? '部门负责人' : '团队负责人' }} {{ receiver.manager }}
-                </span>
+                  <span v-if="r.manager" class="text-[11px] text-medium-emphasis">
+                    {{ r.pick === 'team' ? '部门负责人' : '团队负责人' }} {{ r.manager }}
+                  </span>
 
-                <span v-else-if="receiver.department" class="text-[11px] text-medium-emphasis">
-                  {{ receiver.department }}
-                </span>
+                  <span v-else-if="r.department" class="text-[11px] text-medium-emphasis">{{ r.department }}</span>
 
-                <span v-else-if="receiver.email" class="text-[11px] text-medium-emphasis">{{ receiver.email }}</span>
+                  <span v-else-if="r.email" class="text-[11px] text-medium-emphasis">{{ r.email }}</span>
+
+                  <span v-if="receiverQtyText(r)" class="text-[11px] text-medium-emphasis">
+                    接 <b>{{ receiverQtyText(r) }}</b> 件
+                  </span>
+                </div>
               </div>
 
               <div class="mt-1 text-[11px] text-medium-emphasis">流程到此结束：后面接的环节不再有人办理</div>
@@ -212,7 +217,7 @@
     collectStepOptionItems,
     collectStepResultOptions,
     receivedQuantities,
-    receiverOf,
+    receiversOf,
   } from '@/types/approval'
   import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
   // 运行期视图（重算链路 / 环节负责人 / 连续同人环节合并 / 弃置段起点）：与首页表格同一口径
@@ -413,11 +418,17 @@
   })
 
   /**
-   * 「选择接收组别 / 选择接收团队」的接收方：在时间线上单独渲染成一个节点。
-   * 它命中终结类结论、不在 chain 里，所以只能从办理流水里取（见 receiverOf）；
-   * 粒度（组别 / 团队）由 receiverOf 依据结论码补在 `pick` 上。
+   * 「选择接收团队 / 选择接收部门」的接收方：在时间线上单独渲染成一个节点。
+   * 它命中终结类结论、不在 chain 里，所以只能从办理流水里取（见 receiversOf）；
+   * 粒度（团队 / 部门）由 receiversOf 依据结论码补在 `pick` 上。
+   * 一批货可以分给多个团队 → 这里是数组，一个团队渲染一行（各带自己接的数量）。
    */
-  const receiver = computed(() => receiverOf(orderDatas.value))
+  const receivers = computed(() => receiversOf(orderDatas.value))
+
+  /** 该接收方接了多少件（老单据 / 选部门没有这个字段 → 空串，整块不渲染） */
+  function receiverQtyText (r: { qty?: string | number }): string {
+    return String(r.qty ?? '').trim()
+  }
 
   /** 单据是否还在流转：决定「当前审批人」那一栏显示谁，也决定队列按谁锚定（见 queueAnchor） */
   const orderPending = computed(() => Number(orderDatas.value?.status ?? APPROVAL_STATUS.PENDING) === APPROVAL_STATUS.PENDING)

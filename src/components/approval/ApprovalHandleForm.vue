@@ -95,7 +95,8 @@
       </div>
       <div class="remark-row">
         <OptionFormRenderer v-if="typeFields.length > 0" :key="`${activeStep?.index}-${selectedResult}`"
-          v-model="typeValues" :context="typeContext" :fields="typeFields" @pick="startPick" />
+          v-model="typeValues" :context="typeContext" :fields="typeFields" :receiver-team="receiverTeam"
+          @pick="startPick" />
       </div>
 
       <!--
@@ -189,6 +190,8 @@ import { type ApprovalNextStep, mainOf, type RotationReceipt } from '@/utils/app
 import { isFieldVisible, REASON_OPTIONS, SECOND_REASON_OPTIONS, typeTemplateFromSnapshot } from '@/utils/approvalTypes'
 // 「选择接收组别」的候选：团队表（utils/organazation）——不是整棵飞书通讯录，见组件说明
 import TeamPicker from '../TeamPicker.vue'
+// 「选择接收团队」的平铺清单也认同一张团队表：候选从这儿取，别在组件里另抄一份
+import { teamRowsForReceiver } from '@/utils/organazation'
 // 表单字段的**唯一渲染器**：审批类型页预览、沙盒、办理页三处共用同一份实现
 import OptionFormRenderer from './OptionFormRenderer.vue'
 // 前面轮询各团队的接收汇总（与审批详情 / 时间线共用同一份展示口径）
@@ -451,7 +454,15 @@ function optionKeyOf(o: { result: string, text: string }): string {
 /** 下拉候选项：在选项上补一个 key（供 v-select 的 item-value 用） */
 const selectItems = computed(() => optionItems.value.map(o => ({ ...o, key: optionKeyOf(o) })))
 
-const RADIO_MAX = 3
+/**
+ * radio 能摆下的上限：超过它就退回下拉。
+ *
+ * 为什么是 6 而不是 3：以前 3 个以上一律变下拉，于是「组间轮询」这种四结论环节
+ * （全部接收 / 不接收 / 部分接收 / 回退上一级）在办理页只露出一个下拉框 ——
+ * 四个方向全被折进"点开才看得见"的菜单里，办理人根本不知道这一环还能选什么。
+ * radio 横排（inline 自带 flex-wrap）摆 4~6 个中文结论完全放得下，就全摆出来。
+ */
+const RADIO_MAX = 6
 
 /** 这次用 radio 还是下拉（两种形态绑定同一个 selectedOptionKey，提交逻辑完全一致） */
 const useOptionRadios = computed(() => selectItems.value.length <= RADIO_MAX)
@@ -576,6 +587,15 @@ const stockAmountText = computed(() => {
 const typeTemplate = computed(() => typeTemplateFromSnapshot(props.typeTemplates, selectedResult.value))
 
 /**
+ * 已经预填过「接收团队数量」的 `结论码:字段键`。
+ *
+ * 「选择接收团队」的清单是全团队平铺的，打开表单时要按历史把各团队的数量带出来（见 seedReceiverTeams）。
+ * 用这个集合保证**只带一次**：用户把某个团队的数字删掉就是"这次不分给他"，
+ * 依赖（模板 / 轮询汇总）再变也不能把它填回来。换环节 / 换结论时会清空（见 resetFormState）。
+ */
+const seededReceiverKeys = new Set<string>()
+
+/**
  * 选项树选中的叶子 → 它对应的「原因」候选（叶子文案与 REASON_OPTIONS 一一对应）。
  *
  * 只在**这个结论本来就要填原因**（模板里有 reason 字段，典型是 other_reason）时才有值：
@@ -657,6 +677,8 @@ const OPINION_REQUIRED_HINT = '选择「外部环境」类原因时，意见/备
 watch(() => typeTemplate.value.code, () => {
   typeValues.value = {}
   pickingField.value = null
+  // 换结论 → 接收团队的清单要按新结论重新带一次历史数量
+  seededReceiverKeys.clear()
 })
 
 /**
@@ -683,12 +705,50 @@ function startPick(field: TypeField) {
 }
 
 /**
+ * 本次表单里给各团队填过的数量（`团队名 → 数量`）。
+ *
+ * 用途只有一个：**删除某个团队再选回来时，数量还能带出上次填的值**。
+ * 不参与提交、不落库 —— 提交时数量跟着成员对象走（`extra.members[].qty`）。
+ */
+const qtyMemory = ref<Record<string, string>>({})
+
+/**
+ * 这个团队「之前填的数量」——多团队交接时各队数量框的默认值。
+ *
+ * 两个来源，按可信度排序：
+ *   ① 本次表单里刚填过的（含填完又把这个团队删掉的，见 qtyMemory）；
+ *   ② 前面「组间轮询」里**这个团队自己**填过的接收数量（rotationReceipts）。
+ *
+ * 都没有就返回空串：宁可空着让人填，也别拿别的团队的数量冒充
+ *（一批货分给几个队，数量本来就不该一样）。
+ */
+function defaultQtyOf (team: string): string {
+  const remembered = String(qtyMemory.value[team] ?? '').trim()
+  if (remembered) {
+    return remembered
+  }
+  // 同一团队可能办过好几轮（驳回后重走）：以**最后一次**为准，别把第一轮的数字当默认值
+  for (let i = props.rotationReceipts.length - 1; i >= 0; i--) {
+    const r = props.rotationReceipts[i]
+    if (r.group === team && r.qty !== undefined && r.qty !== null) {
+      return String(r.qty)
+    }
+  }
+  return ''
+}
+
+/**
  * 选中一个接收方（来自 TeamPicker，两种粒度共用这一段）。
  *
  * 存的是**名字**（`name`）+ **负责人**（`manager`）：
  *   · 组别模式（「选择接收组别」）—— 组别名 + 该组组长；
  *   · 团队模式（「选择接收团队」）—— 团队名 + 团队负责人（`parentManager`）。
  * `type: 'manager'` 沿用旧口径（接收方占"办理人"那一格），时间线据此单独渲染一个节点。
+ *
+ * **两种粒度行为不同**：
+ *   · 「选择接收团队」可以选多个（一批货分给几个团队），每追加一个就带出该团队之前填过的
+ *     接收数量做默认值（见 defaultQtyOf）；同一团队不重复追加；
+ *   · 「选择接收部门」是一对一交接，选中即替换掉原来那个（保持改造前行为）。
  */
 function pickReceiver(t: { name: string, manager?: string }) {
   const field = pickingField.value
@@ -701,10 +761,97 @@ function pickReceiver(t: { name: string, manager?: string }) {
     type: 'manager',
     pick: field.pick === 'team' ? 'team' : 'group',
   }
-  // 渲染器里选人控件按**数组**放（同一个控件单选 / 多选都能用）；写库时取第一个（见 collectResult）
-  typeValues.value = { ...typeValues.value, [field.key]: [member] }
+  // 「选部门」保持单选语义：选中就把原来那个换掉
+  if (field.pick === 'team') {
+    typeValues.value = { ...typeValues.value, [field.key]: [member] }
+    pickingField.value = null
+    return
+  }
+
+  // 渲染器里选人控件按**数组**放（单选 / 多选同一个控件）；写库时单团队仍落单对象（见 collectResult）
+  const picked = Array.isArray(typeValues.value[field.key])
+    ? (typeValues.value[field.key] as Array<Record<string, unknown>>)
+    : []
+  // 同一个团队已经在列表里：不重复追加（否则会出两条同名、两份数量，台账会算两遍）
+  if (picked.some(m => String(m.name ?? '') === member.name)) {
+    pickingField.value = null
+    return
+  }
+  const qty = defaultQtyOf(t.name)
+  typeValues.value = {
+    ...typeValues.value,
+    [field.key]: [...picked, qty ? { ...member, qty } : member],
+  }
   pickingField.value = null
 }
+
+/**
+ * 记住各团队填过的数量（只在本表单内有效，见 qtyMemory）。
+ * 深度监听 typeValues 而不是在渲染器里回调：数量框的写入路径只有一条（setPickedQty → update:model-value），
+ * 从值上收口就不用再给渲染器加事件。
+ */
+watch(typeValues, value => {
+  const fields = typeTemplate.value?.fields ?? []
+  let next: Record<string, string> | null = null
+  for (const field of fields) {
+    if (field.control !== 'team' || field.pick === 'team') continue
+    const list = Array.isArray(value[field.key]) ? (value[field.key] as Array<Record<string, unknown>>) : []
+    for (const m of list) {
+      const name = String(m.name ?? '').trim()
+      const qty = String(m.qty ?? '').trim()
+      if (name && qty && qtyMemory.value[name] !== qty) {
+        next = { ...(next ?? qtyMemory.value), [name]: qty }
+      }
+    }
+  }
+  if (next) {
+    qtyMemory.value = next
+  }
+}, { deep: true })
+
+/**
+ * 「选择接收团队」现在是**全团队平铺清单**（见 OptionFormRenderer），所以打开表单时要把
+ * 「这个团队之前填过的数量」直接带进它那一格（口径见 defaultQtyOf：本表单记忆 → 轮询轮次回填）。
+ *
+ * 只带一次（靠 seededReceiverKeys 记）：删掉某个团队的数字就是"这次不分给他"，不能被重跑顶回来。
+ */
+function seedReceiverTeams() {
+  const template = typeTemplate.value
+  const seed: Record<string, unknown> = {}
+  for (const field of template.fields) {
+    if (field.control !== 'team' || field.pick === 'team') continue
+    const seedKey = `${template.code}:${field.key}`
+    if (seededReceiverKeys.has(seedKey)) continue
+    const cur = typeValues.value[field.key]
+    if (Array.isArray(cur) && cur.length > 0) continue
+    seededReceiverKeys.add(seedKey)
+
+    // 只带**有默认数量**的团队：没有历史数量的团队照样列在清单里，等办理人自己填
+    const picked = teamRowsForReceiver(props.receiverTeam)
+      .map(row => ({ row, qty: defaultQtyOf(row.group) }))
+      .filter(x => x.qty !== '')
+      .map(({ row, qty }) => ({
+        name: row.group,
+        ...(row.manager ? { manager: row.manager } : {}),
+        type: 'manager',
+        pick: 'group',
+        qty,
+      }))
+    if (picked.length > 0) {
+      seed[field.key] = picked
+    }
+  }
+  if (Object.keys(seed).length > 0) {
+    typeValues.value = { ...typeValues.value, ...seed }
+  }
+}
+
+watch(
+  // 换结论 / 轮询汇总回来 / 换到下一环，都可能带来新的"历史数量"，各触发一次（靠 seededReceiverKeys 去重）
+  [() => typeTemplate.value.code, () => activeStep.value?.index, () => props.rotationReceipts],
+  () => seedReceiverTeams(),
+  { immediate: true },
+)
 
 /**
  * 「回收」类结论：额外把"这批货总共多少"摆出来当旁注。
@@ -717,6 +864,25 @@ const needRecycle = computed(
 /** 表单值的文本形态（undefined / null 一律空串：别把 "undefined 件" 写进标签） */
 function textOf(value: unknown): string {
   return value === undefined || value === null ? '' : String(value)
+}
+
+/**
+ * 多团队交接：把各团队填的接收数量**合计**写进 `qty`。
+ *
+ * 为什么要合计：接收台账、分支条件、时间线都按 `extra.qty` 看"这一环接了多少件"；
+ * 只把数量挂在 `members[].qty` 上的话，每个消费方都得自己加总，口径容易走偏。
+ * 模板里本来就配了 `qty` 字段（如「接收」类结论）时不覆盖 —— 人填的那个才是准的。
+ */
+function withReceiverQty (extra: Record<string, unknown>) {
+  // 模板自己配了 qty 字段且人填了 → 以人填的为准；空串 / 没这个字段才用团队的合计兜
+  const filled = String(extra.qty ?? '').trim() !== ''
+  if (extra.members === undefined || filled) {
+    return
+  }
+  const total = totalQtyOf(extra.members)
+  if (total > 0) {
+    extra.qty = String(total)
+  }
 }
 
 /**
@@ -910,6 +1076,10 @@ function resetFormState() {
   pickedChild.value = ''
   // 审批类型表单整份清空：下一环要填的字段可能完全不同（渲染器会按新结论重新预填）
   typeValues.value = {}
+  // 换环节了，上个环节各团队填过的数量不能再当默认值（那不是"这个团队这次接多少"）
+  qtyMemory.value = {}
+  // 预填标记一起清：新环节的接收团队清单要按它自己的历史重新带数量
+  seededReceiverKeys.clear()
   pickingField.value = null
   opinion.value = ''
   attachment.value = null
@@ -923,9 +1093,57 @@ function resetFormState() {
 
 /* ==================== 组装结论 & 提交 ==================== */
 
-/** 渲染器的选人控件按数组放；库里 `members` 一直是**单个对象**（时间线据此单独渲染接收方节点） */
-function firstReceiver(value: unknown): unknown {
-  return Array.isArray(value) ? value[0] : value
+/**
+ * 选人控件在表单里按数组放，落库时：
+ *   · 只选了**一个** → 仍是单个对象（沿用改造前的口径：时间线与老单据都按单对象读）；
+ *   · 选了**多个** → 数组，每个成员自带 `qty`（这批货分给了哪几个团队、各接多少）。
+ * ⚠️ 别一律写数组：时间线按单对象渲染接收方节点，一律数组会让老展示读到 `undefined.name`。
+ *
+ * 另外把**数量为空 / 0 的团队剔掉**：「选择接收团队」现在是把全部团队摊成清单，
+ * 数量 > 0 才代表"这个团队接货"（渲染器的约定，见 OptionFormRenderer 的 setTeamQty）。
+ * 过滤放在提交口上做，清单与落库就只有一份口径，不会出现"列了 8 个团队、结果 8 个都记成接收方"。
+ */
+function membersForStore (value: unknown): unknown {
+  if (!Array.isArray(value)) return value
+  const list = value.filter(m => {
+    if (!m || typeof m !== 'object') return false
+    // 选部门（pick='team'）的成员本来就没有 qty，原样保留
+    if (!Object.prototype.hasOwnProperty.call(m, 'qty')) return true
+    return Number(String((m as { qty?: unknown }).qty ?? '').trim()) > 0
+  })
+  return list.length <= 1 ? (list[0] ?? value) : list
+}
+
+/** 接收方合计件数（单对象 / 数组都认；读不到按 0） */
+function totalQtyOf (members: unknown): number {
+  const list = Array.isArray(members) ? members : [members]
+  return list.reduce<number>((sum, m) => {
+    const n = Number(String((m as { qty?: unknown } | null)?.qty ?? '').trim())
+    return sum + (Number.isFinite(n) ? n : 0)
+  }, 0)
+}
+
+/**
+ * 接收团队的数量校验（返回提示文案，空串 = 通过）。
+ *
+ * 「选择接收团队」的清单摊着全部团队，但提交时**至少要有一个团队填了数量**：
+ * 一个都没填就提交，等于"这环把货交给谁"完全没记录，后面查台账也查不到。
+ * 选部门（成员没有 qty 字段）不受这条约束 —— 它是一对一交接，不需要数量。
+ */
+function receiverQtyError (extra: Record<string, unknown>): string {
+  const raw = extra.members
+  if (raw === undefined) return ''
+  const list = Array.isArray(raw) ? raw : [raw]
+  const hasQty = list.some(m => !!m && typeof m === 'object' && Object.prototype.hasOwnProperty.call(m, 'qty'))
+  const valid = list.filter(m => Number(String((m as { qty?: unknown } | null)?.qty ?? '').trim()) > 0)
+  if (valid.length > 0) {
+    return ''
+  }
+  // 选部门（成员压根没有 qty 字段）不适用这条：一对一交接不需要数量
+  if (!hasQty && list.length > 0) {
+    return ''
+  }
+  return '请至少给一个团队填写接收数量'
 }
 
 /**
@@ -983,8 +1201,9 @@ function collectResult(): { result: string, result_label: string, extra: Record<
       if (value === undefined || value === null || String(value).trim() === '') {
         continue
       }
-      extra[field.key] = field.key === 'members' ? firstReceiver(value) : value
+      extra[field.key] = field.key === 'members' ? membersForStore(value) : value
     }
+    withReceiverQty(extra)
     if ((type.effects ?? []).includes('receive_ledger')) {
       withReceiveLedger(extra, extra.qty)
     }
@@ -1011,8 +1230,9 @@ function collectResult(): { result: string, result_label: string, extra: Record<
     if (value === undefined || value === null || String(value).trim() === '') {
       continue
     }
-    extra[field.key] = field.key === 'members' ? firstReceiver(value) : value
+    extra[field.key] = field.key === 'members' ? membersForStore(value) : value
   }
+  withReceiverQty(extra)
 
   const effects = type.effects ?? []
   if (effects.includes('receive_ledger')) {
@@ -1062,13 +1282,21 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
     }
     case PICK_MEMBERS_RESULT:
     case PICK_TEAM_RESULT: {
-      const m = (extra.members ?? {}) as { name?: string, manager?: string, pick?: string }
-      const isTeam = m.pick === 'team'
-      const title = isTeam ? '选择接收团队' : '选择接收组别'
-      // 结论文案带上「名字 + 负责人」：时间线上一眼能看出这一环把货交给了谁、找谁
-      return m.name
-        ? `${title}：${m.name}${m.manager ? `（${isTeam ? '负责人' : '组长'} ${m.manager}）` : ''}`
-        : title
+      type Receiver = { name?: string, manager?: string, pick?: string, qty?: unknown }
+      const raw = extra.members
+      const list = (Array.isArray(raw) ? raw : (raw ? [raw] : []))
+        .filter((m): m is Receiver => !!m && typeof m === 'object')
+      const isDept = list[0]?.pick === 'team'
+      const title = isDept ? '选择接收部门' : '选择接收团队'
+      /*
+       * 结论文案带上「名字 + 负责人 + 接收数量」：时间线上一眼能看出这一环把货交给了谁、找谁、各接多少。
+       * 多团队时按「、」串起来（`选择接收团队：美1组（负责人 A）30 件、欧洲组（负责人 B）20 件`）。
+       */
+      const parts = list.map(m => {
+        const qty = String(m.qty ?? '').trim()
+        return `${m.name ?? ''}${m.manager ? `（${isDept ? '部门负责人' : '团队负责人'} ${m.manager}）` : ''}${qty ? ` ${qty} 件` : ''}`
+      }).filter(text => text.trim() !== '')
+      return parts.length > 0 ? `${title}：${parts.join('、')}` : title
     }
     case 'pending': {
       return '待定'
@@ -1122,6 +1350,15 @@ async function handleConfirm() {
   // 兜底的同一件事：没有有效结论就别发请求（空结论会让单据卡在本环节）
   if (!result) {
     formError.value = '请选择「办理选项」后再提交'
+    return
+  }
+  /*
+   * 接收团队的数量：清单里摊着全部团队，但不能一个都不填就提交 ——
+   * 那样"这环把货交给谁、各接多少"完全没记录，后面查台账也查不到（见 receiverQtyError）。
+   */
+  const qtyError = receiverQtyError(extra)
+  if (qtyError) {
+    formError.value = qtyError
     return
   }
   submitting.value = true
