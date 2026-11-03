@@ -96,7 +96,7 @@
       <div class="remark-row">
         <OptionFormRenderer v-if="typeFields.length > 0" :key="`${activeStep?.index}-${selectedResult}`"
           v-model="typeValues" :context="typeContext" :fields="typeFields" :receiver-team="receiverTeam"
-          @pick="startPick" />
+          :seed-baseline="receiverSeedBaseline" @pick="startPick" />
       </div>
 
       <!--
@@ -682,6 +682,7 @@ watch(() => typeTemplate.value.code, () => {
   pickingField.value = null
   // 换结论 → 接收团队的清单要按新结论重新带一次历史数量
   seededReceiverKeys.clear()
+  receiverSeedBaseline.value = {}
 })
 
 /**
@@ -716,6 +717,21 @@ function startPick(field: TypeField) {
 const qtyMemory = ref<Record<string, string>>({})
 
 /**
+ * 预填进「选择接收团队」清单的**历史接收量**基准（团队名 → 数量）。
+ *
+ * 这些量是前面环节已经接收掉的，「剩余接收数量」（本环节上限）里已经扣过一次；
+ * 清单末尾的剩余与超限校验只统计**超出基准的部分**（本次新分），否则等于把前面的
+ * 接收算两遍（实测：总库存 550、前面已接 200、上限 350；预填 50/100/50 合计 200，
+ * 旧算法剩余显示 150 —— 用户报"剩余多减了一次前面的接收数量"）。
+ *
+ * 维护时机：
+ *   · seedReceiverTeams / pickReceiver 里带出历史量时记入；
+ *   · 选回的团队带的是**本次**填过的数（qtyMemory 优先）→ 从基准里删（那是新分）；
+ *   · 换结论 / 重置表单时清空（见 seededReceiverKeys 的清理点）。
+ */
+const receiverSeedBaseline = ref<Record<string, number>>({})
+
+/**
  * 这个团队「之前填的数量」——「选择接收团队」清单里数量框的默认值。
  *
  * 两个来源，按可信度排序：
@@ -726,10 +742,9 @@ const qtyMemory = ref<Record<string, string>>({})
  * 都没有就返回空串：宁可空着让人填，也别拿别的团队的数量冒充
  *（一批货分给几个队，数量本来就不该一样）。
  *
- * ⚠️ 预填只是**参考值**，合计要一并算进「各团队接收数量合计」（OptionFormRenderer
- *    清单末尾那行 + receiverQtyError 的校验）：前面接收的量已经从「剩余接收数量」里
- *    扣过一次，预填原样照抄可能合计超限 —— 清单末尾的剩余是实时跟着变的（剩余 =
- *    上限 − 合计），超了会有红字，办理人照着调就行。
+ * ⚠️ 预填量会记入 receiverSeedBaseline：剩余显示与超限校验（渲染器 freshQtyTotalOf /
+ *    receiverQtyError）只统计**超出基准的部分**（本次新分），沿用之前的分配原样提交
+ *    不会被拦 —— 否则等于把前面的接收又扣一遍（用户报过"剩余多减了一次"）。
  */
 function defaultQtyOf (team: string): string {
   const remembered = String(qtyMemory.value[team] ?? '').trim()
@@ -787,6 +802,14 @@ function pickReceiver(t: { name: string, manager?: string }) {
     return
   }
   const qty = defaultQtyOf(t.name)
+  if (String(qtyMemory.value[t.name] ?? '').trim()) {
+    // 带出的是**本次**填过的数（qtyMemory 优先）→ 属于新分，从预填基准里除名
+    const { [t.name]: _drop, ...rest } = receiverSeedBaseline.value
+    receiverSeedBaseline.value = rest
+  } else if (qty) {
+    // 带出的是历史接收量 → 记入基准（沿用原样不算新分）
+    receiverSeedBaseline.value = { ...receiverSeedBaseline.value, [t.name]: Number(qty) || 0 }
+  }
   typeValues.value = {
     ...typeValues.value,
     [field.key]: [...picked, qty ? { ...member, qty } : member],
@@ -847,6 +870,10 @@ function seedReceiverTeams() {
         qty,
       }))
     if (picked.length > 0) {
+      // 预填的都是历史接收量 → 记入基准：剩余/超限只统计超出它的部分（见 receiverSeedBaseline）
+      for (const p of picked) {
+        receiverSeedBaseline.value = { ...receiverSeedBaseline.value, [p.name]: Number(p.qty) || 0 }
+      }
       seed[field.key] = picked
     }
   }
@@ -1161,6 +1188,7 @@ function resetFormState() {
   qtyMemory.value = {}
   // 预填标记一起清：新环节的接收团队清单要按它自己的历史重新带数量
   seededReceiverKeys.clear()
+  receiverSeedBaseline.value = {}
   pickingField.value = null
   opinion.value = ''
   attachment.value = null
@@ -1235,10 +1263,21 @@ function receiverQtyError (extra: Record<string, unknown>): string {
   if (receiveCapText.value === '' || !Number.isFinite(cap)) {
     return ''
   }
+  /*
+   * 校验口径与清单末尾的剩余显示一致（OptionFormRenderer 的 freshQtyTotalOf）：
+   * 预填的历史接收量（receiverSeedBaseline）是前面环节已经接收掉的，上限里扣过一次，
+   * 这里只校验**超出基准的部分**（本次新分）—— 沿用之前的分配原样提交不该被拦。
+   */
   const total = totalQtyOf(raw)
-  if (total > cap) {
+  const fresh = list.reduce((sum, m) => {
+    if (!m || typeof m !== 'object') return sum
+    const n = Number(String((m as { qty?: unknown }).qty ?? '').trim()) || 0
+    const base = receiverSeedBaseline.value[String((m as { name?: unknown }).name ?? '')] ?? 0
+    return sum + Math.max(0, n - base)
+  }, 0)
+  if (fresh > cap) {
     const name = usingRemaining.value ? '剩余接收数量' : '总库存数量'
-    return `各团队接收数量合计 ${total} 件，超过${name}（${cap} 件），请调整后再提交`
+    return `本次新分合计 ${fresh} 件，超过${name}（${cap} 件），请调整后再提交`
   }
   /*
    * 「部分接收」的语义是"这次接不完"（与数量框的限值同口径：等于上限要走「全部接收」）。

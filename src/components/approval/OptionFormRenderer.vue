@@ -203,6 +203,15 @@
      * 给了就只平铺该部门下的团队；没给 / 该部门没有团队 → 退回全部部门的团队（见 teamRowsForReceiver）。
      */
     receiverTeam?: string
+    /**
+     * 「选择接收团队」清单里**预填的历史接收量**基准（团队名 → 数量，见 ApprovalHandleForm
+     * 的 receiverSeedBaseline）。
+     *
+     * 这些量是前面环节**已经接收掉的**，本环节的「剩余接收数量」（上限）里已经扣过一次；
+     * 清单末尾的剩余与超限校验只统计**超出基准的部分**（本次新分），否则等于把前面的
+     * 接收算两遍。没传 / 团队不在基准里 → 全额算新分（与旧行为一致）。
+     */
+    seedBaseline?: Record<string, number>
   }>()
 
   const emit = defineEmits<{
@@ -619,26 +628,41 @@
    * 合计超过上限时按 0 显示：超额本身由下面的红字（qtyOverflowTextOf）点出来，
    * 剩余格再甩一个负数反而难读。
    */
+  /**
+   * 本次**新分**出去的合计：各团队数量里超出「预填基准」的部分（见 props.seedBaseline）。
+   *
+   * 预填进清单的历史量是前面环节已经接收掉的，不能再从本环节的剩余里扣一遍 ——
+   * 所以基准以内的部分视为"沿用之前的分配"，只有超出的部分才算新分。
+   * 用户删掉团队再选回、或改数，都按当前值与基准的差实时算。
+   */
+  function freshQtyTotalOf (key: string): number {
+    return pickedList(key).reduce((sum, m) => {
+      const n = Number(String(m.qty ?? '').trim()) || 0
+      const base = props.seedBaseline?.[String(m.name ?? '')] ?? 0
+      return sum + Math.max(0, n - base)
+    }, 0)
+  }
+
   function remainingAfterTextOf (key: string): string {
     const cap = receiveCapValueOf()
     if (cap === undefined) {
       return ''
     }
-    const total = Number(totalQtyTextOf(key)) || 0
-    return String(Math.max(0, cap - total))
+    // 剩余 = 上限 − 本次新分（预填的历史量不再扣一遍）
+    return String(Math.max(0, cap - freshQtyTotalOf(key)))
   }
 
-  /** 合计超出上限时的提示（清单末尾红字；空串 = 没超，正常不渲染） */
+  /** 本次新分超出上限时的提示（清单末尾红字；空串 = 没超，正常不渲染） */
   function qtyOverflowTextOf (key: string): string {
     const cap = receiveCapValueOf()
     if (cap === undefined) {
       return ''
     }
-    const total = Number(totalQtyTextOf(key))
-    if (!Number.isFinite(total) || total <= cap) {
+    const fresh = freshQtyTotalOf(key)
+    if (!Number.isFinite(fresh) || fresh <= cap) {
       return ''
     }
-    return `各团队合计 ${total} 件，超过${receiveCapNameOf()}（${cap} 件），请调整后再提交`
+    return `本次新分合计 ${fresh} 件，超过${receiveCapNameOf()}（${cap} 件），请调整后再提交`
   }
 
   /**
