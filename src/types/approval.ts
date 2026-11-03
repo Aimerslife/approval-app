@@ -602,6 +602,14 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: 'supplier_recycle', label: '供应商回收' },
   // 平台回收：走电商平台（清货 / 回收渠道）处置，与供应商回收并列的另一种回收去向
   { value: 'platform_recycle', label: '平台回收' },
+  /*
+   * 「申请平台回收」：办理人**申请**由平台回收（数量 + 金额在申请时就要给全，
+   * 字段与三种回收同一形态），但它是"申请"而不是"执行" —— 后面通常还接确认环节。
+   * 因此与 rework / discard 同款：**不在 CLOSE_FLOW_RESULTS**（不终结流程）、
+   * 不算接收（不在 RECEIVE_RESULTS，extra.qty 是申请回收的数量）、
+   * 也不进弃置段入口名单（DISCARD_ENTRY_RESULTS）。
+   */
+  { value: 'apply_platform_recycle', label: '申请平台回收' },
   { value: 'scrap', label: '报废清仓' },
   { value: 'rework', label: '建议返工' },
   { value: 'discard', label: '建议弃置' },

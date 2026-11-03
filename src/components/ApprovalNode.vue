@@ -71,7 +71,7 @@
         <span v-if="activeStep && !canHandle" class="text-[11px] text-medium-emphasis">未到该环节</span>
 
         <template v-if="activeStep && canHandle && !status && !hideHandle">
-          <v-dialog v-model="dialog" max-width="500">
+          <v-dialog v-model="dialog" max-width="  ">
             <template #activator="{ props: activatorProps }">
               <v-btn color="success" size="x-small" variant="tonal" v-bind="activatorProps">办理</v-btn>
             </template>
@@ -559,17 +559,28 @@ const rotationStepReceipts = computed(() => {
  *   · 单个组 → 「本组接收 120 件」；
  *   · 多个组（同人合并节点）→ 「美2组 120 件 · 美3组 80 件」。
  * 没填数量的结论（「不接收」）给结论文案，不能显示成 0 件（那是"接了 0 件"）。
+ *
+ * 结论标签自己带件数时（团队负责人把数量改小后「全部接收」会降级成「部分接收 500 件」，
+ * 见 ApprovalHandleForm.resultLabelOf）就不再补一次，否则会读成
+ * 「部分接收 500 件 本组接收 500 件」。
  */
 const rotationQtyText = computed(() => {
   const list = rotationStepReceipts.value
   if (list.length === 0) {
     return ''
   }
+  const carriesQty = (r: { label: string }) => /件\s*$/.test(r.label)
   const textOf = (r: { qty?: number, label: string }) => (r.qty !== undefined ? `${r.qty} 件` : r.label)
   if (list.length === 1) {
-    return `本组接收 ${textOf(list[0])}`
+    const only = list[0]
+    return carriesQty(only) ? only.label : `本组接收 ${textOf(only)}`
   }
-  return list.map(r => `${r.group} ${textOf(r)}`).join(' · ')
+  return list.map((r) => {
+    if (carriesQty(r)) {
+      return `${r.group} ${r.label}`
+    }
+    return `${r.group} ${textOf(r)}`
+  }).join(' · ')
 })
 
 const actionSteps = computed(() => [

@@ -1,11 +1,4 @@
 <template>
-  <!--
-    审批详情视图：首页抽屉、我的审批单右栏共用同一个组件。
-
-    结构固定为「头部（状态 + 上/下一条 + 操作） / 滚动内容（单据信息 + 时间线） / 底部办理栏」，
-    靠内部 flex 撑开：内容区 flex:1 自己滚，办理栏永远贴底。外层只负责给宽高和描边
-    （首页是 v-navigation-drawer，我的审批单是 v-sheet），这里不画外框。
-  -->
   <div class="approval-detail-view d-flex flex-column">
     <div class="detail-head d-flex align-center ga-2 px-3 py-2">
       <span class="text-[14px] font-bold">审批详情</span>
@@ -77,7 +70,7 @@
           <v-chip label size="x-small" variant="tonal">{{ stepGroups.length }} 个环节</v-chip>
         </div>
 
-        <div class="timeline-wrap rounded bg-app px-2 py-3">
+        <div class="timeline-wrap rounded bg-app px-4 py-3">
           <v-timeline density="compact" side="end" truncate-line="both" width="100%">
             <!--
               时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 groupApproverSteps），
@@ -105,7 +98,6 @@
           :option-items="optionItems" :order="order" :receiver-team="receiverTeam" :remaining-qty="remainingQty"
           :result-options="resultOptions" :stock-amount="stockAmount" :stock-qty="stockQty"
           @submit="payload => emit('submit', payload)">
-          <!-- 抄送 / 转办：与审批页同一个组件、同一份落库逻辑（HandleDock 的 extra 槽） -->
           <template #extra>
             <SelectNode :disabled="readonly" @select="payload => emit('select', payload)" />
           </template>
@@ -320,10 +312,6 @@ function goApproval() {
 </script>
 
 <style lang="scss" scoped>
-/*
-   * 撑满外层给的宽高（首页是抽屉内容区、我的审批单是右栏 v-sheet），
-   * 内部三段靠 flex 排：头部固定、内容区自己滚、办理栏贴底。
-   */
 .approval-detail-view {
   height: 100%;
   min-height: 0;
@@ -401,6 +389,6 @@ function goApproval() {
 
 .timeline-wrap {
   /* 时间线本身有左右留白，这里只补一点上下，避免右栏显得太空 */
-  padding-inline: 4px;
+  // padding-inline: 4px;
 }
 </style>

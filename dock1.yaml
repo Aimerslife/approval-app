@@ -1,0 +1,11 @@
+- main [ref=e5]:
+  - generic [ref=e6]:
+    - heading "HandleDock 弹起复现（panel 模式，readonly 标题 + 槽内按钮）" [level=3] [ref=e7]
+    - generic [ref=e8]:
+      - text: panel 模型：
+      - code [ref=e9]: "[]"
+    - button "第 1 / 1 个动作 办理" [ref=e13] [cursor=pointer]:
+      - generic [ref=e15]:
+        - generic [ref=e16]: 第 1 / 1 个动作
+        - button "办理" [ref=e18]:
+          - generic [aria-hidden] [ref=e20]: 󱠛

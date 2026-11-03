@@ -21,31 +21,32 @@
       <div class="d-flex align-center flex-shrink-0">
         <v-btn :color="actionsOpen ? '#0052D9' : undefined" density="comfortable" size="small"
           :icon="actionsOpen ? 'mdi-chevron-up' : 'mdi-chevron-down'"
-          :title="actionsOpen ? '收起操作' : '更多操作（开启任务 / 上传附件）'" variant="text"
-          @click="actionsOpen = !actionsOpen" />
+          :title="actionsOpen ? '收起操作' : '更多操作（开启任务 / 上传附件）'" variant="text" @click="actionsOpen = !actionsOpen" />
       </div>
 
-      <div v-if="actionsOpen" class="actions-row d-flex flex-wrap align-center justify-end ga-2">
+      <div v-if="actionsOpen" class="actions-row d-flex flex-wrap align-center  ga-2">
         <!-- 开启任务（勾选数据行 → 建审批单）：与数据页（pages/workStream）共用同一套逻辑与组件，
              判断与建单都在 composables/useTaskStarter 里 -->
         <TaskStartBar :starter="taskStarter" />
-
-        <v-file-input ref="fileInputRef" v-model="attachment" accept=".xlsx,.xls,.csv" class="attachment-input"
+        <div class="d-flex align-center">
+          <v-file-input ref="fileInputRef" v-model="attachment" accept=".xlsx,.xls,.csv" class="attachment-input"
           density="compact" :disabled="!canUpload" hide-input @update:model-value="onFileChange">
           <template #prepend>
             <v-icon color="#1055C9" size="14">mdi-paperclip</v-icon>
           </template>
         </v-file-input>
-        <span v-if="attachment" class="text-[12px] text-medium-emphasis text-decoration-underline text-truncate"
-          :title="attachment.name">
-          {{ attachment.name }}
-        </span>
-        <span v-else class="text-[12px] text-medium-emphasis"
-          :class="canUpload ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
-          :title="canUpload ? undefined : NO_UPLOAD_TIP" @click="openFilePicker">上传附件</span>
-        <v-btn v-if="attachment" density="compact" icon="mdi-close" variant="plain" @click="attachment = null">
-          <v-icon icon="mdi-close" size="15" />
-        </v-btn>
+          <span v-if="attachment" class="text-[12px] text-medium-emphasis text-decoration-underline text-truncate"
+            :title="attachment.name">
+            {{ attachment.name }}
+          </span>
+          <div v-else class="text-[12px] text-medium-emphasis"
+            :class="canUpload ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
+            :title="canUpload ? undefined : NO_UPLOAD_TIP" @click="openFilePicker">上传附件
+            <v-btn v-if="attachment" density="compact" icon="mdi-close" variant="plain" @click="attachment = null">
+              <v-icon icon="mdi-close" size="15" />
+            </v-btn>
+          </div>
+        </div>
       </div>
     </v-sheet>
 
@@ -118,7 +119,6 @@
           <v-card-actions>
             <v-spacer />
             <v-btn :disabled="purging" variant="text" @click="purgeDialog = false">取消</v-btn>
-
             <v-btn color="error" :disabled="purgeConfirmText !== '清空' || purging" :loading="purging" variant="flat"
               @click="doPurge">确认清空</v-btn>
           </v-card-actions>
@@ -220,10 +220,10 @@
     </div>
 
     <v-data-table-server v-model="selectedIds" v-model:items-per-page="itemsPerPage" v-model:page="page"
-      :headers="tableHeaders" :item-selectable="isRowSelectable" :items="rows"
-      :items-length="totalItems" hover :items-per-page-options="[20, 50, 100, 200]" density="compact"
-      items-per-page-text="每页条数" fixed-header :loading="loading" fixed-footer :height="tableHeight" class="text-[12px]"
-      :no-data-text="noDataText" show-select striped="odd" @update:options="onTableOptions">
+      :headers="tableHeaders" :item-selectable="isRowSelectable" :items="rows" :items-length="totalItems" hover
+      :items-per-page-options="[20, 50, 100, 200]" density="compact" items-per-page-text="每页条数" fixed-header
+      :loading="loading" fixed-footer :height="tableHeight" class="text-[12px]" :no-data-text="noDataText" show-select
+      striped="odd" @update:options="onTableOptions">
       <template #item.图片链接="{ value }">
         <v-img v-if="value" class="rounded mx-auto" cover height="48" :src="String(value)" width="48" />
 

@@ -184,6 +184,7 @@ export const TYPE_CATEGORY: Readonly<Record<string, string>> = {
   recycle: '处置类',
   supplier_recycle: '处置类',
   platform_recycle: '处置类',
+  apply_platform_recycle: '处置类',
   scrap: '处置类',
   rework: '处置类',
   discard: '处置类',
@@ -322,6 +323,13 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
   },
   // 平台回收：与上面两种回收同一形态（数量 + 金额，上限同样是总库存），只是去向不同
   platform_recycle: {
+    fields: [
+      { key: 'qty', label: '回收数量', control: 'number', required: true, unit: '件', integer: true, limit: 'stock_qty' },
+      { key: 'amount', label: '回收金额', control: 'number', required: true, unit: '￥', decimals: 2, limit: 'stock_amount' },
+    ],
+  },
+  // 申请平台回收：申请时就要把数量 / 金额报全（后面接确认环节），表单与「平台回收」同一形态
+  apply_platform_recycle: {
     fields: [
       { key: 'qty', label: '回收数量', control: 'number', required: true, unit: '件', integer: true, limit: 'stock_qty' },
       { key: 'amount', label: '回收金额', control: 'number', required: true, unit: '￥', decimals: 2, limit: 'stock_amount' },

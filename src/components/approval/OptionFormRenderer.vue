@@ -102,7 +102,7 @@
                   density="compact"
                   :model-value="qtyOfTeam(field.key, row.group)"
                   :readonly="props.readonly"
-                  :rules="qtyRulesOf(field)"
+                  :rules="qtyRulesOf(field, row.group)"
                   suffix="件"
                   variant="underlined"
                   @update:model-value="v => setTeamQty(field.key, row, v)"
@@ -119,9 +119,19 @@
             </div>
           </div>
 
-          <!-- 清单末尾对一次账：填了几个团队、一共多少件（留空的团队不算接收方） -->
+          <!--
+            清单末尾对一次账：填了几个团队、一共多少件、本环节还能接多少件
+            （留空的团队不算接收方）。合计超过上限时在下面用红字点出来 ——
+            单看每一行都不越界，加起来超额只有在这一行才看得出来。
+          -->
           <span class="field-side">
             已填 <b>{{ chosenCountOf(field.key) }}</b> 个团队 · 合计 <b>{{ totalQtyTextOf(field.key) }}</b> 件
+            <template v-if="receiveCapValueOf() !== undefined">
+              · {{ receiveCapNameOf() }} <b>{{ receiveCapValueOf() }}</b> 件
+            </template>
+          </span>
+          <span v-if="qtyOverflowTextOf(field.key)" class="field-side field-side--error">
+            {{ qtyOverflowTextOf(field.key) }}
           </span>
         </template>
 
@@ -325,20 +335,40 @@
     return `${qty} ${field.unit || '件'}`
   }
 
+  /**
+   * 本环节**还能接多少件**：剩余优先、没有剩余（老单 / 没关联产品）退回总库存，
+   * 都取不到 = 没有上限。
+   *
+   * 数量框的上限（`limit = 'receive_cap'`）和"团队合计"的上限是**同一个数**，
+   * 所以只在这一处解析，别在两处各写一遍（改口径时容易漏一个）。
+   */
+  function receiveCapValueOf (): number | undefined {
+    const raw = remainingQtyText.value || stockQtyText.value
+    if (!raw) {
+      return undefined
+    }
+    const n = Number(raw.replace(/,/g, ''))
+    return Number.isFinite(n) ? n : undefined
+  }
+
+  /** 上限叫什么：取的是「剩余」还是「总库存」，提示文案要写对 */
+  function receiveCapNameOf (): string {
+    return remainingQtyText.value ? '剩余接收数量' : '总库存数量'
+  }
+
   /** 上限数值：认不出来 = undefined（那就没有上限） */
   function limitValueOf (field: TypeField): number | undefined {
     if (!field.limit) return undefined
-    const raw = field.limit === 'receive_cap'
-      // 剩余优先、没有剩余（空）时退回总库存 —— 与办理页同口径
-      ? (remainingQtyText.value || stockQtyText.value)
-      : (field.limit === 'stock_qty' ? stockQtyText.value : stockAmountText.value)
-    const n = Number(String(raw).replace(/,/g, ''))
+    if (field.limit === 'receive_cap') {
+      return receiveCapValueOf()
+    }
+    const n = Number(String(field.limit === 'stock_qty' ? stockQtyText.value : stockAmountText.value).replace(/,/g, ''))
     return Number.isFinite(n) ? n : undefined
   }
 
   function limitNameOf (field: TypeField): string {
     if (field.limit === 'receive_cap') {
-      return remainingQtyText.value ? '剩余接收数量' : '总库存数量'
+      return receiveCapNameOf()
     }
     return field.limit === 'stock_qty' ? '总库存数量' : '总库存金额'
   }
@@ -539,10 +569,36 @@
     return pickedList(key).filter(m => Number(String(m.qty ?? '').trim()) > 0).length
   }
 
-  /** 数量的校验与办理页同口径：空着不管，填了就得是整数 */
-  function qtyRulesOf (field: TypeField): Array<(v: unknown) => true | string> {
+  /**
+   * 数量的校验：空着不管（这个团队不接），填了就得是正整数，
+   * 而且「这一行 + 其他已填的团队」的合计不能超过本环节还能接的数量。
+   *
+   * 为什么必须带上别人：清单是摊开的，每一行单独看都合法，加起来却可能超额
+   * （剩余 300 时填 100 + 200 + 200）—— 只校验单行永远拦不住；多收的件数还会被
+   * 接收台账记成"已接收"，后面每个环节的剩余都跟着错。
+   * 提交时办理表单还有一道同口径的合计校验（见 ApprovalHandleForm.receiverQtyError）。
+   */
+  function qtyRulesOf (field: TypeField, team: string): Array<(v: unknown) => true | string> {
     if (!qtyEditableOf(field)) return []
-    return [v => v === '' || v === undefined || /^\d+$/.test(String(v)) || '只能填正整数']
+    return [
+      v => v === '' || v === undefined || /^\d+$/.test(String(v)) || '只能填正整数',
+      (v) => {
+        if (v === '' || v === undefined) {
+          return true
+        }
+        const cap = receiveCapValueOf()
+        const n = Number(String(v))
+        if (cap === undefined || !Number.isFinite(n) || n <= 0) {
+          return true
+        }
+        // 其他团队已填的合计：不含本行，否则本行会被算两遍
+        const others = Number(totalQtyTextOf(field.key)) - Number(qtyOfTeam(field.key, team) || 0)
+        if (n + others <= cap) {
+          return true
+        }
+        return `各团队合计 ${n + others} 件，超过${receiveCapNameOf()}（${cap} 件）`
+      },
+    ]
   }
 
   /** 已填团队的合计件数（还没填的按 0 算，别把空串拼成 NaN） */
@@ -552,6 +608,19 @@
       return sum + (Number.isFinite(n) ? n : 0)
     }, 0)
     return String(total)
+  }
+
+  /** 合计超出上限时的提示（清单末尾红字；空串 = 没超，正常不渲染） */
+  function qtyOverflowTextOf (key: string): string {
+    const cap = receiveCapValueOf()
+    if (cap === undefined) {
+      return ''
+    }
+    const total = Number(totalQtyTextOf(key))
+    if (!Number.isFinite(total) || total <= cap) {
+      return ''
+    }
+    return `各团队合计 ${total} 件，超过${receiveCapNameOf()}（${cap} 件），请调整后再提交`
   }
 
   /**
@@ -730,6 +799,11 @@
 .field-side {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+}
+
+/* 合计超上限：与输入框的报错同一档颜色，否则红框下面挂着一行灰字，容易漏看 */
+.field-side--error {
+  color: rgb(var(--v-theme-error));
 }
 
 /*

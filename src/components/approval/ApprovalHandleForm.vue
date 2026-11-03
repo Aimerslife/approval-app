@@ -868,6 +868,7 @@ const RECYCLE_RESULTS: Readonly<Record<string, string>> = {
   recycle: '回收',
   supplier_recycle: '供应商回收',
   platform_recycle: '平台回收',
+  apply_platform_recycle: '申请平台回收',
 }
 
 /**
@@ -888,12 +889,15 @@ function textOf(value: unknown): string {
  *
  * 为什么要合计：接收台账、分支条件、时间线都按 `extra.qty` 看"这一环接了多少件"；
  * 只把数量挂在 `members[].qty` 上的话，每个消费方都得自己加总，口径容易走偏。
- * 模板里本来就配了 `qty` 字段（如「接收」类结论）时不覆盖 —— 人填的那个才是准的。
+ *
+ * 为什么合计**压过**模板里的 `qty`：`qty` 只该是团队清单的合计，而「接收」类结论的
+ * 数量框是按上限**自动预填 + 只读**的（预填的正是整段剩余 —— 也就是"全部接收"的量）。
+ * 以前只在 `qty` 空着时才用合计兜底，于是团队负责人改完各团队数量，记录里仍是
+ * 那整段剩余：改了半天等于没改，接收台账还多记了没人接的货。
+ * 有明细就以明细为准，别让一个自动预填值压过人手填的清单。
  */
 function withReceiverQty (extra: Record<string, unknown>) {
-  // 模板自己配了 qty 字段且人填了 → 以人填的为准；空串 / 没这个字段才用团队的合计兜
-  const filled = String(extra.qty ?? '').trim() !== ''
-  if (extra.members === undefined || filled) {
+  if (extra.members === undefined) {
     return
   }
   const total = totalQtyOf(extra.members)
@@ -901,6 +905,32 @@ function withReceiverQty (extra: Record<string, unknown>) {
     extra.qty = String(total)
   }
 }
+
+/**
+ * 「全部接收」被改成了部分接收：团队合计**没接完**剩余。
+ *
+ * 「全部接收」的语义是把剩余接完（数量由系统按剩余带出）。团队负责人这一环允许改
+ * 各团队数量，合计没到剩余就只是部分接收 —— 码仍走 `receive`（分支条件、台账口径不动），
+ * 但标签得说实话，见 `resultLabelOf`。
+ *
+ * 没有团队清单、或取不到剩余上限时不判：宁可不降级，也别瞎猜。
+ */
+function receiverShortOfCap (extra: Record<string, unknown>): boolean {
+  if (extra.members === undefined || receiveCapText.value === '') {
+    return false
+  }
+  const cap = Number(String(receiveCapText.value).replace(/,/g, ''))
+  if (!Number.isFinite(cap)) {
+    return false
+  }
+  const total = totalQtyOf(extra.members)
+  return total > 0 && total < cap
+}
+
+/*
+ * 「团队清单的合计 → 数量框」的 watch 搬到了 `childIsSecondReason` 声明之后
+ * （它是 immediate 的，放这里会在 setup 时先碰 typeFields → TDZ，面板弹不出来）。
+ */
 
 /**
  * 接收类结论的账：把「已接收 / 剩余」一并写进结论的 extra。
@@ -997,6 +1027,34 @@ const childIsSecondReason = computed(() => {
   const known = new Set(SECOND_REASON_OPTIONS.map(o => String(o.value).trim()))
   return kids.some(k => known.has(String(k).trim()))
 })
+
+/**
+ * 团队清单的合计 → 「数量」框（只同步**按上限预填**的那种数量框）。
+ *
+ * 只读框里挂着整段剩余、记录的却是各团队合计，两处数字对不上，人只会怀疑系统疯了。
+ * 所以清单里一有数量就把它写成数量框的值 —— 看到的就是要记的。
+ *
+ * 只管 `prefillFromLimit` 的框（「全部接收」）：部分接收那种是人手填的数量，不归这里管。
+ * 合计为 0（还没分配）时不动它，留着上限预填值，别把框擦成空白。
+ *
+ * ⚠️ 必须写在 `childIsSecondReason` 声明**之后**：`immediate: true` 会在 setup 阶段
+ * 读 `typeFields`（→ childIsSecondReason），放前面就是 TDZ —— 表单渲染直接崩，
+ * 界面上「办理」面板弹不出来。搬回来之前先想清楚这条链。
+ */
+watch(
+  [() => totalQtyOf(typeValues.value.members), () => typeTemplate.value.code],
+  ([sum]) => {
+    const qtyField = typeFields.value.find(f => f.key === 'qty')
+    if (sum <= 0 || !qtyField?.prefillFromLimit) {
+      return
+    }
+    if (String(typeValues.value.qty ?? '').trim() === String(sum)) {
+      return
+    }
+    typeValues.value = { ...typeValues.value, qty: String(sum) }
+  },
+  { immediate: true },
+)
 
 /**
  * 处理方式一变（或它带的树变了）就**清空**一级 / 二级，避免留下上一棵树里的选择。
@@ -1143,9 +1201,14 @@ function totalQtyOf (members: unknown): number {
 /**
  * 接收团队的数量校验（返回提示文案，空串 = 通过）。
  *
- * 「选择接收团队」的清单摊着全部团队，但提交时**至少要有一个团队填了数量**：
- * 一个都没填就提交，等于"这环把货交给谁"完全没记录，后面查台账也查不到。
- * 选部门（成员没有 qty 字段）不受这条约束 —— 它是一对一交接，不需要数量。
+ * 两条：
+ *   ① 「选择接收团队」的清单摊着全部团队，提交时**至少要有一个团队填了数量** ——
+ *      一个都没填就提交，等于"这环把货交给谁"完全没记录，后面查台账也查不到；
+ *   ② 各团队数量**合计不能超过本环节还能接的数量** —— 摊开填的时候单看每一行都不越界，
+ *      加起来却可能超过剩余（剩余 300，三个团队填 100 + 200 + 200），
+ *      一旦放过，接收台账会把多出来的件数记成"已接收"，后面所有环节的剩余都跟着错。
+ *
+ * 选部门（成员没有 qty 字段）不受这两条约束 —— 它是一对一交接，不需要数量。
  */
 function receiverQtyError (extra: Record<string, unknown>): string {
   const raw = extra.members
@@ -1153,14 +1216,34 @@ function receiverQtyError (extra: Record<string, unknown>): string {
   const list = Array.isArray(raw) ? raw : [raw]
   const hasQty = list.some(m => !!m && typeof m === 'object' && Object.prototype.hasOwnProperty.call(m, 'qty'))
   const valid = list.filter(m => Number(String((m as { qty?: unknown } | null)?.qty ?? '').trim()) > 0)
-  if (valid.length > 0) {
+  if (valid.length === 0) {
+    // 选部门（成员压根没有 qty 字段）不适用这条：一对一交接不需要数量
+    if (!hasQty && list.length > 0) {
+      return ''
+    }
+    return '请至少给一个团队填写接收数量'
+  }
+
+  // 上限口径与数量框一致：剩余优先，没有剩余（老单 / 没关联产品）退回总库存
+  const cap = Number(String(receiveCapText.value).replace(/,/g, ''))
+  if (receiveCapText.value === '' || !Number.isFinite(cap)) {
     return ''
   }
-  // 选部门（成员压根没有 qty 字段）不适用这条：一对一交接不需要数量
-  if (!hasQty && list.length > 0) {
-    return ''
+  const total = totalQtyOf(raw)
+  if (total > cap) {
+    const name = usingRemaining.value ? '剩余接收数量' : '总库存数量'
+    return `各团队接收数量合计 ${total} 件，超过${name}（${cap} 件），请调整后再提交`
   }
-  return '请至少给一个团队填写接收数量'
+  /*
+   * 「部分接收」的语义是"这次接不完"（与数量框的限值同口径：等于上限要走「全部接收」）。
+   * 合计正好把剩余接完时，数量框上那个小于上限的规则管不到它 —— 得在这里补一道，
+   * 否则记录会写成「部分接收 <剩余> 件」，跟「全部接收」自相矛盾。
+   */
+  if (total >= cap && typeTemplate.value.code === 'part_receive') {
+    const name = usingRemaining.value ? '剩余接收数量' : '总库存数量'
+    return `部分接收的合计要小于${name}（${cap} 件），正好接完请选「全部接收」`
+  }
+  return ''
 }
 
 /**
@@ -1271,6 +1354,15 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
   const custom = customLabelOf(result)
   switch (result) {
     case 'receive': {
+      /*
+       * 团队负责人可以改各团队数量：合计没接完剩余时，标签不能还写「全部接收」——
+       * 记录里明明是「全部接收」却只记了几百件，看单据的人只会以为账错了。
+       * 码保持 receive（分支条件照旧走），只把标签降级成「部分接收 X 件」。
+       * 模板自己配了结论文案（custom）时以它为准，不擅自改人写的字。
+       */
+      if (!custom && receiverShortOfCap(extra)) {
+        return `部分接收 ${textOf(extra.qty) || 0} 件`
+      }
       return custom || '全部接收'
     }
     case 'part_receive': {
@@ -1281,7 +1373,8 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
     }
     case 'recycle':
     case 'supplier_recycle':
-    case 'platform_recycle': {
+    case 'platform_recycle':
+    case 'apply_platform_recycle': {
       // 基名从 RECYCLE_RESULTS 取（与码表文案一致，case 已保证能命中）
       return recycleLabel(RECYCLE_RESULTS[result], extra)
     }

@@ -138,8 +138,7 @@
         </div>
       </v-sheet>
       <!-- ==================== 右：审批流程面板 ==================== -->
-      <v-sheet v-if="showDetail" class="mine-detail min-w-0" :class="{ 'mine-detail--fixed': tab === 'history' }"
-        rounded="15">
+      <v-sheet v-if="showDetail" class="mine-detail min-w-0" :class="{ 'mine-detail--fixed': tab === 'history' }">
         <ApprovalDetailView :closable="tab === 'history'" :has-next="hasNextStep" :has-prev="hasPrevStep"
           :index="selectedIndex + 1" :order="selectedOrder" :readonly="tab === 'history'" :total="activeRows.length"
           @close="closeDetail" @next="nextStep" @prev="backStep" @select="handleSelect" @submit="onDrawerSubmit" />

@@ -1,5 +1,5 @@
 import type { ApprovalBranch, ApprovalChain, ApprovalChainItem, ApprovalFlow, ApprovalNodeOption, ApprovalOrder, FlowEndInfo } from '@/types/approval'
-import { APPROVAL_RESULTS, APPROVAL_STATUS, branchTerminalMapOf, CLOSE_FLOW_RESULTS, firstResultValueOf, mainOf, mergeExtraMembers, rebuildChain, sameApprover } from '@/types/approval'
+import { APPROVAL_RESULTS, APPROVAL_STATUS, branchTerminalMapOf, CLOSE_FLOW_RESULTS, firstResultValueOf, mainOf, mergeExtraMembers, RECEIVE_RESULTS, rebuildChain, sameApprover } from '@/types/approval'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 
 /*
@@ -453,15 +453,28 @@ export interface RotationReceipt {
 export function rotationReceiptsOf (chain: ApprovalChainItem[][]): RotationReceipt[] {
   const byGroup = new Map<string, RotationReceipt>()
   for (const step of chain ?? []) {
-    // 轮询环：组名在**成员**的 role.dept 上（不是 department —— 那是解析后的部门名）
-    const group = String((step ?? []).find(m => String(m?.role?.dept ?? '').trim())?.role?.dept ?? '').trim()
-    if (!group) {
-      continue
-    }
     const who = mainOf(step)
     // 还没办（没有结论）：不列 —— 那说明轮询还没走到这一环
     if (!who?.result) {
       continue
+    }
+    // 轮询环：组名在**成员**的 role.dept 上（不是 department —— 那是解析后的部门名）
+    let group = String((step ?? []).find(m => String(m?.role?.dept ?? '').trim())?.role?.dept ?? '').trim()
+    if (!group) {
+      /*
+       * 非轮询环也可能是"某个组接收"：模板把第一棒接收配成**固定环节**（该组负责人办、
+       * 结论是接收类、填数量）时，成员没有 role —— 实测单号 1793692668319：美1组先接
+       * 50 件，之后再轮询美2/美3 组，面板上却只列出后两组。
+       * 这种环节**只有办了接收类结论**才当作组接收：固定审批人也有 department
+       * （他自己的部门），把「通过 / 驳回」也算进来会把普通审批环节误报成组接收。
+       */
+      if (!RECEIVE_RESULTS.includes(String(who.result))) {
+        continue
+      }
+      group = String(who.department ?? '').trim()
+      if (!group) {
+        continue
+      }
     }
     const qty = qtyOf(who.extra?.qty)
     byGroup.set(group, {
