@@ -716,14 +716,20 @@ function startPick(field: TypeField) {
 const qtyMemory = ref<Record<string, string>>({})
 
 /**
- * 这个团队「之前填的数量」——多团队交接时各队数量框的默认值。
+ * 这个团队「之前填的数量」——「选择接收团队」清单里数量框的默认值。
  *
  * 两个来源，按可信度排序：
  *   ① 本次表单里刚填过的（含填完又把这个团队删掉的，见 qtyMemory）；
- *   ② 前面「组间轮询」里**这个团队自己**填过的接收数量（rotationReceipts）。
+ *   ② 前面环节里**这个团队自己**填过的接收数量（rotationReceipts）——
+ *      办理人大概率会沿用之前的分配，直接带出来省得逐个回忆。
  *
  * 都没有就返回空串：宁可空着让人填，也别拿别的团队的数量冒充
  *（一批货分给几个队，数量本来就不该一样）。
+ *
+ * ⚠️ 预填只是**参考值**，合计要一并算进「各团队接收数量合计」（OptionFormRenderer
+ *    清单末尾那行 + receiverQtyError 的校验）：前面接收的量已经从「剩余接收数量」里
+ *    扣过一次，预填原样照抄可能合计超限 —— 清单末尾的剩余是实时跟着变的（剩余 =
+ *    上限 − 合计），超了会有红字，办理人照着调就行。
  */
 function defaultQtyOf (team: string): string {
   const remembered = String(qtyMemory.value[team] ?? '').trim()
@@ -814,7 +820,7 @@ watch(typeValues, value => {
 
 /**
  * 「选择接收团队」现在是**全团队平铺清单**（见 OptionFormRenderer），所以打开表单时要把
- * 「这个团队之前填过的数量」直接带进它那一格（口径见 defaultQtyOf：本表单记忆 → 轮询轮次回填）。
+ * 「这个团队之前填过的数量」直接带进它那一格（口径见 defaultQtyOf：本表单记忆 → 前面环节回填）。
  *
  * 只带一次（靠 seededReceiverKeys 记）：删掉某个团队的数字就是"这次不分给他"，不能被重跑顶回来。
  */

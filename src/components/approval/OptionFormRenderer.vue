@@ -127,7 +127,7 @@
           <span class="field-side">
             已填 <b>{{ chosenCountOf(field.key) }}</b> 个团队 · 合计 <b>{{ totalQtyTextOf(field.key) }}</b> 件
             <template v-if="receiveCapValueOf() !== undefined">
-              · {{ receiveCapNameOf() }} <b>{{ receiveCapValueOf() }}</b> 件
+              · {{ receiveCapNameOf() }} <b>{{ remainingAfterTextOf(field.key) }}</b> 件
             </template>
           </span>
           <span v-if="qtyOverflowTextOf(field.key)" class="field-side field-side--error">
@@ -608,6 +608,24 @@
       return sum + (Number.isFinite(n) ? n : 0)
     }, 0)
     return String(total)
+  }
+
+  /**
+   * 清单末尾的「剩余」：上限 − 各团队已填合计，**跟着填数实时变**。
+   *
+   * 上限（还能接多少）本身不变，变的是"这次分完之后还剩多少" ——
+   * 静态显示上限的话，办理人边填边看不出来还剩多少、也看不出是不是快分完了
+   *（实测反馈：分配各团队数量时剩余一直不动）。
+   * 合计超过上限时按 0 显示：超额本身由下面的红字（qtyOverflowTextOf）点出来，
+   * 剩余格再甩一个负数反而难读。
+   */
+  function remainingAfterTextOf (key: string): string {
+    const cap = receiveCapValueOf()
+    if (cap === undefined) {
+      return ''
+    }
+    const total = Number(totalQtyTextOf(key)) || 0
+    return String(Math.max(0, cap - total))
   }
 
   /** 合计超出上限时的提示（清单末尾红字；空串 = 没超，正常不渲染） */
