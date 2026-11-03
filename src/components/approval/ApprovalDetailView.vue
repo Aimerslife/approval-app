@@ -63,6 +63,12 @@
 
         <GoodsInfo :product="order.expand?.relation" />
 
+        <!--
+          审批结束后，在时间线**上方**给一张归档表（单号 / 发起人与时长 / 各团队接收数量与金额 /
+          剩余 / 结论），右上角可导出 PDF —— 与审批页同一份实现，口径见 utils/approvalSummary。
+        -->
+        <ApprovalSummaryTable v-if="finished" class="mt-2" :order="order" />
+
         <!-- 轮询各团队已接多少（只读；没有轮询环时组件自己不渲染） -->
         <RotationReceipts class="mt-2" :items="rotationReceipts" label="轮询接收情况" />
 
@@ -117,6 +123,8 @@ import { useRouter } from 'vue-router'
 import HandleDock from '@/components/approval/HandleDock.vue'
 // 轮询各团队的接收汇总（与办理面板 / 审批页同一份展示口径）
 import RotationReceipts from '@/components/approval/RotationReceipts.vue'
+// 办结后的「审批信息表」（含导出 PDF）：与审批页同一个组件、同一份数据
+import ApprovalSummaryTable from '@/components/approval/ApprovalSummaryTable.vue'
 import ApprovalNode from '@/components/ApprovalNode.vue'
 // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
 import FlowEndNote from '@/components/FlowEndNote.vue'
@@ -132,6 +140,8 @@ import {
 import { APPROVAL_STAGE_META, approvalStageOf } from '@/utils/approvalFilters'
 // 条件求值上下文（建单快照优先）：算剩余接收数量、取「平台」快照都要用它，与流程引擎同源
 import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
+// 「单子是不是已经审批结束」：与审批页共用同一判据（status + 链路待办）
+import { isOrderFinished } from '@/utils/approvalSummary'
 import {
   discardMarkOf,
   discardMarksOf,
@@ -208,6 +218,9 @@ const chain = computed<ApprovalChainItem[][]>(() => runtime.value?.chain ?? [])
 const stepIds = computed(() => runtime.value?.stepIds ?? [])
 const currentStep = computed(() => runtime.value?.currentStep ?? -1)
 const flowEnd = computed(() => runtime.value?.end)
+
+/** 单据是否已审批结束（决定归档表出不出来）：与审批页共用同一判据 */
+const finished = computed(() => isOrderFinished(props.order))
 
 /**
  * 「组间轮询」里各团队已接多少（只读展示，与办理面板同一个口径）。

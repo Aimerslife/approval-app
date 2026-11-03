@@ -19,11 +19,11 @@
         <div class="d-flex align-center ga-2">
           <template v-if="topTab === 'template'">
             <!-- 导入 / 导出 JSON：用来在环境之间搬模板（文件格式见 utils/templateJson） -->
-            <v-btn class="me-2 text-none" prepend-icon="mdi-file-import-outline" variant="tonal" @click="openImport">
-              导入 JSON
+            <v-btn class="me-2 text-none" prepend-icon="mdi-file-import-outline" variant="tonal" @click="openImport" size="small">
+              <span class="mb-1">导入 JSON</span>
             </v-btn>
-            <v-btn class="me-2 text-none" color="primary" prepend-icon="mdi-plus" variant="flat"
-              @click="createStream">新模板</v-btn>
+            <v-btn class="me-2 text-none" color="primary" prepend-icon="mdi-plus" variant="flat" size="small"
+              @click="createStream"><span class="mb-1">新模板</span></v-btn>
           </template>
 
           <!--

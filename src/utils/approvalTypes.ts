@@ -177,11 +177,13 @@ export const TYPE_CATEGORY: Readonly<Record<string, string>> = {
   reject: '常规',
   not_receive: '常规',
   pending: '常规',
+  enter_approval: '常规',
   receive: '接收类',
   receive_qty: '接收类',
   part_receive: '接收类',
   recycle: '处置类',
   supplier_recycle: '处置类',
+  platform_recycle: '处置类',
   scrap: '处置类',
   rework: '处置类',
   discard: '处置类',
@@ -313,6 +315,13 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
     ],
   },
   supplier_recycle: {
+    fields: [
+      { key: 'qty', label: '回收数量', control: 'number', required: true, unit: '件', integer: true, limit: 'stock_qty' },
+      { key: 'amount', label: '回收金额', control: 'number', required: true, unit: '￥', decimals: 2, limit: 'stock_amount' },
+    ],
+  },
+  // 平台回收：与上面两种回收同一形态（数量 + 金额，上限同样是总库存），只是去向不同
+  platform_recycle: {
     fields: [
       { key: 'qty', label: '回收数量', control: 'number', required: true, unit: '件', integer: true, limit: 'stock_qty' },
       { key: 'amount', label: '回收金额', control: 'number', required: true, unit: '￥', decimals: 2, limit: 'stock_amount' },

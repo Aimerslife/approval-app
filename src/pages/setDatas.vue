@@ -14,7 +14,22 @@
           <v-btn color="#0052D9" size="small" variant="flat" @click="applyFilters">确认</v-btn>
         </div>
       </div>
-      <div class="d-flex align-center gap-1 mr-2">
+      <!--
+        右侧操作区默认收起：开启任务 / 上传附件都不是高频动作，常显会把这条筛选栏挤成两行，
+        白吃掉一截表格高度。点这个箭头才在下面展开一行，再点一次收回。
+      -->
+      <div class="d-flex align-center flex-shrink-0">
+        <v-btn :color="actionsOpen ? '#0052D9' : undefined" density="comfortable" size="small"
+          :icon="actionsOpen ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+          :title="actionsOpen ? '收起操作' : '更多操作（开启任务 / 上传附件）'" variant="text"
+          @click="actionsOpen = !actionsOpen" />
+      </div>
+
+      <div v-if="actionsOpen" class="actions-row d-flex flex-wrap align-center justify-end ga-2">
+        <!-- 开启任务（勾选数据行 → 建审批单）：与数据页（pages/workStream）共用同一套逻辑与组件，
+             判断与建单都在 composables/useTaskStarter 里 -->
+        <TaskStartBar :starter="taskStarter" />
+
         <v-file-input ref="fileInputRef" v-model="attachment" accept=".xlsx,.xls,.csv" class="attachment-input"
           density="compact" :disabled="!canUpload" hide-input @update:model-value="onFileChange">
           <template #prepend>
@@ -204,10 +219,11 @@
       </div>
     </div>
 
-    <v-data-table-server v-model:items-per-page="itemsPerPage" v-model:page="page" :headers="headers" :items="rows"
+    <v-data-table-server v-model="selectedIds" v-model:items-per-page="itemsPerPage" v-model:page="page"
+      :headers="tableHeaders" :item-selectable="isRowSelectable" :items="rows"
       :items-length="totalItems" hover :items-per-page-options="[20, 50, 100, 200]" density="compact"
       items-per-page-text="每页条数" fixed-header :loading="loading" fixed-footer :height="tableHeight" class="text-[12px]"
-      :no-data-text="noDataText" striped="odd" @update:options="onTableOptions">
+      :no-data-text="noDataText" show-select striped="odd" @update:options="onTableOptions">
       <template #item.图片链接="{ value }">
         <v-img v-if="value" class="rounded mx-auto" cover height="48" :src="String(value)" width="48" />
 
@@ -224,6 +240,17 @@
       <template #item.是否属于灯具="{ value }">
         <v-chip :color="value == '是' ? 'primary' : 'success'" size="x-small">
           <span>{{ value == '是' ? '灯具' : '非灯具' }}</span></v-chip>
+      </template>
+
+      <!--
+        任务状态：一行数据只对应一张单 —— 有单的行显示状态，且勾选框是灰的（见 isRowSelectable）。
+        「进行中」但实际办不下去（流程卡住 / 该环节没有审批人）时补警示图标，悬浮提示给出原因。
+      -->
+      <template #item.__task_status__="{ item }">
+        <v-chip v-bind="taskChip(item.id)" class="text-[11px]" size="x-small">
+          {{ taskOf(item.id).text }}
+          <v-icon v-if="taskOf(item.id).alert" class="ml-1" size="12">mdi-alert-circle-outline</v-icon>
+        </v-chip>
       </template>
     </v-data-table-server>
     <!-- 列设置：显示哪些字段 + 拖动调顺序。
@@ -271,6 +298,10 @@ import {
   purgeBiData, type PurgeSummary, type SnapshotSyncSummary, syncBiSnapshots, uploadBiRows,
 } from '@/api/api'
 import { isEditorFullscreen } from '@/composables/useEditorFullscreen'
+// 「勾选数据行 → 开启任务」的全部逻辑（任务状态 / 闸门 / 模板解析 / 建单 / 执行记录）都在这里，
+// 与「数据页」（pages/workStream）共用同一份实现
+import { useTaskStarter } from '@/composables/useTaskStarter'
+import TaskStartBar from '@/components/task/TaskStartBar.vue'
 import { useUserStore } from '@/stores/user'
 import { canAct } from '@/utils/permissions'
 // 与服务端**同一个**唯一键实现，用来预告「这份文件入库后是多少行」
@@ -291,6 +322,14 @@ const fullSceen = ref(false)
 
 /** 当前页的行。已是「中文 key 的视图对象」，并做过千分位格式化 */
 const rows = ref<Record<string, unknown>[]>([])
+/**
+ * `id → 未格式化的原始行`。
+ *
+ * 表格行被 formatDatas 做过千分位格式化（数字 → "1,234"），而建单时要用**原始值**：
+ * 分支条件按业务数据选路，`Number("1,234")` 是 NaN，所有数值条件都会判 false
+ * （见 utils/approvalFlow 的 toFlowContext）。
+ */
+const rawRows = ref<Record<string, Record<string, unknown>>>({})
 /** 满足当前筛选条件的总行数（PB 返回，分页器用它） */
 const totalItems = ref(0)
 /** 本次读取完成的时间 */
@@ -320,6 +359,15 @@ const pendingRows = ref<Record<string, unknown>[]>([])
 const uploading = ref(false)
 const attachment = ref<File | null>(null)
 const fileInputRef = ref<{ click: () => void } | null>(null)
+
+/**
+ * 筛选栏右侧「开启任务 / 上传附件」是否展开。
+ *
+ * 默认收起：这两块常显会把整条筛选栏撑成两行（筛选控件本身已经会换行），
+ * 白白吃掉表格高度。收起后右侧只留一个「更多操作」图标，点开才在下面展开一行。
+ * 不持久化 —— 每个进来的人应该看到干净的筛选栏。
+ */
+const actionsOpen = ref(false)
 
 /**
  * 选中 Excel → **只解析**，不写库、也不切换表格数据。
@@ -545,6 +593,7 @@ async function doPurge() {
     showMsg(`已清空 ${touched} 个集合，共删除 ${res.totalDeleted} 条记录`, 'success')
     // 清完把表格置空：否则页面上还列着已经不存在的行
     rows.value = []
+    rawRows.value = {}
     totalItems.value = 0
   } catch (error) {
     console.error('[setDatas] 清空失败:', error)
@@ -815,8 +864,11 @@ onBeforeUnmount(() => {
 onMounted(() => document.body.classList.add('data-table-page'))
 onBeforeUnmount(() => document.body.classList.remove('data-table-page'))
 
-const headers = computed(() =>
-  visibleFields.value.map(({ title, key, sortable, fixed }) => {
+/** 「任务状态」列的 key（不在 PRODUCT_FIELDS 里，是表格另外关联算出来的，见 useTaskStarter） */
+const TASK_STATUS_KEY = '__task_status__'
+
+const headers = computed(() => [
+  ...visibleFields.value.map(({ title, key, sortable, fixed }) => {
     const w = widthOf(key)
     // 只有「用户调过宽度」的列才给 width，没调过的只给 minWidth（原因见上方注释）
     const resized = colLayout.value.some(i => i.field === key && typeof i.width === 'number')
@@ -826,12 +878,51 @@ const headers = computed(() =>
       sortable: sortable ?? false,
       align: 'center' as const,
       fixed,
-      ...(resized ? { width: w, minWidth: w } : { minWidth: w }),
+      ...(resized || fixed ? { width: w, minWidth: w } : { minWidth: w }),
     }
   }),
-)
+  // 任务状态：永远排在最后、固定在右侧（Vuetify 的 fixed: 'end' 自带 sticky / 背景 / 左分隔线）
+  {
+    title: '任务状态',
+    key: TASK_STATUS_KEY,
+    sortable: false,
+    align: 'center' as const,
+    fixed: 'end' as const,
+    width: 100,
+    minWidth: 100,
+  },
+])
+
+/**
+ * 左侧「复选框 + 产品图片」两列要**一起**钉住。
+ *
+ * 复选框列本由 Vuetify 为 `show-select` 内部 `unshift` 进来，**不带 fixed** ——
+ * 而「产品图片」列是 fixed: true（fixedOffset 从 0 起算），横向滚动时图片会滑到复选框上面。
+ * 这里自己声明同一 key（`data-table-select`）并 `fixed: 'start'`：Vuetify 见到该 key 就不再注入
+ * 自己那份（见 createHeaders 里 `keys.has('data-table-select')`），两列偏移按 48 + 图片宽依次累加。
+ * 同时「多列固定」要求每列都有静态宽度，所以这里必须给死 width。
+ */
+const SELECT_HEADER = {
+  title: '',
+  key: 'data-table-select',
+  sortable: false,
+  width: 48,
+  minWidth: 48,
+  fixed: 'start' as const,
+}
+
+/**
+ * 表格实际用的表头 = 复选框列 + 字段列。
+ *
+ * ⚠️ 不能把它并进 `headers`：列宽拖拽靠 th 下标减 LEADING_COLUMNS 映射回字段列，
+ * 多一列会让映射整体错位一格（拖 A 列却改了 B 列的宽度）。
+ */
+const tableHeaders = computed(() => [SELECT_HEADER, ...headers.value])
 
 // —— 拖拽 ——
+
+/** 表头行里「字段列」前面还有几列（只有复选框列） */
+const LEADING_COLUMNS = 1
 
 /** 正在拖的列（null = 没在拖） */
 let resizing: { key: string, startX: number, startWidth: number } | null = null
@@ -840,10 +931,10 @@ function resizeTargetOf(e: { target: EventTarget | null, offsetX: number }) {
   const th = (e.target as HTMLElement | null)?.closest?.('th')
   if (!th) return null
   if (th.clientWidth - e.offsetX > RESIZE_ZONE) return null
-  // th 在表头行里的序号就是 headers 的序号（这个表没有多选框列 / 展开列）
+  // th 序号减掉前面的复选框列，才是 headers（字段列 + 任务状态列）的序号
   const row = th.parentElement
-  const index = row ? Array.from(row.children).indexOf(th) : -1
-  const header = headers.value[index]
+  const index = (row ? Array.from(row.children).indexOf(th) : -1) - LEADING_COLUMNS
+  const header = index >= 0 ? headers.value[index] : undefined
   if (!header) return null
   return { key: String(header.key), width: th.clientWidth }
 }
@@ -916,7 +1007,7 @@ const SELECT_CONFIGS: { key: FilterKey, field: string, mode: 'eq' | 'includes' }
   // { key: 'model', field: '主MODEL', mode: 'eq' },
   { key: 'manager', field: '组长', mode: 'eq' },
   { key: 'department', field: '部门', mode: 'eq' },
-  { key: 'remain', field: '是否属于待评估库存', mode: 'eq' },
+  { key: 'remain', field: '评估状态', mode: 'eq' },
   { key: 'category1', field: '一级品类', mode: 'eq' },
   { key: 'category2', field: '二级品类', mode: 'eq' },
   // { key: 'lamp', field: '是否属于灯具', mode: 'eq' },
@@ -989,11 +1080,18 @@ async function loadPage(force = false) {
   try {
     const res = await fetchBiRows(query)
     rows.value = res.rows.map(formatDatas)
+    // 原始行留一份（见 rawRows 的说明）：建单时用它算条件、算唯一键，不能用被格式化过的值
+    rawRows.value = Object.fromEntries(
+      (res.rows as unknown as Record<string, unknown>[]).map(r => [String(r.id ?? ''), r]),
+    )
     totalItems.value = res.totalItems
     fetchedAt.value = new Date().toLocaleString('zh-CN')
+    // 任务状态是另外关联查出来的（approval_chain），不阻塞表格渲染
+    void loadTaskStatus(res.rows as unknown as Record<string, unknown>[])
   } catch (error) {
     console.error('[setDatas] 从 PB 读取失败:', error)
     rows.value = []
+    rawRows.value = {}
     totalItems.value = 0
     const raw = error instanceof Error ? error.message : String(error)
     // 「连接被中断」这类错误原本只显示 Failed to fetch，看不出所以然。
@@ -1176,6 +1274,35 @@ function showMsg(text: string, color: 'success' | 'error' | 'warning' = 'success
   snackbar.value = { show: true, text, color }
 }
 
+/*
+ * 「勾选数据行 → 开启任务」的实例。
+ *
+ * 逻辑全在 composables/useTaskStarter：任务状态（表格列 + 勾选闸门）、模板按行解析
+ * （模板名 = 该行的「团队」+「模板」）、建单前的空跑拦截、批量进度、本机执行记录 ——
+ * 与「数据页」（pages/workStream）共用同一份，建单口径要改只改那一处。
+ */
+const taskStarter = useTaskStarter({
+  rows,
+  rawRows,
+  showMsg,
+  // 两个页面各存各的执行记录，互不覆盖
+  runsKey: 'approval.setDatas.taskRuns',
+  logTag: '[setDatas]',
+})
+const { taskOf, taskChip, isRowSelectable, loadTaskStatus } = taskStarter
+
+/**
+ * 勾选的行 id。
+ *
+ * 为什么用 computed 中转、而不是直接从 taskStarter 解构那个 ref：
+ * 表格的 `v-model` 会**写回来**（勾选 / 取消 / 全选），这里给一个明确的 setter，
+ * 写入一定落到 composable 里那一份 ref 上；建完单后它清空勾选，表格也会跟着刷新。
+ */
+const selectedIds = computed<string[]>({
+  get: () => taskStarter.selectedIds.value,
+  set: value => { taskStarter.selectedIds.value = value },
+})
+
 /**
  * 「上传到数据库」—— **唯一会改库的入口**。
  *
@@ -1235,6 +1362,12 @@ async function uploadDatas() {
 onMounted(() => reload())
 </script>
 <style scoped lang="scss">
+/* —— 筛选栏右侧操作区（默认收起，点「更多操作」才展开）—— */
+/* v-sheet 是 flex-wrap，给 100% 的 basis 才能稳定落到下面一整行 */
+.actions-row {
+  flex-basis: 100%;
+}
+
 /* —— 列设置面板 —— */
 .col-item {
   display: flex;

@@ -107,8 +107,6 @@
           />
 
           <v-divider class="mt-3" />
-          <v-progress-linear v-if="loading" class="mt-2" color="primary" height="2" indeterminate />
-
           <v-data-table
             v-model:page="page"
             border

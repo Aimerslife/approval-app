@@ -66,10 +66,12 @@
             :active-edge-id="selectedEdgeId"
             :branches="outBranches(id)"
             :data="data"
+            movable
             :selected="selected"
             @add-member="addLeaderTo(id)"
             @add-role="addRoleMemberTo(id)"
             @branch-click="selectBranch"
+            @branch-move="moveBranch"
             @remove="removeNodeById(id)"
           />
         </template>
@@ -585,6 +587,37 @@
   function selectBranch (edgeId: string) {
     selectedEdgeId.value = edgeId
     selectedNodeId.value = null
+  }
+
+  /**
+   * 卡片内「审批结果分支」上移 / 下移一位（delta = -1 / +1）。
+   *
+   * 与主画布同一口径（见 pages/createStream 的 moveBranch）：只重排**同一个节点**
+   * 那几条出线在数组里的相对位置 —— 编译按数组顺序铺 branches，办理端的选项也按这个顺序摆，
+   * 所以挪数组就是挪办理人看到的顺序。卡片内部图写回 `graph.edges` 由下面的
+   * `watch([nodes, edges], …)` 负责，随画布快照一起落库。
+   */
+  function moveBranch (edgeId: string, delta: number) {
+    const list = edges.value
+    const idx = list.findIndex(e => e.id === edgeId)
+    if (idx < 0) {
+      return
+    }
+    const { source } = list[idx]
+    const siblings = list.reduce<number[]>((acc, e, i) => {
+      if (e.source === source) {
+        acc.push(i)
+      }
+      return acc
+    }, [])
+    const to = siblings[siblings.indexOf(idx) + delta]
+    if (to === undefined) {
+      return
+    }
+    const next = [...list]
+    next[idx] = list[to]
+    next[to] = list[idx]
+    edges.value = next
   }
 
   /** 点空白处：两个面板都收起来 */

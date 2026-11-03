@@ -65,6 +65,13 @@
       <v-col ref="leftColRef" class="relative" cols="4">
         <!-- 底部留白跟固定办理面板的实测高度走（展开时面板变高，留白同步增加） -->
         <v-container class="pb-10" :style="{ paddingBottom: timelinePaddingBottom }">
+          <!--
+            审批结束后，在时间线**上方**给一张归档用的信息表（单号 / 发起人与时长 /
+            各团队接收数量与金额 / 剩余 / 结论），右上角可导出 PDF。
+            还在流转时不出现：那时这些数只是"到目前为止"，容易被人当成最终结果。
+          -->
+          <ApprovalSummaryTable v-if="orderFinished" class="mb-3" :order="orderDatas" />
+
           <!-- 轮询各团队已接多少（只读；没有轮询环时组件自己不渲染） -->
           <RotationReceipts class="mb-3" :items="rotationReceipts" label="轮询接收情况" />
 
@@ -203,6 +210,8 @@
   import HandleDock from '@/components/approval/HandleDock.vue'
   // 轮询各团队的接收汇总（与办理面板 / 首页详情同一份展示口径）
   import RotationReceipts from '@/components/approval/RotationReceipts.vue'
+  // 办结后时间线上方的「审批信息表」（含导出 PDF）：口径见 utils/approvalSummary
+  import ApprovalSummaryTable from '@/components/approval/ApprovalSummaryTable.vue'
   import ApprovalNode from '@/components/ApprovalNode.vue'
   // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
   import FlowEndNote from '@/components/FlowEndNote.vue'
@@ -233,6 +242,8 @@
     runtimeOf,
     stepStartTimesOf,
   } from '@/utils/approvalRuntime'
+  // 「单子是不是已经审批结束」：详情抽屉与这里共用同一判据（status + 链路待办）
+  import { isOrderFinished } from '@/utils/approvalSummary'
   // 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口，别自己读 record.data）
   import { toProductView } from '@/utils/biRowFields'
   import { getApprovalOrder, getApprovalOrderByNo, updateApprovalOrder } from '@/utils/collection'
@@ -432,6 +443,13 @@
 
   /** 单据是否还在流转：决定「当前审批人」那一栏显示谁，也决定队列按谁锚定（见 queueAnchor） */
   const orderPending = computed(() => Number(orderDatas.value?.status ?? APPROVAL_STATUS.PENDING) === APPROVAL_STATUS.PENDING)
+
+  /**
+   * 单据是否**审批结束**（决定时间线上方那张归档表出不出来）。
+   * 判据交给 utils/approvalSummary 的 isOrderFinished：status 之外还要看链路有没有待办，
+   * 历史脏数据里出现过 status 没跟上、其实早就办完的单。
+   */
+  const orderFinished = computed(() => isOrderFinished(orderDatas.value))
 
   /** 最后一条已办是谁办的（办结单用它回答"这张单最后谁经手"）—— 与表格「审批结论」列同一口径 */
   const lastHandler = computed(() => lastHandledOf(runtime.value.chain))

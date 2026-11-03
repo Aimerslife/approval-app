@@ -22,15 +22,33 @@
 
         <!-- 审批结果分支列表：该审批有第二条出线后出现，点击某条分支联动配置面板 -->
         <div v-if="!isNotify && branches && branches.length > 1" class="branch-list">
-            <button v-for="b in branches" :key="b.id" class="branch-item nodrag"
-                :class="{ active: b.id === activeEdgeId }" title="点击配置此结果分支" type="button"
-                @click.stop="emit('branch-click', b.id)">
-                <span class="branch-dot" />
-                <span class="branch-name">{{ b.label || '未命名分支' }}</span>
-                <span v-if="b.toEnd" class="branch-end-tag" title="此分支直接连到结束节点：命中该分支时流程立即结束">→ 结束</span>
-                <v-icon v-if="b.id === activeEdgeId" class="branch-edit-ico" color="#2563eb"
-                    size="11">mdi-pencil</v-icon>
-            </button>
+            <div v-for="(b, i) in branches" :key="b.id" class="branch-row">
+                <button class="branch-item nodrag" :class="{ active: b.id === activeEdgeId }" title="点击配置此结果分支"
+                    type="button" @click.stop="emit('branch-click', b.id)">
+                    <span class="branch-dot" />
+                    <span class="branch-name">{{ b.label || '未命名分支' }}</span>
+                    <span v-if="b.toEnd" class="branch-end-tag" title="此分支直接连到结束节点：命中该分支时流程立即结束">→ 结束</span>
+                    <v-icon v-if="b.id === activeEdgeId" class="branch-edit-ico" color="#2563eb"
+                        size="11">mdi-pencil</v-icon>
+                </button>
+
+                <!--
+                  上下移：顺序**就是数据**（编译按出线数组的先后铺 branches，
+                  办理端的选项也按这个顺序摆），所以这里不做"只改显示"的假排序。
+                  只在编辑器里给（FlowPreview 不传 movable），预览态不出现这些按钮。
+                -->
+                <div v-if="movable" class="branch-move nodrag">
+                    <button class="move-btn" :disabled="i === 0" title="上移：办理端选项按这个顺序摆（主线永远是兜底，挪动不改变走哪条线）"
+                        type="button" @click.stop="emit('branch-move', b.id, -1)">
+                        <v-icon size="12">mdi-chevron-up</v-icon>
+                    </button>
+
+                    <button class="move-btn" :disabled="i === branches.length - 1" title="下移：办理端选项按这个顺序摆"
+                        type="button" @click.stop="emit('branch-move', b.id, 1)">
+                        <v-icon size="12">mdi-chevron-down</v-icon>
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="node-body">
@@ -130,6 +148,14 @@ const props = defineProps<{
      * 复制出来的那份以后每改一处交互都得同步，迟早漂。
      */
     kind?: 'approval' | 'notify'
+    /**
+     * 分支列表是否给「上移 / 下移」。
+     *
+     * 只读预览（FlowPreview）不传 —— 那里没有可写的数据，按钮点了也没意义；
+     * 编辑器（createStream / LoopCardCanvas）传 true，并把 `branch-move` 接到
+     * "重排出线数组"上（顺序即数据，见事件说明）。
+     */
+    movable?: boolean
 }>()
 
 /** 是不是「飞书提醒」节点 */
@@ -152,6 +178,14 @@ const emit = defineEmits<{
     'remove': []
     /** 点击某条结果分支名，请求父级选中该连线 */
     'branch-click': [edgeId: string]
+    /**
+     * 请求把某条结果分支上移 / 下移一位（delta = -1 / +1）。
+     *
+     * 父级要**真的改数据顺序**：编译按出线数组的先后生成 `branches`，
+     * 办理端的选项（collectStepOptionItems）也按这个顺序摆 —— 所以挪数组就是挪一切，
+     * 不需要另存一份"显示顺序"。
+     */
+    'branch-move': [edgeId: string, delta: number]
 }>()
 
 const EMPTY_ROLE: ApprovalRole = { kind: 'dept_leader', deptFrom: '' }
@@ -361,10 +395,19 @@ input.member-dept:focus {
     border-top: 1px solid var(--flow-border);
 }
 
+/* 一行分支 = 分支按钮（占满剩余宽度）+ 上下移按钮 */
+.branch-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
 .branch-item {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 1;
+    min-width: 0;
     width: 100%;
     padding: 3px 6px;
     border: none;
@@ -394,6 +437,48 @@ input.member-dept:focus {
 .branch-edit-ico {
     margin-left: auto;
     flex: none;
+}
+
+/*
+ * 上下移按钮：竖排两个箭头，平时压得很淡（分支名才是主体），hover 卡片时才明显；
+ * 到头的那个置灰不可点（不隐藏 —— 隐藏会让按钮位置左右跳）。
+ */
+.branch-move {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    gap: 1px;
+}
+
+.move-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 10px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--flow-text-muted);
+    opacity: 0.55;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.node-card:hover .move-btn,
+.move-btn:hover:not(:disabled) {
+    opacity: 1;
+}
+
+.move-btn:hover:not(:disabled) {
+    background: var(--flow-blue-soft);
+    color: #2563eb;
+}
+
+.move-btn:disabled {
+    opacity: 0.18;
+    cursor: default;
 }
 
 .branch-dot {

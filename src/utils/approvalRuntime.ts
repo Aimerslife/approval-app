@@ -603,8 +603,9 @@ function discardFlags (
  * 为什么不直接用 utils/approvalTypes 里那组「处置类」：
  *   · 那组里有 `rework`（**返工**）—— 它与弃置是**并列**的两条线（真实模板就是
  *     「建议返工 / 建议弃置」两分支），算进来会把返工那条线也标成弃置；
- *   · `scrap`（报废清仓）、`supplier_recycle`（供应商回收）、`recycle` 出现在弃置段
- *     **内部**，当成入口会在段内又找一个"起点"，段首标志跟着跑到中间去。
+ *   · `scrap`（报废清仓）、`recycle` / `supplier_recycle` / `platform_recycle`
+ *     （三种回收：自己回收 / 供应商回收 / 平台回收）出现在弃置段**内部**，
+ *     当成入口会在段内又找一个"起点"，段首标志跟着跑到中间去。
  * 所以只列弃置流程**本身的入口**：`discard`（建议弃置）+ `lack_demand`（无需求走弃置）。
  */
 const DISCARD_ENTRY_RESULTS = ['discard', 'lack_demand']

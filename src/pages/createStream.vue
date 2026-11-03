@@ -531,9 +531,9 @@
 
               <template #node-approval="{ id, data, selected }">
                 <div class="node-shell">
-                  <ApprovalNode :active-edge-id="selectedEdge?.id" :branches="outBranches(id)" :data="data"
+                  <ApprovalNode :active-edge-id="selectedEdge?.id" :branches="outBranches(id)" :data="data" movable
                     :selected="selected" @add-member="addMemberTo(id)" @add-role="addRoleMemberTo(id)"
-                    @branch-click="selectBranch" @remove="removeNodeById(id)" />
+                    @branch-click="selectBranch" @branch-move="moveBranch" @remove="removeNodeById(id)" />
 
                   <div v-if="nodeErrorOf(id)" class="node-error" :title="nodeErrorOf(id)">
                     <v-icon size="12">mdi-alert-circle-outline</v-icon>
@@ -1676,6 +1676,38 @@ function selectBranch(edgeId: string) {
   if (!edge) return
   onEdgeClick({ edge })
   addSelectedEdges([edge])
+}
+
+/**
+ * 卡片内「审批结果分支」上移 / 下移一位（delta = -1 / +1）。
+ *
+ * 只重排 `edges` 数组里**同一个节点**这几条出线的相对位置，别的连线原封不动：
+ *   · 编译（utils/approvalFlow）按出线数组的先后铺 `branches`，
+ *     办理端的选项（types/approval 的 collectStepOptionItems）又按分支顺序摆 ——
+ *     所以挪数组 = 挪办理人看到的顺序，不需要另存一份"显示顺序"；
+ *   · 选路不受影响：`matchBranch` 把无条件主线只当兜底（记 fallback，不抢先命中），
+ *     挪动它只会改变它在下拉里排第几。真正会变的是**多条条件同时命中时谁优先**
+ *     —— 那是从左到右取第一个命中，正是用户想调的那件事。
+ *
+ * 撤销栈由 `watch([nodes, edges], …)` 统一记录（整数组替换也是一次变化）。
+ */
+function moveBranch(edgeId: string, delta: number) {
+  const list = edges.value
+  const idx = list.findIndex(e => e.id === edgeId)
+  if (idx < 0) return
+  const { source } = list[idx]
+  // 同一节点的出线在数组里的下标（升序 = 卡片上从上到下的展示顺序）
+  const siblings = list.reduce<number[]>((acc, e, i) => {
+    if (e.source === source) acc.push(i)
+    return acc
+  }, [])
+  const to = siblings[siblings.indexOf(idx) + delta]
+  if (to === undefined) return
+  // 只交换位置、不换对象：selectedEdge 等按引用持有的状态不受影响
+  const next = [...list]
+  next[idx] = list[to]
+  next[to] = list[idx]
+  edges.value = next
 }
 
 /**

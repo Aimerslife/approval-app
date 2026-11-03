@@ -471,7 +471,10 @@ function radioColorOf(result: string): string {
   if (result === 'reject' || result === 'discard' || result === 'scrap') {
     return 'error'
   }
-  return result === 'pass' || result === 'receive' || result === RECEIVE_QTY_RESULT ? 'success' : 'primary'
+  // 推进类结论（通过 / 接收 / 进入审批）用成功色：这一环是"继续往下走"，不是处置或异常
+  return result === 'pass' || result === 'receive' || result === RECEIVE_QTY_RESULT || result === 'enter_approval'
+    ? 'success'
+    : 'primary'
 }
 
 /** 当前选中的**键** —— v-model 绑它，才分得清同码的多个选项 */
@@ -854,11 +857,25 @@ watch(
 )
 
 /**
+ * 回收类结论（结论码 → 结论文案的基名）：三种回收**同一办理形态**
+ * （都要填回收数量 + 回收金额，见 utils/approvalTypes 的 BUILTIN），
+ * 但业务上要分别统计去向，所以各占一个码。
+ *
+ * 新增一种回收去向时**只改这张表**：needRecycle（数量/金额字段、库存旁注）
+ * 与结论文案（resultLabelOf）都从这里取，别在两处各写一遍。
+ */
+const RECYCLE_RESULTS: Readonly<Record<string, string>> = {
+  recycle: '回收',
+  supplier_recycle: '供应商回收',
+  platform_recycle: '平台回收',
+}
+
+/**
  * 「回收」类结论：额外把"这批货总共多少"摆出来当旁注。
  * 只是提示，不参与校验（上限由模板字段的 `limit` 管）。
  */
 const needRecycle = computed(
-  () => selectedResult.value === 'recycle' || selectedResult.value === 'supplier_recycle',
+  () => RECYCLE_RESULTS[selectedResult.value] !== undefined,
 )
 
 /** 表单值的文本形态（undefined / null 一律空串：别把 "undefined 件" 写进标签） */
@@ -1263,8 +1280,10 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
       return `接收 ${textOf(extra.qty) || 0} 件`
     }
     case 'recycle':
-    case 'supplier_recycle': {
-      return recycleLabel(result === 'recycle' ? '回收' : '供应商回收', extra)
+    case 'supplier_recycle':
+    case 'platform_recycle': {
+      // 基名从 RECYCLE_RESULTS 取（与码表文案一致，case 已保证能命中）
+      return recycleLabel(RECYCLE_RESULTS[result], extra)
     }
     case 'scrap': {
       // 选中即确认：结论本身就是"确认清仓"这个动作（固定值见模板的 fixedValues）

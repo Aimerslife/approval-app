@@ -592,20 +592,31 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: RECEIVE_QTY_RESULT, label: '接收' },
   { value: 'recycle', label: '回收' },
   /*
-   * 「供应商回收」：与「回收」同一类处置结论（办理时同样填**回收数量 + 回收金额**，
-   * 见 components/ApprovalNode.vue 的 needRecycle / supplier_recycle 分支），
-   * 但业务上要能与"自己回收"分开统计，所以**单独一个码**，不要复用 recycle。
+   * 「供应商回收」「平台回收」：与「回收」同一类处置结论（办理时同样填**回收数量 + 回收金额**，
+   * 见 components/approval/ApprovalHandleForm.vue 的 needRecycle / resultLabelOf），
+   * 但业务上要能与"自己回收"分开统计，所以**各占一个码**，不要复用 recycle。
    *
-   * ⚠️ 因此它也**不算接收**（不在 RECEIVE_RESULTS）—— 写法与 recycle 一致，
+   * ⚠️ 因此它们也**不算接收**（不在 RECEIVE_RESULTS）—— 写法与 recycle 一致，
    *    `extra.qty` 是回收数量，混进「已接收数量」会把其余组还能接多少算错。
    */
   { value: 'supplier_recycle', label: '供应商回收' },
+  // 平台回收：走电商平台（清货 / 回收渠道）处置，与供应商回收并列的另一种回收去向
+  { value: 'platform_recycle', label: '平台回收' },
   { value: 'scrap', label: '报废清仓' },
   { value: 'rework', label: '建议返工' },
   { value: 'discard', label: '建议弃置' },
   { value: 'lack_demand', label: '市场需求不足' },
   { value: 'other_reason', label: '其他原因' },
   { value: 'pending', label: '待定' },
+  /*
+   * 「进入审批」：把"这一环办完，交给后面的审批环节"这件事显式写成结论。
+   *
+   * 与 `pass` 的区别只在**语义**：`pass` 是"本环节同意"，而它是流程**推进**动作
+   * （常见于核对 / 补充资料那一环的出线）。因此它**不需要额外字段**（只填备注与附件）、
+   * 不终结流程（不在 CLOSE_FLOW_RESULTS）、不算驳回、也不算接收（不在 RECEIVE_RESULTS）——
+   * 引擎只看结论命中哪条分支，所以不配这些名单就等于"正常往前走"。
+   */
+  { value: 'enter_approval', label: '进入审批' },
   // 「选择接收团队」：办理人当场指定由哪个团队接下这批货（命中即终结流程，
   // 接收方是**结果**、不是下一环的审批人 —— 见 PICK_MEMBERS_RESULT 的说明）。
   // 配套的是「允许没有审批人的环节」—— 模板里把接收环节留空，由上一环指定。
