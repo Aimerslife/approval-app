@@ -188,6 +188,7 @@ export const TYPE_CATEGORY: Readonly<Record<string, string>> = {
   scrap: '处置类',
   rework: '处置类',
   discard: '处置类',
+  dispose: '处置类',
   lack_demand: '处置类',
   other_reason: '原因类',
   pick_members: '选接收方',
@@ -340,6 +341,12 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
     fields: [],
     fixedValues: { confirmed: true },
     note: '选中即视为已确认清仓，不需要再点确认',
+  },
+  // 弃置：与「报废清仓」同一办理形态 —— 审批人当场拍板，选中即确认，不填数量 / 金额
+  dispose: {
+    fields: [],
+    fixedValues: { confirmed: true },
+    note: '选中即视为确认弃置，不需要再点确认',
   },
   /*
    * 其他原因：原因（分组）→ 开发类才出二级原因（组件 195-221 / 1396-1406）。

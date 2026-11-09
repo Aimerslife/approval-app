@@ -613,6 +613,14 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: 'scrap', label: '报废清仓' },
   { value: 'rework', label: '建议返工' },
   { value: 'discard', label: '建议弃置' },
+  /*
+   * 「弃置」：**直接执行**的弃置处置（办理形态与「报废清仓」同款 —— 选中即确认，
+   * 不填数量 / 金额）。它与「建议弃置」（discard）的区别在语气：
+   * discard 是"建议走弃置"，后面还接弃置确认段（见 DISCARD_ENTRY_RESULTS 的弃置段标注）；
+   * 本码是审批人当场拍板，不进弃置段入口名单、不在 CLOSE_FLOW_RESULTS
+   *（流程是否结束由模板分支决定，与 scrap 同款）、也不算接收（不在 RECEIVE_RESULTS）。
+   */
+  { value: 'dispose', label: '弃置' },
   { value: 'lack_demand', label: '市场需求不足' },
   { value: 'other_reason', label: '其他原因' },
   { value: 'pending', label: '待定' },

@@ -468,7 +468,7 @@ const RADIO_MAX = 6
 const useOptionRadios = computed(() => selectItems.value.length <= RADIO_MAX)
 
 function radioColorOf(result: string): string {
-  if (result === 'reject' || result === 'discard' || result === 'scrap') {
+  if (result === 'reject' || result === 'discard' || result === 'scrap' || result === 'dispose') {
     return 'error'
   }
   // 推进类结论（通过 / 接收 / 进入审批）用成功色：这一环是"继续往下走"，不是处置或异常
@@ -1433,6 +1433,10 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
     }
     case 'discard': {
       return custom || '建议弃置'
+    }
+    case 'dispose': {
+      // 弃置：当场拍板的处置（fixedValues 带 confirmed，见 utils/approvalTypes 的 BUILTIN）
+      return custom || '弃置'
     }
     case 'other_reason': {
       return textOf(extra.reason) || labelOf(result)
