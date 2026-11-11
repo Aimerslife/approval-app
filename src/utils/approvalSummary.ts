@@ -1,4 +1,4 @@
-import type { ApprovalOrder } from '@/types/approval'
+import type { ApprovalChainItem, ApprovalOrder } from '@/types/approval'
 import { APPROVAL_RESULTS, APPROVAL_STATUS, mainOf, receivedQuantities } from '@/types/approval'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 // 单据 → 表格行：「审批人 / 状态 / 审批时长 / 最后结论」的口径**只此一份**
@@ -93,18 +93,8 @@ export function isOrderFinished (order?: ApprovalOrder | null): boolean {
  * @param creatorName 发起人姓名。单上只存了 `creator`（users 记录 id），姓名由调用方给
  *                    （能 expand 到就用展开值，否则用登录者姓名兜底，见 components/approval/ApprovalSummaryTable）
  */
-export function buildApprovalSummary (order: ApprovalOrder, creatorName = ''): ApprovalSummary {
-  // 口径与表格列完全一致（状态、审批人、审批时长、最后结论）
-  const row = toApprovalRow(order)
-  const rt = runtimeOf(order)
-  const ctx = flowContextOfOrder(order)
-  const product = toProductView(order.expand?.relation)
-  const startTimes = stepStartTimesOf(order, rt.chain)
-
-  /*
-   * 办结时间 = **最后一个有办理时间的环节**（与 toApprovalRow 里 duration 的终点同一个口径）。
-   * 不能用 order.updated：单据会被抄送 / 转办 / 催办改写，那不是审批结束的时间。
-   */
+/** 办结时间 = 最后一个有办理时间的环节（与 toApprovalRow 里 duration 的终点同一个口径） */
+function finishedAtOf (rt: ReturnType<typeof runtimeOf>): string {
   let finishedAt = ''
   for (const step of rt.chain) {
     const m = mainOf(step)
@@ -112,6 +102,98 @@ export function buildApprovalSummary (order: ApprovalOrder, creatorName = ''): A
       finishedAt = m.handled_at
     }
   }
+  return finishedAt
+}
+
+/*
+ * 审批过程：逐环节一行（**不合并**同一审批人 —— 合并是时间线的展示口径，
+ * 归档表格要的是每一步各自的时间与结论）。
+ * 「飞书提醒」环不是审批动作，跳过（它没有办理人）。
+ */
+function stepRowsOf (
+  rt: ReturnType<typeof runtimeOf>,
+  startTimes: string[],
+  amountOf: (qty: unknown) => string,
+  deptOf?: (member: ApprovalChainItem) => string,
+): SummaryStepRow[] {
+  const steps: SummaryStepRow[] = []
+  const deptTextOf = (who: ApprovalChainItem): string =>
+    who.department || who.department_path || deptOf?.(who) || '—'
+  for (const [i, step] of rt.chain.entries()) {
+    const who = mainOf(step)
+    if (!who || who.type === 'notify') {
+      continue
+    }
+    // 只收已办：未办环节上挂着的是"接下来该谁办"，写进归档表会被当成办过
+    if (!who.handled_at && !who.result) {
+      continue
+    }
+    const qty = String(who.extra?.qty ?? '').trim()
+    steps.push({
+      index: steps.length + 1,
+      approver: who.name || '—',
+      department: deptTextOf(who),
+      result: resultLabelOf(who.result_label, who.result),
+      opinion: String(who.opinion ?? '').trim() || '—',
+      qty: qty || '—',
+      amount: (qty ? amountOf(qty) : '') || '—',
+      at: formatDate(who.handled_at) || '—',
+      duration: who.handled_at ? formatTimeDiff(startTimes[i], who.handled_at) : '—',
+    })
+  }
+  return steps
+}
+
+/*
+ * 接收情况：轮询各团队各接多少（有轮询才有多行）+ 合计 + 剩余。
+ * 金额同样按「总额 ÷ 总数量 × 数量」折算 —— 件数说明不了轻重，归档要能看出接了多少钱。
+ */
+function receiptRowsOf (
+  rt: ReturnType<typeof runtimeOf>,
+  ledger: { received?: unknown, remaining?: unknown },
+  amountOf: (qty: unknown) => string,
+  stockQty: string,
+  stockAmount: string,
+  deptOf?: (member: ApprovalChainItem) => string,
+): SummaryReceiptRow[] {
+  const receiptRowOf = (name: string, qty: unknown, note: string): SummaryReceiptRow => {
+    const missing = qty === undefined || qty === ''
+    return {
+      name,
+      qty: missing ? '—' : String(qty),
+      amount: (missing ? '' : amountOf(qty)) || '—',
+      note,
+    }
+  }
+  const groupRowOf = (r: ReturnType<typeof rotationReceiptsOf>[number]): SummaryReceiptRow => {
+    const missing = r.qty === undefined
+    return {
+      name: r.group,
+      qty: missing ? '—' : String(r.qty),
+      amount: (missing ? '' : amountOf(r.qty)) || '—',
+      note: [r.resultLabel, r.byName].filter(Boolean).join(' · '),
+    }
+  }
+  return [
+    ...rotationReceiptsOf(rt.chain, m => m.department || deptOf?.(m) || '').map(r => groupRowOf(r)),
+    receiptRowOf('团队接收合计', ledger.received, `总库存数量 ${stockQty || '—'}`),
+    receiptRowOf('剩余', ledger.remaining, `总库存金额 ${stockAmount || '—'}`),
+  ]
+}
+
+export function buildApprovalSummary (
+  order: ApprovalOrder,
+  creatorName = '',
+  /** 成员部门补全（链路成员瘦身后 department 不在快照里，见 types/approval 的 slimFlowMembers）；
+   *  调用方从组织目录取（stores/avatarDirectory 的 detailOf），不传则老单自带什么显示什么 */
+  deptOf?: (member: ApprovalChainItem) => string,
+): ApprovalSummary {
+  // 口径与表格列完全一致（状态、审批人、审批时长、最后结论）
+  const row = toApprovalRow(order)
+  const rt = runtimeOf(order)
+  const ctx = flowContextOfOrder(order)
+  const product = toProductView(order.expand?.relation)
+  const startTimes = stepStartTimesOf(order, rt.chain)
 
   /*
    * 数量与金额：总库存取建单快照（ctx），快照里没有才退到关联行当前值 ——
@@ -129,68 +211,18 @@ export function buildApprovalSummary (order: ApprovalOrder, creatorName = ''): A
     { label: '发起人', value: creatorName || '—' },
     { label: '所属部门', value: String(row['部门'] || '—') },
     { label: '发起时间', value: formatDate(order.created) || '—' },
-    { label: '结束时间', value: formatDate(finishedAt) || '—' },
+    { label: '结束时间', value: formatDate(finishedAtOf(rt)) || '—' },
     { label: '审批时长', value: row.duration || '—' },
     { label: 'SKU', value: String(row.sku || '—') },
     { label: '主MODEL', value: String(row.主MODEL || '—') },
     { label: '平台 / 团队', value: [ctx['平台'], product['团队'] ?? product['组别']].filter(Boolean).join(' / ') || '—' },
   ]
 
-  /*
-   * 审批过程：逐环节一行（**不合并**同一审批人 —— 合并是时间线的展示口径，
-   * 归档表格要的是每一步各自的时间与结论）。
-   * 「飞书提醒」环不是审批动作，跳过（它没有办理人）。
-   */
-  const steps: SummaryStepRow[] = []
-  rt.chain.forEach((step, i) => {
-    const who = mainOf(step)
-    if (!who || who.type === 'notify') {
-      return
-    }
-    // 只收已办：未办环节上挂着的是"接下来该谁办"，写进归档表会被当成办过
-    if (!who.handled_at && !who.result) {
-      return
-    }
-    const qty = String(who.extra?.qty ?? '').trim()
-    steps.push({
-      index: steps.length + 1,
-      approver: who.name || '—',
-      department: who.department || who.department_path || '—',
-      result: resultLabelOf(who.result_label, who.result),
-      opinion: String(who.opinion ?? '').trim() || '—',
-      qty: qty || '—',
-      amount: (qty ? amountOf(qty) : '') || '—',
-      at: formatDate(who.handled_at) || '—',
-      duration: who.handled_at ? formatTimeDiff(startTimes[i], who.handled_at) : '—',
-    })
-  })
+  const steps = stepRowsOf(rt, startTimes, amountOf, deptOf)
+  const receipts = receiptRowsOf(rt, ledger, amountOf, stockQty, stockAmount, deptOf)
 
-  /*
-   * 接收情况：轮询各团队各接多少（有轮询才有多行）+ 合计 + 剩余。
-   * 金额同样按「总额 ÷ 总数量 × 数量」折算 —— 件数说明不了轻重，归档要能看出接了多少钱。
-   */
-  const receipts: SummaryReceiptRow[] = rotationReceiptsOf(rt.chain).map(r => ({
-    name: r.group,
-    qty: r.qty === undefined ? '—' : String(r.qty),
-    amount: (r.qty === undefined ? '' : amountOf(r.qty)) || '—',
-    note: [r.resultLabel, r.byName].filter(Boolean).join(' · '),
-  }))
-  receipts.push({
-    name: '团队接收合计',
-    qty: String(ledger.received),
-    amount: amountOf(ledger.received) || '—',
-    note: `总库存数量 ${stockQty || '—'}`,
-  })
-  receipts.push({
-    name: '剩余',
-    qty: ledger.remaining === undefined ? '—' : String(ledger.remaining),
-    amount: (ledger.remaining === undefined ? '' : amountOf(ledger.remaining)) || '—',
-    note: `总库存金额 ${stockAmount || '—'}`,
-  })
-
-  const lastHandled = [...rt.chain].reverse()
-    .map(step => mainOf(step))
-    .find(m => m && (m.handled_at || m.result))
+  // 用 slice().reverse() 而不是 toReversed()：后者要 ES2023 lib，项目的 tsconfig 目标版本里没有（TS2550）
+  const lastHandled = rt.chain.slice().reverse().map((step: ApprovalChainItem[]) => mainOf(step)).find((m: ApprovalChainItem | undefined) => m && (m.handled_at || m.result))
   const conclusion: SummaryField[] = [
     { label: '审批结论', value: row.conclusion || '—' },
     { label: '结论人', value: lastHandled?.name || '—' },

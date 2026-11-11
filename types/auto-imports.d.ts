@@ -337,7 +337,7 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
-  export type { AvatarLookup } from '../src/stores/avatarDirectory'
+  export type { AvatarLookup, MemberDetail } from '../src/stores/avatarDirectory'
   import('../src/stores/avatarDirectory')
   // @ts-ignore
   export type { UserInfo, UserPreferences } from '../src/stores/user'

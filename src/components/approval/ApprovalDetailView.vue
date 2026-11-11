@@ -84,6 +84,7 @@
               :next-steps="nextStepsOf(g, optionItems, resultOptions)"
               :option-context="optionContextOf(order, chain, g.indexes[0])" :prev-time="g.startTimes[0]"
               :receiver-team="receiverTeam" :remaining-qty="remainingQty" :start-time="order.created"
+              :step-name="stepNameOf(g.stepIds[0])"
               :stock-amount="stockAmount" :stock-qty="stockQty" :type-templates="order.chain?.types" />
 
             <!-- 时间线最后一条：流转为什么停下（与审批页同一口径） -->
@@ -125,6 +126,7 @@ import GoodsInfo from '@/components/GoodsInfo.vue'
 import SelectNode from '@/components/streamNodes/SelectNode.vue'
 import {
   APPROVAL_STATUS,
+  collectStepNames,
   collectStepOptionItems,
   collectStepResultOptions,
   receivedQuantities,
@@ -147,6 +149,8 @@ import {
 } from '@/utils/approvalRuntime'
 // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
 import { toProductView } from '@/utils/biRowFields'
+// 组织目录（按 open_id 补全成员的 department）：固定接收环节的分组名靠它（见下面 rotationReceipts）
+import { useAvatarDirectory } from '@/stores/avatarDirectory'
 import { formatDate } from '@/utils/utils'
 
 /**
@@ -219,8 +223,15 @@ const finished = computed(() => isOrderFinished(props.order))
  *
  * 放在详情里而不只在办理弹窗：审批人打开一张单先判断"要不要接、还能接多少"，
  * 这一步往往发生在点「办理」之前 —— 只在办理面板里给出，等于要先点开才知道。
+ *
+ * 部门补全必须带（与审批页 / 办理面板同一口径）：**模板把第一棒接收配成固定环节**时
+ * 那一环没有 `role.dept`，组名只能按 open_id 从组织目录现查 —— 不带补全时那一行整个丢失
+ * （实测：美1组先接 50 件、之后轮询美2/美3 组，面板只剩后两组）。
  */
-const rotationReceipts = computed(() => rotationReceiptsOf(chain.value))
+const memberDir = useAvatarDirectory()
+void memberDir.ensure()
+const rotationReceipts = computed(() =>
+  rotationReceiptsOf(chain.value, m => memberDir.detailOf(m).department))
 
 const startTimes = computed(() =>
   props.order ? stepStartTimesOf(props.order, chain.value) : [],
@@ -255,6 +266,26 @@ const optionItems = computed(() => {
   const flow = props.order?.chain?.flow
   return flow?.length ? collectStepOptionItems(flow) : {}
 })
+
+/**
+ * 各环节的**名字**（模板画布上给这一环起的标题）：时间线卡片显示「这是哪一环」用。
+ * chain 只带成员、名字只在 flow 上（见 types/approval 的 collectStepNames）。
+ */
+const stepNames = computed(() => {
+  const flow = props.order?.chain?.flow
+  return flow?.length ? collectStepNames(flow) : {}
+})
+
+/** 环节名兜底：存量单的轮询环没存名字，靠 id 的 `#N` 后缀标出「第 N 环」 */
+function stepNameOf (stepId?: string) {
+  const id = String(stepId ?? '')
+  const hit = stepNames.value[id]
+  if (hit) {
+    return hit
+  }
+  const m = /#(\d+)$/.exec(id)
+  return m ? `第 ${m[1]} 环` : ''
+}
 
 /** 接收数量的账：总库存数量 / 已接收 / 剩余（与流程引擎共用，见 receivedQuantities） */
 const qtyLedger = computed(() =>

@@ -93,6 +93,7 @@
               :receiver-team="receiverTeam"
               :remaining-qty="remainingQty"
               :start-time="orderDatas?.created"
+              :step-name="stepNameOf(g.stepIds[0])"
               :stock-amount="stockAmount"
               :stock-qty="stockQty"
               :type-templates="orderDatas?.chain?.types"
@@ -112,7 +113,8 @@
                   </v-chip>
 
                   <v-avatar class="mr-1" size="22">
-                    <v-img v-if="r.avatar" cover :src="proxyAvatar(r.avatar)" />
+                    <!-- 接收方记录与链路成员同一瘦身口径（不带头像）：老单自带直显、新单按 open_id 现查 -->
+                    <v-img v-if="r.avatar || memberDir.avatarOf(r)" cover :src="proxyAvatar(r.avatar || memberDir.avatarOf(r))" />
                     <v-icon v-else size="13">mdi-account</v-icon>
                   </v-avatar>
 
@@ -132,7 +134,7 @@
                 </div>
               </div>
 
-              <div class="mt-1 text-[11px] text-medium-emphasis">流程到此结束：后面接的环节不再有人办理</div>
+              <div class="mt-1 text-[11px] text-medium-emphasis">接收方已记录：后续走向按模板里这条结论的分支执行</div>
             </v-timeline-item>
 
             <FlowEndNote :end="runtime.end" />
@@ -221,8 +223,11 @@
   import { useNodeSubmit } from '@/composables/useNodeSubmit'
   // 登录用户：右上角「上一个 / 下一个」按他锚定队列（见 queueAnchor，需求口径是"自己名下的单"）
   import { useUserStore } from '@/stores/user'
+  // 组织目录：链路成员瘦身后（见 types/approval 的 slimFlowMembers），email / 部门按 open_id 现查
+  import { useAvatarDirectory } from '@/stores/avatarDirectory'
   import {
     APPROVAL_STATUS,
+    collectStepNames,
     collectStepOptionItems,
     collectStepResultOptions,
     receivedQuantities,
@@ -414,8 +419,11 @@
   /**
    * 「组间轮询」里各团队已接多少（只读，口径见 utils/approvalRuntime 的 rotationReceiptsOf）。
    * 放在时间线上方：打开单据就能看到各组分了多少，不必先点开办理面板。
+   * 部门补全：成员瘦身后 department 不在快照里（见 types/approval 的 slimFlowMembers），
+   * 固定接收环节的分组名按 open_id 从组织目录现查。
    */
-  const rotationReceipts = computed(() => rotationReceiptsOf(runtime.value.chain))
+  const rotationReceipts = computed(() =>
+    rotationReceiptsOf(runtime.value.chain, m => memberDir.detailOf(m).department))
 
   const stepResultOptions = computed(() => {
     const flow = orderDatas.value?.chain?.flow
@@ -429,9 +437,32 @@
   })
 
   /**
+   * 各环节的**名字**（模板画布上给这一环起的标题）：时间线卡片显示「这是哪一环」用。
+   * `runtimeOf` 的 chain 只带成员，名字只在 flow 上 —— 按 stepId 回查（见 collectStepNames）。
+   */
+  const stepNames = computed(() => {
+    const flow = orderDatas.value?.chain?.flow
+    return flow?.length ? collectStepNames(flow) : {}
+  })
+
+  /**
+   * 环节名兜底：**存量单**的轮询环没把名字写进快照，但展开时 id 带了 `#N` 后缀
+   * （见 utils/approvalRotation 的 stampRing）——至少标出「第 N 环」。
+   */
+  function ringLabelOf (stepId?: string) {
+    const m = /#(\d+)$/.exec(String(stepId ?? ''))
+    return m ? `第 ${m[1]} 环` : ''
+  }
+
+  /** 时间线卡片要显示的环节名：快照里的名字优先，其次轮询环的「第 N 环」 */
+  function stepNameOf (stepId?: string) {
+    return stepNames.value[String(stepId ?? '')] ?? ringLabelOf(stepId)
+  }
+
+  /**
    * 「选择接收团队 / 选择接收部门」的接收方：在时间线上单独渲染成一个节点。
-   * 它命中终结类结论、不在 chain 里，所以只能从办理流水里取（见 receiversOf）；
-   * 粒度（团队 / 部门）由 receiversOf 依据结论码补在 `pick` 上。
+   * 接收方记在**办理流水的 extra.members** 里（是结论的成果、不是环节审批人名单），
+   * 所以从流水里取（见 receiversOf）；粒度（团队 / 部门）由 receiversOf 依据结论码补在 `pick` 上。
    * 一批货可以分给多个团队 → 这里是数组，一个团队渲染一行（各带自己接的数量）。
    */
   const receivers = computed(() => receiversOf(orderDatas.value))
@@ -457,7 +488,8 @@
   /**
    * 当前待办环节的负责人。**办结之后没有"当前审批人"可言** —— 返回 undefined。
    *
-   * 为什么不能再退到"链尾那一环的负责人"：单据可能**中途就收了**（走到结束节点 / 命中终结类结论），
+   * 为什么不能再退到"链尾那一环的负责人"：单据可能**中途就收了**（走到结束节点；
+   * 历史单还有按终结类结论收尾的，见 LEGACY_CLOSE_FLOW_RESULTS），
    * 链尾往后还挂着**从没办过**的环节 —— 报出去的人名是错的（实测一张办结单被显示成下一环那位）。
    */
   const currentApprover = computed<ApprovalChainItem | undefined>(() => {
@@ -471,9 +503,13 @@
 
   /* ===== 「上一个 / 下一个审批单」===== */
 
-  /** 两个审批人是不是同一个人：邮箱优先（快照里最稳的标识），缺邮箱时退回姓名 */
+  /** 两个审批人是不是同一个人：open_id 优先（瘦身后唯一稳定的键，见 types/approval 的 sameApprover），
+   *  老成员没有 open_id 时退回邮箱、再退姓名（与 types 那份同一口径，别让两份漂了） */
   function sameApprover (a?: ApprovalChainItem, b?: ApprovalChainItem) {
     if (!a || !b) return false
+    const aid = String(a.open_id ?? '').trim()
+    const bid = String(b.open_id ?? '').trim()
+    if (aid && bid) return aid === bid
     const ae = String(a.email ?? '').trim().toLowerCase()
     const be = String(b.email ?? '').trim().toLowerCase()
     return ae && be ? ae === be : (!!a.name && a.name === b.name)
@@ -504,6 +540,9 @@
   const approverQueue = ref<ApprovalOrder[]>([])
 
   const userStore = useUserStore()
+  // 组织目录（与头像同一份数据、同一次请求）：瘦身后成员的 email / 部门按 open_id 现查
+  const memberDir = useAvatarDirectory()
+  void memberDir.ensure()
 
   /**
    * 能不能不受"我名下"限制地翻单：**管理员及以上**（超级管理员 / 管理员），
@@ -517,7 +556,7 @@
    * ## 为什么不是"这张单的当前审批人"（旧口径，三个死结都实测过）
    *
    *   · **单据办结后就没有"当前审批人"了**：旧代码退到"链尾那一环的负责人"，而链尾往后
-   *     还挂着**从没办过**的环节（单据在中途就收了：走到结束节点 / 命中终结类结论）——
+   *     还挂着**从没办过**的环节（单据在中途就收了：走到结束节点；历史单还有选接收方终结的）——
    *     于是队列算成别人的、甚至空的，箭头直接消失。这就是"办结了没法接着跳下一张"。
    *   · **单据流转给下一位时**，队列会跳到**接手人**名下，对刚办完的人没有意义。
    *   · 只有"这一环正好压在我手上"时才成立，而办完那一刻恰恰不成立。

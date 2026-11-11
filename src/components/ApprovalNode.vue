@@ -20,6 +20,10 @@
       <!-- flex-wrap + 可收缩宽度：结论胶囊文案很长（一次分给多个团队时尤其长），
            不放开换行就会被卡片右边界裁掉（见 .result-chip 的说明） -->
       <div class="node-head-left d-flex align-center flex-wrap gap-2">
+        <!-- 环节名（模板画布上给这一环起的标题，如「流程11」「产品侵权」）：
+             没有它时间线只剩「[部门] 姓名」，看不出这一环在模板里是哪一步 -->
+        <span v-if="stepName" class="text-[13px] font-weight-medium">{{ stepName }}</span>
+
         <span v-if="deptName" class="text-[12px]">[{{ deptName }}]</span>
 
         <!-- 飞书提醒环节：没人可办，头部显示**提醒名称**（不是某人姓名），也没有头像 -->
@@ -147,7 +151,8 @@
           </v-chip>
 
           <v-avatar class="mr-1" size="22">
-            <v-img v-if="r.avatar" cover :src="proxyAvatar(r.avatar)" />
+            <!-- 接收方记录与链路成员同一瘦身口径（不带头像）：老单自带直显、新单按 open_id 现查 -->
+            <v-img v-if="memberAvatar(r)" cover :src="memberAvatar(r)" />
             <v-icon v-else size="13">mdi-account</v-icon>
           </v-avatar>
 
@@ -231,7 +236,6 @@ import type { ApprovalChainItem, ApprovalNodeOption, NodeSubmitPayload, Receiver
 import type { ApprovalTypeTemplate } from '@/utils/approvalTypes'
 import dayjs from 'dayjs'
 // proxyAvatar：飞书头像要经服务端代理才能在浏览器里正常显示（历史单里选过的"接收人"带着头像）
-import { proxyAvatar } from '@/api/api'
 // 头像目录：单据快照里不带成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
 import { useAvatarDirectory } from '@/stores/avatarDirectory'
 // 头像地址的逐级降级（代理 → 原地址 → 首字）：见 composables/useAvatarSrc 的文件头
@@ -255,6 +259,12 @@ const overlay = ref(false)
 interface ApprovalNodeProps {
   startTime?: string
   department?: string
+  /**
+   * 这一环在模板里起的名字（画布卡片标题）。
+   * `runtimeOf` 的 chain 只带成员、不带环节名，所以由页面按 `stepId` 从 flow 回查后下发
+   * （见 types/approval 的 collectStepNames）。空串 = 模板里没起名，不显示。
+   */
+  stepName?: string
   status?: number
   data?: ApprovalChainItem[]
   /** 审批链总步骤数，用于计算节点尺寸与动态色阶 */
@@ -343,6 +353,7 @@ interface ApprovalNodeProps {
 const props = withDefaults(defineProps<ApprovalNodeProps>(), {
   startTime: '',
   department: '',
+  stepName: '',
   status: 0,
   data: () => [],
   length: 0,
@@ -634,13 +645,17 @@ const durationText = computed(() => {
   return formatTimeDiff(from, handledAt.value)
 })
 
-const deptName = computed(
-  () =>
-    manageDatas.value[0]?.department
+const deptName = computed(() => {
+  // 部门展示：老单成员自带 department 直显；新单成员已瘦身（不存部门，见 types/approval
+  // 的 slimFlowMembers）—— 按 open_id 从组织目录现查（detailOf 与头像同一份数据、同一次请求）。
+  const stored = manageDatas.value[0]?.department
     ?? props.data.find(item => item?.department)?.department
-    ?? props.department
-    ?? '',
-)
+  if (stored) {
+    return stored
+  }
+  const m = manageDatas.value[0] ?? props.data.find(item => item?.open_id)
+  return avatarDir.detailOf(m).department || props.department || ''
+})
 
 /** extra 字段 → 展示文案 */
 const EXTRA_LABELS: Record<string, string> = {

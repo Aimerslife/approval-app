@@ -121,20 +121,25 @@
                   </div>
                 </v-expansion-panel-title>
                 <v-expansion-panel-text>
-                  <v-row dense>
-                    <v-col cols="12" md="6">
+                  <!--
+                    字段编辑的**行排列**（2 列一行；后缀 / 行数 / 必填这类小项占半列）。
+                    不用 v-row / v-col：Vuetify 4 的响应式列宽在这里不生效（v-col 被挤成
+                    一行等宽小列），改用自带 grid —— 每行放什么只由下面的 CSS 决定，所见即所得。
+                  -->
+                  <div class="field-grid">
+                    <div>
                       <div class="field-title mb-1">键名（写进 extra 的键）</div>
                       <v-text-field v-model="field.key" density="compact" hide-details variant="outlined"
                         @update:model-value="markDirty" />
-                    </v-col>
-                    <v-col cols="12" md="6">
+                    </div>
+                    <div>
                       <div class="field-title mb-1">界面文案</div>
 
                       <v-text-field v-model="field.label" density="compact" hide-details variant="outlined"
                         @update:model-value="markDirty" />
-                    </v-col>
+                    </div>
 
-                    <v-col cols="12" md="6">
+                    <div>
                       <div class="field-title mb-1">控件</div>
 
                       <v-select v-model="field.control" density="compact" hide-details item-title="title"
@@ -142,117 +147,117 @@
                         variant="outlined" @update:model-value="markDirty" />
 
                       <div class="text-[11px] text-medium-emphasis mt-1">{{ controlHintOf(field.control) }}</div>
-                    </v-col>
+                    </div>
 
-                    <v-col v-if="field.control === 'number' || field.control === 'text'" cols="12" md="3">
+                    <div v-if="field.control === 'number' || field.control === 'text'" class="span-1">
                       <div class="field-title mb-1">后缀</div>
 
                       <v-text-field v-model="field.unit" density="compact" hide-details placeholder="件 / ￥"
                         variant="outlined" @update:model-value="markDirty" />
-                    </v-col>
+                    </div>
 
-                    <v-col v-if="field.control === 'textarea'" cols="12" md="3">
+                    <div v-if="field.control === 'textarea'" class="span-1">
                       <div class="field-title mb-1">行数</div>
 
                       <v-text-field v-model.number="field.rows" density="compact" hide-details type="number"
                         variant="outlined" @update:model-value="markDirty" />
-                    </v-col>
+                    </div>
 
-                    <v-col cols="12" md="3">
+                    <div class="span-1">
                       <div class="field-title mb-1">必填</div>
 
                       <v-switch v-model="field.required" color="primary" density="compact" hide-details
                         @update:model-value="markDirty" />
-                    </v-col>
+                    </div>
 
-                    <v-col cols="12" md="6">
+                    <div>
                       <div class="field-title mb-1">占位提示</div>
 
                       <v-text-field v-model="field.placeholder" density="compact" hide-details variant="outlined"
                         @update:model-value="markDirty" />
-                    </v-col>
+                    </div>
 
-                    <v-col cols="12" md="6">
+                    <div>
                       <div class="field-title mb-1">字段说明（显示在控件下方）</div>
 
                       <v-text-field v-model="field.hint" density="compact" hide-details variant="outlined"
                         @update:model-value="markDirty" />
-                    </v-col>
+                    </div>
 
                     <!-- 数字规则 -->
                     <template v-if="field.control === 'number'">
-                      <v-col cols="12" md="3">
+                      <div class="span-1">
                         <div class="field-title mb-1">只允许正整数</div>
 
                         <v-switch v-model="field.integer" color="primary" density="compact" hide-details
                           @update:model-value="markDirty" />
-                      </v-col>
+                      </div>
 
-                      <v-col cols="12" md="3">
+                      <div class="span-1">
                         <div class="field-title mb-1">最多小数位</div>
 
                         <v-text-field v-model.number="field.decimals" density="compact" hide-details placeholder="2"
                           type="number" variant="outlined" @update:model-value="markDirty" />
-                      </v-col>
+                      </div>
 
-                      <v-col cols="12" md="6">
+                      <div>
                         <div class="field-title mb-1">必须小于</div>
 
                         <v-select v-model="field.limit" clearable density="compact" hide-details item-title="title"
                           item-value="value" :items="limitItems" :menu-props="{ contentClass: 'filter-menu' }"
                           placeholder="不限制" variant="outlined" @update:model-value="markDirty" />
-                      </v-col>
+                      </div>
 
                       <!-- 上限是否允许等于：接收类里「接收」可以等于剩余，「部分接收」不能 -->
-                      <v-col v-if="field.limit" cols="12" md="6">
+                      <div v-if="field.limit">
                         <div class="field-title mb-1">允许等于上限</div>
 
                         <v-switch v-model="field.limitInclusive" color="primary" density="compact" hide-details
                           @update:model-value="markDirty" />
-                      </v-col>
+                      </div>
 
-                      <v-col cols="12" md="6">
+                      <div>
                         <div class="field-title mb-1">按上限预填（空值时）</div>
 
                         <v-switch v-model="field.prefillFromLimit" color="primary" density="compact" hide-details
                           @update:model-value="markDirty" />
-                      </v-col>
+                      </div>
 
-                      <v-col cols="12" md="6">
+                      <div>
                         <div class="field-title mb-1">取到上限后只读</div>
 
                         <v-switch v-model="field.readonlyWhenFull" color="primary" density="compact" hide-details
                           @update:model-value="markDirty" />
-                      </v-col>
+                      </div>
                     </template>
 
                     <!-- 选接收方 -->
-                    <v-col v-if="field.control === 'team'" cols="12" md="6">
+                    <div v-if="field.control === 'team'">
                       <div class="field-title mb-1">选到哪一级</div>
 
                       <v-select v-model="field.pick" density="compact" hide-details item-title="title"
                         item-value="value" :items="pickItems" :menu-props="{ contentClass: 'filter-menu' }"
                         variant="outlined" @update:model-value="markDirty" />
-                    </v-col>
+                    </div>
 
                     <!-- 联动显隐 -->
-                    <v-col cols="12" md="6">
+                    <div>
                       <div class="field-title mb-1">联动：当这个键</div>
 
                       <v-text-field density="compact" hide-details :model-value="field.showWhen?.key ?? ''"
                         placeholder="如 reason_belong" variant="outlined"
                         @update:model-value="v => setShowKey(field, String(v))" />
-                    </v-col>
+                    </div>
 
-                    <v-col cols="12" md="6">
+                    <div>
                       <div class="field-title mb-1">取值是（逗号分隔；键与取值都填才生效）</div>
 
                       <v-text-field density="compact" hide-details :model-value="(field.showWhen?.in ?? []).join(',')"
                         placeholder="如 开发类" variant="outlined" @update:model-value="v => setShowIn(field, v)" />
-                    </v-col>
+                    </div>
 
                     <!-- 选项候选 -->
-                    <v-col v-if="usesOptions(field)" cols="12">
+                    <div v-if="usesOptions(field)" class="span-4">
                       <div class="d-flex align-center mb-1">
                         <div class="field-title">选项</div>
                         <v-spacer />
@@ -284,8 +289,8 @@
                         「附带写入」用于一项带出多个键（如原因要一起记 reason_target / reason_belong），
                         写成 <code>{"reason_target":"xxx"}</code>
                       </div>
-                    </v-col>
-                  </v-row>
+                    </div>
+                  </div>
 
                   <div class="d-flex align-center ga-2 mt-2">
                     <v-btn class="text-none" prepend-icon="mdi-arrow-up" size="x-small" variant="text"
@@ -317,13 +322,13 @@
                 @pick="onPick" />
             </v-sheet>
 
-            <v-row class="mt-3" dense>
-              <v-col v-for="item in contextItems" :key="item.key" cols="6" md="3">
+            <div class="ctx-grid mt-3">
+              <div v-for="item in contextItems" :key="item.key">
                 <div class="field-title mb-1">{{ item.title }}</div>
 
                 <v-text-field v-model="previewContext[item.key]" density="compact" hide-details variant="outlined" />
-              </v-col>
-            </v-row>
+              </div>
+            </div>
 
             <div class="text-[11px] text-medium-emphasis mt-2">
               上面的数字只是**预览用的假数据**（真实办理时取自当前单据的库存/已接收数量）。
@@ -904,6 +909,51 @@ onMounted(() => {
 /* ===== 右：字段编排 ===== */
 .field-panels {
   margin-top: 2px;
+}
+
+/*
+ * 字段编辑的**行排列**栅格（4 列基准）：
+ *   · 默认项占 2 列（= 原 v-col md="6"，两列一行）；
+ *   · `.span-1` 占 1 列（= 原 md="3"，如后缀 / 必填这类小项）；
+ *   · `.span-4` 占满整行（= 原 cols="12"，如「选项」清单）。
+ * 不依赖 Vuetify 网格 —— v-col 的响应式列宽在展开面板里会失效（全部挤成一行等宽小列），
+ * 这里的行布局只由这段 CSS 决定；窄屏降为 2 列，宽项占满。
+ */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+
+.field-grid > * {
+  grid-column: span 2;
+}
+
+.field-grid > .span-1 {
+  grid-column: span 1;
+}
+
+.field-grid > .span-4 {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 720px) {
+  .field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 预览上下文（库存 / 剩余 / 已接收 / 金额）：一行四个，与字段栅格同一套理由 */
+.ctx-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+@media (max-width: 720px) {
+  .ctx-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .field-key {

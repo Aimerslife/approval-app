@@ -228,7 +228,8 @@
                 <v-chip color="primary" label size="x-small" variant="tonal">
                   {{ importPayload.status ? '启用' : '未启用' }}
                 </v-chip>
-                <span>{{ importPayload.chain.chain.length }} 个审批环节</span>
+                <span v-if="importPayload.chain.chain.length">{{ importPayload.chain.chain.length }} 个审批环节</span>
+                <span v-else-if="importPayload.chain.flow?.length">环节由流程结构展开</span>
                 <span v-if="importPayload.chain.flow?.length">{{ importPayload.chain.flow.length }} 个流程节点</span>
                 <span v-if="!importPayload.chain.flow?.length" class="text-warning">（没有流程结构，只有链路）</span>
               </div>

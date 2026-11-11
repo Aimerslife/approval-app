@@ -1,6 +1,11 @@
 <template>
   <v-container :class="{ 'screen-full': fullSceen }" fluid>
-    <BackNode title="审批模板" />
+    <BackNode title="审批模板">
+      <span v-if="streamName.trim()" class="text-[13px] font-weight-medium text-medium-emphasis ml-1">
+        / {{ streamName }}
+      </span>
+      <span v-else class="text-[13px] text-disabled ml-1">/ 未命名模板</span>
+    </BackNode>
     <v-row align="stretch" class="flow-grid" density="compact">
       <v-col class="min-w-0 flow-col-left" :class="{ 'flow-col-left--collapsed': leftCollapsed }" cols="2">
         <v-icon-btn class="flow-col-left__toggle mr-5 mt-5"
@@ -227,7 +232,24 @@
                   「其他原因」通常需要再细化：可追加条件，如 result_label 包含关键词、amount 大于 5000；
                   多个原因属于同一走向时把满足方式改成「任一满足」
                 </div>
+                <div v-if="isRefEdge" class="panel-hint ml-3">
+                  段内以条件分支收尾时（如「金额判断 / 弃置」），出线有两种接法：给这条线起个与段内分支
+                  <b>同名</b>的名字（自动承接该走向），或加条件「条件分支 = 弃置」显式匹配
+                </div>
               </template>
+
+              <!--
+                引用卡片出线的**纯条件**入口：不绑结论、只按业务条件分流（引擎的 formOf 里有
+                剩余接收数量 / 仓位等，见 types/approval）。上面的条件区只在已有条件时渲染，
+                兜底主线上没有"添加条件"的入口就永远配不出第一条 —— 这里补上。
+              -->
+              <div v-if="isRefEdge && selectedEdgeConditions.length === 0" class="panel-row ml-3">
+                <button class="add-cond-btn" @click="addCondition">
+                  <v-icon size="11">mdi-plus</v-icon>
+                  <span>添加条件</span>
+                </button>
+                <span class="panel-hint ml-2">只绑条件不绑结论：按业务条件分流这一段之后的走向（如 剩余接收数量>0）；绑了结论则"结论命中才看条件"</span>
+              </div>
 
               <!--
                 「办理选项条件」：只在满足时把这条线的选项**摆给办理人**，**不影响走哪条线**。
@@ -1778,8 +1800,11 @@ function addCondition() {
   const edge = ensureEdgeData()
   if (!edge) return
   const list = edge.data.conditions as ConditionExpr[]
-  // 结果分支（审批 / 引用）必须先有结论才能附条件（按"有没有结论条件"判断，不是按下标）
-  if ((isResultEdge.value || isRefEdge.value) && !list.some(isResultCondition)) {
+  // 结果分支（审批）必须先有结论才能附条件（按"有没有结论条件"判断，不是按下标）。
+  // 引用卡片的出线允许**只绑业务条件、不绑结论**：引擎按「结论 + 办理填值 + 单据快照」
+  // 整张表单选路（types/approval 的 formOf / matchBranch），条件线是"按条件自动选中"，
+  // 不需要办理人挑，也不进办理下拉（见 collectStepOptionItems 的 optionsOf）。
+  if (isResultEdge.value && !list.some(isResultCondition)) {
     list.push({ field: 'result', op: 'eq', value: 'reject' })
   }
   list.push({ field: '', op: 'eq', value: '' })

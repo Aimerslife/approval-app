@@ -4,7 +4,8 @@ import { fetchOrgTreeCache, type OrgTreeData } from '@/api/api'
 import { useUserStore } from '@/stores/user'
 import {
   APPROVAL_STATUS, type ApprovalFlow, type ApprovalOrder,
-  branchTerminalMapOf, compactBranchTerminal, flowToChain, mainOf, rebuildChain, slimFlowMembers,
+  branchTerminalMapOf, compactBranchTerminal, compactFlowSnapshot, flowToChain, mainOf, rebuildChain,
+  renameBranchTerminalKeys, slimFlowMembers,
 } from '@/types/approval'
 import { toFlowContext } from '@/utils/approvalFlow'
 import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
@@ -558,6 +559,14 @@ export function useTaskStarter (options: TaskStarterOptions) {
       const dir = buildOrgDirectory((await orgTree())?.tree)
       const slim = flow ? slimFlowMembers(flow, m => memberOpenId(dir, m)) : undefined
       /*
+       * **快照压缩**（成员瘦身后第二刀，见 types/approval 的 compactFlowSnapshot）：
+       * id 短化 + 裁冗余字段，只压**写进单据的那一份**（preview 的空跑照用 slim，
+       * 两者引擎行为完全一致）。branchTerminal 出口表的键是 branch id，跟着映射换 ——
+       * 注意 payload 是按模板缓存的复用对象，重映射做副本、不动它本体。
+       */
+      const compact = compactFlowSnapshot(slim ?? [])
+      const branchTerminal = renameBranchTerminalKeys(payload.branchTerminal ?? {}, compact.branchIdMap)
+      /*
        * 建单前**空跑一次引擎**：专门拦"建出来就动不了的单"。
        *
        * 两种能造成这种单的情况：
@@ -585,7 +594,8 @@ export function useTaskStarter (options: TaskStarterOptions) {
       const order = await createApprocalModel(
         {
           ...payload,
-          ...(slim ? { flow: slim, chain: flowToChain(slim) } : {}),
+          branchTerminal,
+          ...(slim ? { flow: compact.flow, chain: flowToChain(compact.flow) } : {}),
           context,
         },
         { relation: biRowId, syncKey },

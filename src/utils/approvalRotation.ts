@@ -461,13 +461,25 @@ export function expandRotations (
         : { ...m }))
 
     function mapRingSteps (list: ApprovalFlowStep[]): ApprovalFlowStep[] {
-      return list.map(s => ({
-        ...s,
-        id: suffix(s.id),
-        ...(s.members ? { members: membersWithGroup(s.members) } : {}),
-        ...(s.type === 'branch' ? { branches: mapRingBranches(s.branches ?? []) } : {}),
-        ...(s.steps ? { steps: mapRingSteps(s.steps) } : {}),
-      }))
+      return list.map(s => {
+        const step: ApprovalFlowStep = {
+          ...s,
+          id: suffix(s.id),
+          ...(s.members ? { members: membersWithGroup(s.members) } : {}),
+          ...(s.type === 'branch' ? { branches: mapRingBranches(s.branches ?? []) } : {}),
+          ...(s.steps ? { steps: mapRingSteps(s.steps) } : {}),
+        }
+        /*
+         * 审批环节补上**环名**：卡片内部的审批节点常常没起名（画布上直接用默认卡片），
+         * 展开后时间线就只剩「[部门] 姓名」，看不出这是哪一环、属于哪张轮询卡片。
+         * 起过名的带上组名（「审批（美2组）」），没起名的用「卡片名 第 N 环」。
+         */
+        if (!s.type || s.type === 'approval') {
+          const cardName = String((card as { name?: string }).name ?? '').trim()
+          step.name = s.name ? `${s.name}（${group.name}）` : `${cardName || '轮询'} 第 ${ring} 环`
+        }
+        return step
+      })
     }
 
     function mapRingBranches (branches: ApprovalBranch[]): ApprovalBranch[] {

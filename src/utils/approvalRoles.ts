@@ -105,18 +105,17 @@ function findUserByName (
   return walk(tree, undefined, [])
 }
 
-function toMember (u: UserBrief, role: ApprovalRole, hit?: DeptHit): ApprovalChainItem {
+function toMember (u: UserBrief, role: ApprovalRole, _hit?: DeptHit): ApprovalChainItem {
   return {
     /*
-     * 只带"身份 + 展示"要用的字段（与 types/approval 的 slimFlowMembers 同一份口径）：
-     * 头像与 is_leader / is_tenant_manager 不进单据快照 —— 头像由展示层按 open_id 现查
-     * （见 stores/avatarDirectory），那两个标记只有选人界面才看。
+     * 只带"身份 + 展示"要用的字段（与 types/approval 的 slimFlowMembers 同一份口径，2026-11-10
+     * 最终版）：快照存 open_id + name + type + role；avatar / email / department / department_path
+     * 裁掉，展示与推送需要时按 open_id 现查（stores/avatarDirectory 的 avatarOf / detailOf）。
+     * _hit（部门命中信息）因此不再写进成员 —— 形参保留是调用方传参兼容，改名 _ 前缀示不用。
      */
     ...(u.open_id ? { open_id: u.open_id } : {}),
     name: u.name,
-    email: u.email,
     type: 'manager',
-    ...(hit ? { department: hit.node.name, department_path: hit.path } : {}),
     role,
   }
 }

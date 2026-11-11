@@ -127,7 +127,7 @@
           <span class="field-side">
             已填 <b>{{ chosenCountOf(field.key) }}</b> 个团队 · 合计 <b>{{ totalQtyTextOf(field.key) }}</b> 件
             <template v-if="receiveCapValueOf() !== undefined">
-              · {{ receiveCapNameOf() }} <b>{{ remainingAfterTextOf(field.key) }}</b> 件
+              · 尚未分配 <b>{{ unassignedTextOf(field.key) }}</b> 件 · 可新增 <b>{{ remainingAfterTextOf(field.key) }}</b> 件
             </template>
           </span>
           <span v-if="qtyOverflowTextOf(field.key)" class="field-side field-side--error">
@@ -600,12 +600,26 @@
         if (cap === undefined || !Number.isFinite(n) || n <= 0) {
           return true
         }
-        // 其他团队已填的合计：不含本行，否则本行会被算两遍
-        const others = Number(totalQtyTextOf(field.key)) - Number(qtyOfTeam(field.key, team) || 0)
-        if (n + others <= cap) {
+        /*
+         * 行级超限口径与清单末尾的剩余 / 底部红字 / 提交校验**完全一致**：
+         * 按**净变化**统计（当前值 − 预填基准，可正可负，见 props.seedBaseline）——
+         * 预填的历史接收量在「剩余接收数量」里已经扣过一次，不能再算一遍；
+         * 而且**基准内挪动要能互相抵消**：把 A 行少分的量挪给 B 行（总量不变）是正常调整，
+         * 按"每行各自 max(0, 差额)"算的话挪动会被当成新分误报
+         * （实测反馈：上限 0、预填 4 行，把一行改小另一行补上，还是报"超过剩余（0 件）"）。
+         */
+        const deltaOf = (name: string, qty: number): number =>
+          qty - (props.seedBaseline?.[name] ?? 0)
+        // 本行的净变化：扣掉这一行的基准
+        const mine = deltaOf(team, n)
+        // 其他行的净变化合计：不含本行，否则本行会被算两遍
+        const others = pickedList(field.key)
+          .filter(m => String(m.name ?? '') !== team)
+          .reduce((sum, m) => sum + deltaOf(String(m.name ?? ''), Number(String(m.qty ?? '').trim()) || 0), 0)
+        if (mine + others <= cap) {
           return true
         }
-        return `各团队合计 ${n + others} 件，超过${receiveCapNameOf()}（${cap} 件）`
+        return `本次新分合计 ${mine + others} 件，超过${receiveCapNameOf()}（${cap} 件）`
       },
     ]
   }
@@ -620,26 +634,18 @@
   }
 
   /**
-   * 清单末尾的「剩余」：上限 − 各团队已填合计，**跟着填数实时变**。
-   *
-   * 上限（还能接多少）本身不变，变的是"这次分完之后还剩多少" ——
-   * 静态显示上限的话，办理人边填边看不出来还剩多少、也看不出是不是快分完了
-   *（实测反馈：分配各团队数量时剩余一直不动）。
-   * 合计超过上限时按 0 显示：超额本身由下面的红字（qtyOverflowTextOf）点出来，
-   * 剩余格再甩一个负数反而难读。
-   */
-  /**
-   * 本次**新分**出去的合计：各团队数量里超出「预填基准」的部分（见 props.seedBaseline）。
+   * 本次**新分**的净额：Σ(当前值 − 预填基准)，**可正可负**（见 props.seedBaseline）。
    *
    * 预填进清单的历史量是前面环节已经接收掉的，不能再从本环节的剩余里扣一遍 ——
-   * 所以基准以内的部分视为"沿用之前的分配"，只有超出的部分才算新分。
-   * 用户删掉团队再选回、或改数，都按当前值与基准的差实时算。
+   * 所以按"与基准的差"算。**必须是净额**（不逐行取 max(0, …)）：基准内挪动要能互相抵消 ——
+   * 把 A 行少分的量挪给 B 行（总量不变）是正常调整，逐行取正的话挪动会被当成新分误报
+   * （实测反馈：上限 0、预填 4 行，改一行补另一行仍报"超过剩余（0 件）"）。
    */
   function freshQtyTotalOf (key: string): number {
     return pickedList(key).reduce((sum, m) => {
       const n = Number(String(m.qty ?? '').trim()) || 0
       const base = props.seedBaseline?.[String(m.name ?? '')] ?? 0
-      return sum + Math.max(0, n - base)
+      return sum + (n - base)
     }, 0)
   }
 
@@ -648,8 +654,28 @@
     if (cap === undefined) {
       return ''
     }
-    // 剩余 = 上限 − 本次新分（预填的历史量不再扣一遍）
-    return String(Math.max(0, cap - freshQtyTotalOf(key)))
+    /*
+     * 可新增 = 上限 − 本次新分净额。净额为负（基准内净减少）时不放大显示 ——
+     * 它只是"有几件还没定主"，不代表本环节能新分更多，钳回 [0, cap] 才不误导。
+     */
+    return String(Math.max(0, Math.min(cap, cap - freshQtyTotalOf(key))))
+  }
+
+  /**
+   * 「尚未分配」= 总可分 − 清单已填：预填基准（前面已接的量）+ 上限（本环节还能新接的量）
+   * − 各团队当前值。单摆「可新增」的话账对不上总数（实测反馈：前面组接完 550、清单改到
+   * 270，剩余显示 0，用户算 550 − 270 = 280 对不上）—— 把这段摆出来账就平了：
+   * 总件数 = 前面已接（表单开头的轮询汇总）+ 尚未分配；清单合计 = 基准 + 本次净变化。
+   */
+  function unassignedTextOf (key: string): string {
+    const cap = receiveCapValueOf()
+    if (cap === undefined) {
+      return ''
+    }
+    const total = Number(totalQtyTextOf(key)) || 0
+    const baseTotal = pickedList(key)
+      .reduce((sum, m) => sum + (props.seedBaseline?.[String(m.name ?? '')] ?? 0), 0)
+    return String(Math.max(0, baseTotal + cap - total))
   }
 
   /** 本次新分超出上限时的提示（清单末尾红字；空串 = 没超，正常不渲染） */

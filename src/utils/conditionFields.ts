@@ -1,4 +1,4 @@
-import { CURRENT_GROUP_FIELD, RECEIVED_QTY_FIELD, REMAINING_QTY_FIELD } from '@/types/approval'
+import { BRANCH_NAME_FIELD, CURRENT_GROUP_FIELD, RECEIVED_QTY_FIELD, REMAINING_QTY_FIELD } from '@/types/approval'
 import { DERIVED_KEYS } from '@/utils/biRowFields'
 import { PRODUCT_FIELDS } from '@/utils/productFields'
 
@@ -14,6 +14,7 @@ export const CONDITION_FIELD_OPTIONS: readonly ConditionFieldOption[] = [
   { value: DERIVED_KEYS.grossMargin, label: '派生指标（SKU3月前毛利润 ÷ SKU3月前回款 × 100）' },
   { value: DERIVED_KEYS.overseasAmount, label: '派生指标（= 总库存金额，白板里的"海外仓库存金额/呆滞金额"就是它）' },
   { value: 'result', label: '上一环节的审批结论（pass / reject / …）' },
+  { value: BRANCH_NAME_FIELD, label: '上一条件分支的走向（分支名，如 弃置 / 金额判断）' },
   { value: CURRENT_GROUP_FIELD, label: '当前环节对应的组别（按组轮询时 = 本轮轮到的那个组）' },
   { value: 'amount', label: '办理时填写的金额' },
   { value: 'qty', label: '办理时填写的数量' },

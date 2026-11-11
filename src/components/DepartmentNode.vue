@@ -76,7 +76,9 @@
 
 <script setup lang="ts">
   import { computed, onMounted, ref } from 'vue'
-  import { fetchOrgTreeCache, type OrgTreeNode, type UserBrief } from '@/api/api'
+  import { type OrgTreeNode, type UserBrief } from '@/api/api'
+  // 组织树的会话级缓存与请求去重（选人弹窗预热也走它），不再直接调 api
+  import { fetchOrgTreeOnce, orgTreeCache } from '@/utils/orgPickerCache'
 
   interface TreeItem {
     id: string
@@ -105,9 +107,35 @@
   const emit = defineEmits<{ select: [user: UserBrief] }>()
 
   const treeItems = ref<TreeItem[]>([])
-  const treeLoading = ref(false)
+  /**
+   * 初始就是 loading：首帧直接是骨架屏。
+   * 以前初始 false —— 组件一挂载会先闪一下「暂无组织架构数据」再转骨架
+   * （onMounted 里才把 loading 置 true，中间那一帧已经画出去了）。
+   */
+  const treeLoading = ref(true)
   const treeError = ref('')
   const activated = ref<string[]>([])
+
+  /**
+   * 渲染树缓存（模块级）：会话内**第二次**打开弹窗 / 切回「全部部门」直接复用，
+   * 不再重复跑一遍 toTreeItems（几千个节点的同步递归，一次 ~1s）。
+   * 原始数据由 utils/orgPickerCache 兜住；这里缓存的是转换结果。
+   */
+  let builtTreeMemo: TreeItem[] | null = null
+
+  /**
+   * 让出一帧：**先把界面画出来（切到「全部部门」+ 骨架屏），再做同步重活**。
+   *
+   * 为什么必须让：`toTreeItems` 是全量同步递归，整棵组织树转换会占住主线程 ~1s ——
+   * 和"切 tab / 弹窗打开"放在同一个 tick 里，首帧就出不来，用户看到的是
+   * "点了没反应，等一会儿直接整棵树出现"（反馈：先加载再跳转）。
+   * rAF 等下一次绘制、setTimeout 把重活挪出该帧，两条都要：只 rAF 仍可能在同一帧内跑完。
+   */
+  function nextPaint (): Promise<void> {
+    return new Promise<void>(resolve => {
+      requestAnimationFrame(() => setTimeout(resolve, 0))
+    })
+  }
 
   function toTreeItems (nodes: OrgTreeNode[]): TreeItem[] {
     return nodes.map(node => {
@@ -148,9 +176,20 @@
     if (treeItems.value.length > 0) return
     treeLoading.value = true
     treeError.value = ''
+    // 先让骨架屏绘制出来，再开始加载 / 转换（见 nextPaint 的说明）
+    await nextPaint()
     try {
-      const res = await fetchOrgTreeCache()
-      treeItems.value = toTreeItems(res.data.tree)
+      // 渲染树已建过：直接复用（切 tab / 重开弹窗都是瞬时）
+      if (builtTreeMemo) {
+        treeItems.value = builtTreeMemo
+        return
+      }
+      // 会话级缓存优先：选人弹窗预热过 / 上次打开拉过的话，这里直接重建树，不再发请求
+      // （缓存与去重在 utils/orgPickerCache —— 弹窗每次关闭会卸载本组件，靠它保住数据）
+      const cached = orgTreeCache()
+      const tree = cached ?? await fetchOrgTreeOnce()
+      builtTreeMemo = toTreeItems(tree)
+      treeItems.value = builtTreeMemo
     } catch (error: any) {
       treeError.value = error?.message || '加载组织架构失败'
     } finally {

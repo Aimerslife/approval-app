@@ -20,6 +20,18 @@ export interface OrgDirectoryEntry {
   avatar: string
   /** email / mobile（小写、去空白）：给"只有邮箱没有 open_id"的老成员反查用 */
   contacts: string[]
+  /**
+   * 邮箱明文（第一个 email 联系方式；没有就是空串）。
+   *
+   * 为什么目录里要有它：链路成员已**瘦身**（见 types/approval 的 slimFlowMembers，
+   * 只存 open_id / name / avatar），展示与推送匹配需要的 email 由这里按 open_id 补回
+   * —— 与头像同一份数据源、同一次请求（见 stores/avatarDirectory）。
+   */
+  email: string
+  /** 所属部门（成员在树上最近的部门名；没有就是空串） */
+  department: string
+  /** 部门完整路径，如 "总经理 / 财务部 / 财务BP组"（分隔符与 OrgTree 的展示口径一致） */
+  department_path: string
 }
 
 export interface OrgDirectory {
@@ -37,16 +49,25 @@ export function buildOrgDirectory (tree?: OrgTreeNode[] | null): OrgDirectory {
   const byOpenId = new Map<string, OrgDirectoryEntry>()
   const byContact = new Map<string, OrgDirectoryEntry>()
   const nameHits = new Map<string, OrgDirectoryEntry[]>()
-  const walk = (nodes?: OrgTreeNode[] | null) => {
+  /*
+   * 部门路径沿树**边走边记**：path 是"从根到当前节点"的名字栈，成员取它所在节点的名字
+   * 作 department、整条栈拼起来作 department_path（分隔符与 OrgTree 的展示口径一致）。
+   */
+  const walk = (nodes?: OrgTreeNode[] | null, path: string[] = []) => {
     for (const n of nodes ?? []) {
+      const here = [...path, String(n.name ?? '').trim()].filter(Boolean)
       for (const u of n.users ?? []) {
+        const contacts = [u.email, u.mobile]
+          .map(v => String(v ?? '').trim().toLowerCase())
+          .filter(Boolean)
         const entry: OrgDirectoryEntry = {
           open_id: String(u.open_id ?? '').trim(),
           name: String(u.name ?? '').trim(),
           avatar: resolveAvatar(u.avatar),
-          contacts: [u.email, u.mobile]
-            .map(v => String(v ?? '').trim().toLowerCase())
-            .filter(Boolean),
+          contacts,
+          email: String(u.email ?? '').trim(),
+          department: String(n.name ?? '').trim(),
+          department_path: here.join(' / '),
         }
         all.push(entry)
         if (entry.open_id && !byOpenId.has(entry.open_id)) {
@@ -61,7 +82,7 @@ export function buildOrgDirectory (tree?: OrgTreeNode[] | null): OrgDirectory {
           nameHits.set(entry.name, [...(nameHits.get(entry.name) ?? []), entry])
         }
       }
-      walk(n.children)
+      walk(n.children, here)
     }
   }
   walk(tree)

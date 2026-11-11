@@ -17,7 +17,7 @@
  * ## 两条刻意划下的边界（别越界，越了就会退化成半吊子 DSL）
  * 1. **不做表达式/脚本引擎**。模板只能"选内置控件 + 填参数 + 选规则"：
  *    `control` 是内置控件、`limit` 是固定几种上限来源、`showWhen` 只管"另一个键的取值在不在给定集合里"。
- *    带副作用的（接收台账写回、指定接收方即终结、附件）保留为**内置副作用**（`effects`），
+ *    带副作用的（接收台账写回、指定接收方、附件）保留为**内置副作用**（`effects`），
  *    只声明"要哪一种"，参数与算法留在代码里（见 TYPE_EFFECTS）。
  * 2. **运行期不查这张表**。类型模板在建单期解析后进单据快照（与 ref / probe / loop 卡片同一时机、
  *    同一套"已建的单不受后来改动影响"的口径）；办理页只读快照。否则今天改一下模板，
@@ -145,8 +145,8 @@ export const TYPE_EFFECTS: ReadonlyArray<{ value: string, title: string, hint: s
   },
   {
     value: 'receiver',
-    title: '指定接收方即终结',
-    hint: '把选中的组别 / 团队记成接收方（members），流程到此结束（见 CLOSE_FLOW_RESULTS）',
+    title: '指定接收方',
+    hint: '把选中的组别 / 团队记成接收方（members）；流程是否结束由模板里这条结论后面的分支决定',
   },
 ]
 
@@ -367,16 +367,16 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
       },
     ],
   },
-  // 选接收团队 / 选接收部门：点开选人，选中即记为接收方并终结流程（组件 226-252 / 1407-1422）
+  // 选接收团队 / 选接收部门：点开选人，选中即记为接收方（流程是否结束由模板分支决定）
   pick_members: {
     fields: [{ key: 'members', label: '选择接收团队', control: 'team', pick: 'group' }],
     effects: ['receiver'],
-    note: '选中接收团队后流程即结束，后面的环节不再需要办理',
+    note: '选中的团队记为接收方；分支后面还有环节（如剩余未收完走弃置）就继续流转',
   },
   pick_team: {
     fields: [{ key: 'members', label: '选择接收部门', control: 'team', pick: 'team' }],
     effects: ['receiver'],
-    note: '选中接收部门后流程即结束，后面的环节不再需要办理',
+    note: '选中的部门记为接收方；分支后面还有环节就继续流转',
   },
   /*
    * 其余结论（通过 / 驳回 / 不接收 / 建议返工 / 建议弃置 / 市场需求不足 / 待定 / 7 个原因分类）

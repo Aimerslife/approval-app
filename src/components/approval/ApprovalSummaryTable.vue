@@ -125,6 +125,8 @@ import type { SummaryField } from '@/utils/approvalSummary'
 import { buildApprovalSummary } from '@/utils/approvalSummary'
 import { formatDate } from '@/utils/utils'
 import { useUserStore } from '@/stores/user'
+// 链路成员已瘦身（不存部门，见 types/approval 的 slimFlowMembers）——归档表的部门列按 open_id 现查
+import { useAvatarDirectory } from '@/stores/avatarDirectory'
 
 const props = withDefaults(defineProps<{
   /** 单据还没加载出来时传 null —— 组件自己空闲即可（页面不必再套一层 v-if） */
@@ -143,6 +145,9 @@ const props = withDefaults(defineProps<{
 })
 
 const userStore = useUserStore()
+// 组织目录（与头像同一份数据、同一次请求）：给瘦身成员补 email / 部门
+const memberDir = useAvatarDirectory()
+void memberDir.ensure()
 
 /**
  * 发起人姓名：expand 展开值 → 传进来的覆盖值 → 「就是登录者自己」时的姓名。
@@ -168,7 +173,10 @@ const resolvedCreatorName = computed(() => {
 })
 
 /** null = 还没有单据（或模板里没传）：整块不渲染，导出按钮也就无从点起 */
-const summary = computed(() => (props.order ? buildApprovalSummary(props.order, resolvedCreatorName.value) : null))
+const summary = computed(() =>
+  props.order
+    ? buildApprovalSummary(props.order, resolvedCreatorName.value, m => memberDir.detailOf(m).department)
+    : null)
 
 /** 键值对两两一组：一排放四个单元格（key / value / key / value），A4 宽度刚好 */
 function toPairs (fields: SummaryField[]): SummaryField[][] {

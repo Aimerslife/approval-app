@@ -72,6 +72,8 @@ import { useApprovalDockSetting } from '@/composables/useApprovalDockSetting'
 import { optionContextOf } from '@/utils/approvalFlow'
 // 组内第 2..N 环 → 表单的 next-steps；口径与 ApprovalNode 完全一致
 import { type ApproverStepGroup, nextStepsOf, rotationReceiptsOf } from '@/utils/approvalRuntime'
+// 组织目录（按 open_id 补全成员的 department）：固定接收环节的分组名靠它（见下面 rotationReceipts）
+import { useAvatarDirectory } from '@/stores/avatarDirectory'
 import ApprovalHandleForm from './ApprovalHandleForm.vue'
 
 /**
@@ -196,8 +198,16 @@ const optionContext = computed(() => (pendingGroup.value
  * 为什么在抽屉这一层算：`chain` 只有这里有（表单组件只拿到当前环节的成员），
  * 而三处办理入口都收敛到本组件，算一次三处同口径。
  * 没有轮询环时返回空数组，表单那一行自然不显示。
+ *
+ * 部门补全必须带：成员瘦身后 department 不在快照里（见 types/approval 的 slimFlowMembers），
+ * 而**模板把第一棒接收配成固定环节**时（该组负责人办、结论是接收类），那一环没有
+ * `role.dept` —— 组名只能按 open_id 从组织目录现查（实测：美1组先接 50 件、
+ * 之后轮询美2/美3 组，不带补全时面板只列后两组，美1组那行整个丢失）。
  */
-const rotationReceipts = computed(() => rotationReceiptsOf(props.chain))
+const memberDir = useAvatarDirectory()
+void memberDir.ensure()
+const rotationReceipts = computed(() =>
+  rotationReceiptsOf(props.chain, m => memberDir.detailOf(m).department))
 
 /** 两种呈现方式传给表单的是同一组属性，避免两处写两遍后悄悄漂掉 */
 const formProps = computed(() => ({

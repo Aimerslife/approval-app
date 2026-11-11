@@ -499,8 +499,11 @@ export function graphToFlowFrom (
     const list: ConditionExpr[] = Array.isArray(be.data?.conditions)
       ? be.data.conditions
       : (be.data?.condition ? [be.data.condition] : [])
-    // 没绑结论 = 纯"穿过去"，不补兜底（老语义，一字不改）
-    if (!list.some(c => !isConditionGroup(c) && c.field === 'result')) {
+    // 一条条件都没有 = 纯"穿过去"，不补兜底（老语义，一字不改）。
+    // 只绑**业务条件**（不绑结论）也算"有条件"—— 与绑结论同口径："命中这条线继续、
+    // 其它情况整单结束"。编辑器以前根本配不出这种线（addCondition 给引用出线强制先绑
+    // 结论），放开后这里必须接住，否则条件被静默忽略、线变成无条件直通。
+    if (list.length === 0) {
       return {}
     }
     const logic = be.data?.logic === 'or' ? 'or' : 'and'

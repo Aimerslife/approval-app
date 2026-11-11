@@ -1,5 +1,5 @@
-import type { ApprovalBranch, ApprovalChain, ApprovalChainItem, ApprovalFlow, ApprovalNodeOption, ApprovalOrder, FlowEndInfo } from '@/types/approval'
-import { APPROVAL_RESULTS, APPROVAL_STATUS, branchTerminalMapOf, CLOSE_FLOW_RESULTS, firstResultValueOf, mainOf, mergeExtraMembers, RECEIVE_RESULTS, rebuildChain, sameApprover } from '@/types/approval'
+import type { ApprovalBranch, ApprovalChain, ApprovalChainItem, ApprovalFlow, ApprovalNodeOption, ApprovalOrder, FlowEndFacts, FlowEndInfo } from '@/types/approval'
+import { APPROVAL_RESULTS, APPROVAL_STATUS, branchTerminalMapOf, firstResultValueOf, isRefExitsGroupId, LEGACY_CLOSE_FLOW_RESULTS, mainOf, mergeExtraMembers, rebuildChain, RECEIVE_RESULTS, sameApprover } from '@/types/approval'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 
 /*
@@ -53,7 +53,58 @@ export function runtimeOf (order: ApprovalOrder) {
   )
   // 合并运行期追加的抄送/转办（转办会把被接替者标成「已转办」，实现见 mergeExtraMembers）
   mergeExtraMembers(r.chain, r.stepIds, snapshot?.extraMembers)
+  // 历史单收尾兜底（2026-11-10 语义变更，见 LEGACY_CLOSE_FLOW_RESULTS）：
+  // 旧单是在「选接收方」上被旧引擎**当场终结**的；新引擎把它当普通结论会继续往后展开 ——
+  // 已办结的旧单要按**当时的口径**收尾，否则时间线会长出"从没办过"的幽灵环节，
+  // 结束依据还会误报「没有分支命中，流转中止」（实测单 1794219794216）。
+  // 判定口径：单据已办结 **且** 最后一条已办的结论属于历史终结类 —— 这说明旧引擎正是在这一步收的尾。
+  const finished = Number(order.status ?? APPROVAL_STATUS.PENDING) !== APPROVAL_STATUS.PENDING
+  if (finished && !r.done) {
+    let legacyIdx = -1
+    for (let i = r.chain.length - 1; i >= 0; i--) {
+      if (r.chain[i]?.some(m => m.result && LEGACY_CLOSE_FLOW_RESULTS.includes(m.result))) {
+        legacyIdx = i
+        break
+      }
+    }
+    if (legacyIdx >= 0) {
+      const last = r.chain[legacyIdx].find(m => m.result && LEGACY_CLOSE_FLOW_RESULTS.includes(m.result))
+      r.chain.length = legacyIdx + 1
+      r.stepIds.length = legacyIdx + 1
+      r.done = true
+      r.currentStep = -1
+      r.outcome = 'approved' // 旧引擎口径：终结类结论算通过（见 types/approval 的 outcomeOf 历史）
+      r.end = {
+        kind: 'closed',
+        reason: `本环节的结论「${last?.result_label || last?.result || ''}」是终结类结论，流程到此结束`,
+        ...factsOfChain(r.chain),
+      }
+    }
+  }
   return { ...r, done: r.done }
+}
+
+/**
+ * 终止出口的具体事实：取**链上最后一条已办**（谁办的、什么结论、什么时候）。
+ * 与 rebuildChain 内部的 factsOf 同口径（新引擎的各出口自己带 facts，只有上面的
+ * 历史单兜底需要在外面补 —— 单独抽出来避免为它漏传单据上下文）。
+ */
+function factsOfChain (chain: ApprovalChain): { facts?: FlowEndFacts } {
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const items: ApprovalChainItem[] = chain[i] ?? []
+    const m = items.find(x => x?.type === 'manager' && (x.handled_at || x.result))
+      ?? items.find(x => x.handled_at || x.result)
+    if (m) {
+      return {
+        facts: {
+          ...(m.result_label || m.result ? { resultLabel: m.result_label || m.result } : {}),
+          ...(m.name ? { byName: m.name } : {}),
+          ...(m.handled_at ? { at: m.handled_at } : {}),
+        },
+      }
+    }
+  }
+  return {}
 }
 
 /**
@@ -226,11 +277,13 @@ export function queueCursorOf (
  * 但按**同一套判定条件**能从链路 + 流水反推出来：
  *
  *   ① 单据还没结束（`status === PENDING`）→ 进行中，**不给依据**（与 rebuildChain 的 done=false 一致）；
- *   ② 最后一条已办的结论属于**终结类结论**（CLOSE_FLOW_RESULTS，如「选择接收团队」）→ 它本身就是结果；
+ *   ② 最后一条已办的结论属于**终结类结论**（历史口径 LEGACY_CLOSE_FLOW_RESULTS，
+ *      如「选择接收团队」—— 这类结论 2026-11-10 起不再终结流程，但旧单就是按它结束的）
+ *      → 它本身就是结果；
  *   ③ 其余 → 所有环节都已办完（附最后一个环节的结论）。
  *
- * 与 rebuildChain 的 `markEnd` 同口径（同一份 CLOSE_FLOW_RESULTS、同样取"最后一条已办"），
- * 所以旧单与新单在时间线上看到的是**同一种表述**。
+ * 与 rebuildChain 的 `markEnd` 同样取"最后一条已办"作事实，所以旧单与新单在时间线上
+ * 看到的是**同一种表述**（终结类结论 2026-11-10 起只在旧单出现，见 LEGACY_CLOSE_FLOW_RESULTS）。
  * 旧单唯一的欠缺：拿不到"命中的是哪条分支线"（那要有 flow 才算得出来），所以不写 `exit` 那一类。
  *
  * ⚠️ 时间字段只认 `handled_at`（与全仓一致）；更老的记录若用别的字段名，这里就退化成不显示时间，
@@ -250,8 +303,8 @@ export function legacyFlowEndOf (order: ApprovalOrder): FlowEndInfo | undefined 
     ...(last?.name ? { byName: last.name } : {}),
     ...(last?.handled_at ? { at: last.handled_at } : {}),
   }
-  // ② 终结类结论收尾：这就是引擎里 `kind: 'closed'` 的判定条件
-  if (result && CLOSE_FLOW_RESULTS.includes(result)) {
+  // ② 终结类结论收尾（历史口径）：新单的引擎已无此类出口（kind: 'closed' 不会再产生）
+  if (result && LEGACY_CLOSE_FLOW_RESULTS.includes(result)) {
     return {
       kind: 'closed',
       reason: `本环节的结论「${label}」是终结类结论，流程到此结束`,
@@ -450,7 +503,12 @@ export interface RotationReceipt {
   at?: string
 }
 
-export function rotationReceiptsOf (chain: ApprovalChainItem[][]): RotationReceipt[] {
+export function rotationReceiptsOf (
+  chain: ApprovalChainItem[][],
+  /** 成员部门补全（链路成员瘦身后 department 不在快照里，见 types/approval 的 slimFlowMembers）；
+   *  调用方从组织目录取（stores/avatarDirectory 的 detailOf），不传则老单自带什么显示什么 */
+  deptOf?: (m: ApprovalChainItem) => string,
+): RotationReceipt[] {
   const byGroup = new Map<string, RotationReceipt>()
   for (const step of chain ?? []) {
     const who = mainOf(step)
@@ -471,7 +529,7 @@ export function rotationReceiptsOf (chain: ApprovalChainItem[][]): RotationRecei
       if (!RECEIVE_RESULTS.includes(String(who.result))) {
         continue
       }
-      group = String(who.department ?? '').trim()
+      group = String(who.department ?? '').trim() || deptOf?.(who) || ''
       if (!group) {
         continue
       }
@@ -620,6 +678,12 @@ function discardFlags (
  *     （三种回收：自己回收 / 供应商回收 / 平台回收）出现在弃置段**内部**，
  *     当成入口会在段内又找一个"起点"，段首标志跟着跑到中间去。
  * 所以只列弃置流程**本身的入口**：`discard`（建议弃置）+ `lack_demand`（无需求走弃置）。
+ *
+ * `dispose` 单独判（见 branchEntersDiscard）：它**只**在引用卡片的出线组（`:exits`）上算入口 ——
+ * 模板用引用卡片分流时，弃置段就挂在那条「弃置」出线的子树里（实测单 1794359076584：
+ * 引用出线「弃置」绑 `result=dispose`，漏判则整段没有背景/标志/余量）。
+ * 而普通审批结论上的「弃置/处置」子树可能是正常流程（美一组关卡审批：审批结论「弃置」
+ * 下面接的是仓位判断 + 数据查询 + 部门轮询），一律算入口会把正常环节染成弃置段。
  */
 const DISCARD_ENTRY_RESULTS = ['discard', 'lack_demand']
 
@@ -663,7 +727,7 @@ function discardSubtreeIds (flow: ApprovalFlow): Set<string> {
        */
       for (const b of (node?.branches ?? []) as ApprovalBranch[]) {
         // 回退 / 跳出这类分支不是"往下走"，不算弃置入口
-        if (!b?.loopBackTo && !b?.exitTo && branchEntersDiscard(b)) {
+        if (!b?.loopBackTo && !b?.exitTo && branchEntersDiscard(b, node?.id)) {
           addAll(b.steps)
           // 已整段收下：段内不会再有"入口"（段内的回收 / 报废分支不在 entry 名单里）
           continue
@@ -743,9 +807,18 @@ function discardFlagsByRef (stepIds: string[]): boolean[] | undefined {
   return stepIds.map(id => refSourceKeys(id).some(k => keys.has(k)))
 }
 
-/** 这条分支是不是"弃置流程的入口"（**顶层**结论条件命中弃置入口结论；口径同 firstResultValueOf） */
-function branchEntersDiscard (b: ApprovalBranch): boolean {
-  return DISCARD_ENTRY_RESULTS.includes(String(firstResultValueOf(b) ?? '').trim())
+/**
+ * 这条分支是不是"弃置流程的入口"（**顶层**结论条件命中弃置入口结论；口径同 firstResultValueOf）。
+ *
+ * `groupId` 传分支**所属分支组的节点 id**：`dispose` 只在引用卡片出线组（`:exits`/`:bound`）
+ * 上算入口 —— 审批结论上的 dispose 子树可能是正常流程（见 DISCARD_ENTRY_RESULTS 的说明）。
+ */
+function branchEntersDiscard (b: ApprovalBranch, groupId?: unknown): boolean {
+  const code = String(firstResultValueOf(b) ?? '').trim()
+  if (code === 'dispose') {
+    return isRefExitsGroupId(groupId)
+  }
+  return DISCARD_ENTRY_RESULTS.includes(code)
 }
 
 /**

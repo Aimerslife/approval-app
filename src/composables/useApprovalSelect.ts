@@ -1,6 +1,6 @@
-import type { Ref } from 'vue'
 import type { UserBrief } from '@/api/api'
 import type { ApprovalChainItem, ApprovalOrder } from '@/types/approval'
+import type { Ref } from 'vue'
 import { updateApprovalOrder } from '@/utils/collection'
 
 /**
@@ -62,10 +62,12 @@ export function useApprovalSelect (options: UseApprovalSelectOptions) {
     const managers = (chain[idx] ?? []).filter(m => m.type === 'manager')
     const fromName = managers.at(-1)?.name ?? ''
     const member: ApprovalChainItem = {
+      /*
+       * 与建单期瘦身同一份口径（见 types/approval 的 slimFlowMembers，2026-11-10 最终版）：
+       * 只存 open_id + name（+ type / 转办标记）；avatar / email 由展示层按 open_id 现查。
+       */
       ...(u.open_id ? { open_id: u.open_id } : {}),
       name: u.name,
-      avatar: u.avatar,
-      email: u.email,
       type: isTransfer ? 'manager' : 'cc',
       ...(isTransfer
         ? { delegated_from: fromName || '（未指定）', delegated_at: new Date().toISOString() }

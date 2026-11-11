@@ -4,6 +4,7 @@
       <v-icon :icon="props.icon" size="20" />
     </v-icon-btn>
     <span class="text-[13px]">{{ props.title }}</span>
+    <slot />
   </div>
 </template>
 <script lang="ts" setup>

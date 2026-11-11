@@ -1,4 +1,4 @@
-import { APPROVAL_STATUS, CLOSE_FLOW_RESULTS, PENDING_RESULT, type FlowEndInfo } from '@/types/approval'
+import { APPROVAL_STATUS, LEGACY_CLOSE_FLOW_RESULTS, PENDING_RESULT, type FlowEndInfo } from '@/types/approval'
 
 /** 行里**可被筛选**的字段（页面的 ApprovalRow 是它的超集） */
 export interface FilterableRow {
@@ -36,7 +36,7 @@ export const APPROVAL_STAGE = {
   APPROVED: 3,
   /** 走完流程且落入驳回走向 */
   REJECTED: 4,
-  /** 命中「选择接收组别 / 团队」这类终结类结论（货有人接了） */
+  /** 结束在「选择接收团队 / 部门」上（历史口径 LEGACY_CLOSE_FLOW_RESULTS，货有人接了） */
   RECEIVED: 5,
   /** 流程卡住（模板缺兜底分支 / 疑似成环），要人去查模板 */
   STUCK: 6,
@@ -95,8 +95,9 @@ export function approvalStageOf (
   if (s === APPROVAL_STATUS.REJECTED) {
     return APPROVAL_STAGE.REJECTED
   }
-  // 已结束且不是驳回：先看最后一条结论是不是"终结类"（接收组别 / 团队），再看「待定」
-  if (last?.result && CLOSE_FLOW_RESULTS.includes(last.result)) {
+  // 已结束且不是驳回：先看最后一条结论是不是"选接收方"（历史口径 LEGACY_CLOSE_FLOW_RESULTS ——
+  // 该类结论 2026-11-10 起不再终结流程，但结束在它上面的单仍归「已接收」档），再看「待定」
+  if (last?.result && LEGACY_CLOSE_FLOW_RESULTS.includes(last.result)) {
     return APPROVAL_STAGE.RECEIVED
   }
   return last?.result === PENDING_RESULT ? APPROVAL_STAGE.HELD : APPROVAL_STAGE.APPROVED

@@ -56,8 +56,11 @@
             </v-sheet>
           </div>
 
-          <!-- 全部部门树：keyword 一并传下去，搜索才不只在本部门生效 -->
-          <DepartmentNode v-show="tab === 'all'" ref="deptNodeRef" :keyword="keyword" @select="selectUser" />
+          <!-- 全部部门树：keyword 一并传下去，搜索才不只在本部门生效。
+               必须用 v-if 按需挂载（不能用 v-show）：v-dialog 每次打开都会重建内容，
+               v-show 会把整棵组织树的首次渲染（~1.5s 主线程阻塞）塞进"点抄送/转办 → 弹窗出现"
+               这一段里 —— 实测点击后近 2 秒才见弹窗；v-if 后 ~60-90ms 即现。 -->
+          <DepartmentNode v-if="tab === 'all'" ref="deptNodeRef" :keyword="keyword" @select="selectUser" />
 
           <!-- 选中人员：转办单选 / 抄送多选 -->
           <SelectedUsers :action="action" :users="selectedUsers" @remove="removeUser" />
@@ -76,9 +79,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { getDepartmentUsers, proxyAvatar, type UserBrief } from '@/api/api'
+import { computed, onMounted, ref } from 'vue'
+import { type UserBrief } from '@/api/api'
 import { useUserStore } from '@/stores/user'
+// 通讯录数据的会话级缓存：先弹窗再加载（见 utils/orgPickerCache 的模块说明）
+import { deptUsersCache, deptUsersFresh, fetchDeptUsersOnce, fetchOrgTreeOnce, type DeptUsersSnapshot } from '@/utils/orgPickerCache'
 import DepartmentNode from '../DepartmentNode.vue'
 import SelectedUsers from '../SelectedUsers.vue'
 
@@ -130,11 +135,30 @@ function openPicker(a: string) {
   keyword.value = ''
   tab.value = 'dept'
   deptNodeRef.value?.reset()
+  // 先弹窗，再加载：弹窗同步打开，本部门成员在 loadDeptUsers 里命中缓存直接渲染、
+  // 未命中才转骨架屏（抄送 / 转办同一个弹窗、同一条数据链路，行为完全一致）
   showPicker.value = true
   loadDeptUsers()
 }
 
+/** 把一份快照填进当前弹窗（缓存命中 / 静默刷新共用同一入口） */
+function applyDeptUsers(snapshot: DeptUsersSnapshot) {
+  deptName.value = snapshot.deptName
+  deptUsers.value = snapshot.users
+}
+
 async function loadDeptUsers() {
+  // 命中缓存：立即渲染不转骨架；过期则后台静默刷新，不打断当前内容
+  const cached = deptUsersCache()
+  if (cached) {
+    applyDeptUsers(cached)
+    if (!deptUsersFresh()) {
+      const openId = userStore.user?.open_id
+      if (openId) void fetchDeptUsersOnce(openId).then(applyDeptUsers).catch(() => {})
+    }
+    return
+  }
+
   const openId = userStore.user?.open_id
   if (!openId) {
     deptError.value = '未获取到当前用户 open_id，请先通过飞书登录'
@@ -143,18 +167,24 @@ async function loadDeptUsers() {
   deptLoading.value = true
   deptError.value = ''
   try {
-    const res = await getDepartmentUsers(openId)
-    deptName.value = res.data.department_name
-    deptUsers.value = res.data.users.map(u => ({
-      ...u,
-      avatar: u.avatar ? proxyAvatar(u.avatar) : undefined,
-    }))
+    applyDeptUsers(await fetchDeptUsersOnce(openId))
   } catch (error: any) {
     deptError.value = error?.message || '加载部门成员失败'
   } finally {
     deptLoading.value = false
   }
 }
+
+/**
+ * 预热：办理界面一挂载就后台把两份通讯录拉好（本部门成员 + 全部部门树），
+ * 等用户点「抄送 / 转办」时弹窗里直接就是名单，而不是骨架屏。
+ * 拉失败不打扰 —— 打开弹窗时 loadDeptUsers / DepartmentNode 会自己兜底重拉。
+ */
+onMounted(() => {
+  const openId = userStore.user?.open_id
+  if (openId) void fetchDeptUsersOnce(openId).catch(() => {})
+  void fetchOrgTreeOnce().catch(() => {})
+})
 
 const filteredDeptUsers = computed(() => {
   const kw = keyword.value.trim().toLowerCase()

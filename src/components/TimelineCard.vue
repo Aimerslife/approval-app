@@ -10,7 +10,9 @@
     >
       <div v-for="(its, i) in item" :key="i" class="d-flex align-center mb-1 cursor-pointer" @click="send(its)">
         <v-avatar class="mr-3" size="25">
-          <v-img v-if="its.avatar" cover :src="its.avatar" />
+          <!-- 链路成员已瘦身（快照不带头像，见 types/approval 的 slimFlowMembers）：
+               老单自带直显，新单按 open_id 从组织目录现查 -->
+          <v-img v-if="its.avatar || avatarDir.avatarOf(its)" cover :src="its.avatar || avatarDir.avatarOf(its)" />
           <v-icon v-else size="20">mdi-account</v-icon>
         </v-avatar>
 
@@ -26,6 +28,10 @@
 </template>
 <script lang="ts" setup>
   import type { ApprovalChainItem } from '@/types/approval'
+  // 成员目录：瘦身后的链路成员不带头像，按 open_id 现查（见 stores/avatarDirectory）
+  import { useAvatarDirectory } from '@/stores/avatarDirectory'
+  const avatarDir = useAvatarDirectory()
+  void avatarDir.ensure()
   const emits = defineEmits<{
     send: [item: ApprovalChainItem]
   }>()

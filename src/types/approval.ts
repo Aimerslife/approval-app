@@ -59,24 +59,32 @@ export interface ApprovalAttachment {
 
 export interface ApprovalChainItem {
   name?: string
+  /**
+   * 邮箱。**新单里不再存**（2026-11-10 成员瘦身，见 slimFlowMembers）：认人已改 open_id 优先
+   * （sameApprover），发飞书通知 open_id 优先、email 只是老数据兜底；确需 email 时按 open_id
+   * 从组织架构缓存现查（见 stores/avatarDirectory 的 detailOf）。老单自带照旧。
+   */
   email?: string
   /**
    * 头像 URL。
    *
-   * **新单里不再有这一项**（见 slimFlowMembers）：它一个就 ~165 B，而同一份记录会被按环节
-   * （轮询还要按组）复制很多遍 —— 实测 97 个成员对象里只有 15 个人。
-   * 现在展示层按 `open_id`（退化用 `email`）现查（见 stores/avatarDirectory）；
-   * 老单自带这一项，照旧直显。两边都支持，所以读取方统一走 `avatar ?? 现查`。
+   * **新单里不再存**（2026-11-10 成员瘦身最终口径，见 slimFlowMembers：快照只留
+   * open_id + name）：展示层按 `open_id`（退化用 `email`）现查（见 stores/avatarDirectory
+   * 的 avatarOf）；老单自带这一项，照旧直显。读取方统一走 `m.avatar || avatarOf(m)`。
    */
   avatar?: string
-  /** 飞书 open_id：查头像 / 认人用的稳定标识（通讯录选人时带上，见 components/OrgTree.vue） */
+  /** 飞书 open_id：认人 / 查档案 / 发通知的稳定标识（通讯录选人时带上，见 components/OrgTree.vue） */
   open_id?: string
   is_tenant_manager?: boolean
   is_leader?: boolean
   type?: 'manager' | 'cc' | string
-  /** 所属部门：该成员在组织架构中最近的上级部门 */
+  /**
+   * 所属部门：该成员在组织架构中最近的上级部门。
+   * **新单里不再存**（成员瘦身）：展示按 open_id 现查（stores/avatarDirectory 的 detailOf）；
+   * 老单自带照旧直显（读取方 `m.department || detailOf(m).department` 兜底）。
+   */
   department?: string
-  /** 部门完整路径，如 "XX公司 / 技术部 / 前端组"，用于悬浮展示 */
+  /** 部门完整路径（同上，新单不存、展示现查；用于悬浮展示） */
   department_path?: string
 
   // ===== 办理信息：审批人提交后回填，随 chain 一起存库 =====
@@ -262,12 +270,18 @@ export function mainOf (step?: ApprovalChainItem[]) {
 }
 
 /**
- * 两个审批人是不是同一个人：**邮箱优先**（快照里最稳的标识），缺邮箱时退回姓名。
+ * 两个审批人是不是同一个人：**open_id 优先**（瘦身后唯一稳定的标识，见 slimFlowMembers），
+ * 老成员没有 open_id 时退回邮箱（再老的连邮箱也没有 → 姓名，与改造前口径一致）。
  * 口径说明见 mainOf。
  */
 export function sameApprover (a?: ApprovalChainItem, b?: ApprovalChainItem) {
   if (!a || !b) {
     return false
+  }
+  const aid = String(a.open_id ?? '').trim()
+  const bid = String(b.open_id ?? '').trim()
+  if (aid && bid) {
+    return aid === bid
   }
   const ae = String(a.email ?? '').trim().toLowerCase()
   const be = String(b.email ?? '').trim().toLowerCase()
@@ -525,10 +539,10 @@ export function isConditionGroup (expr: ConditionExpr): expr is ConditionGroup {
 /**
  * 「选择接收团队」结论码。
  *
- * 语义：这一环的办理人**当场指定由哪个团队接下这批货**，命中即**终结流程**
- * （接收方是**结果**，不是下一环的审批人，见 CLOSE_FLOW_RESULTS）。
- * 所以模板里那个接收环节**可以留空**（`allowEmptyMembers`，编辑器已放开）——
- * 「谁接」由业务在办理时按实际情况决定，写死在模板里反而做不到。
+ * 语义：这一环的办理人**当场指定由哪个团队接下这批货**（接收方随结论记进办理流水，
+ * 见 receiversOf）。它是**普通结论**：流程是否结束由模板里这条结论命中的分支决定
+ * ——分支连到结束节点就结束，后面还有环节（如「剩余 > 0 → 弃置段」）就继续走
+ * （2026-11-10 起，原「命中即终结」口径已废，见 CLOSE_FLOW_RESULTS 的变更说明）。
  *
  * 候选来自**团队表**（utils/organazation 的 groupManage：`group` = 团队、`manager` = 团队负责人），
  * 按部门分组展示；不是整棵飞书通讯录，见 components/TeamPicker.vue 的说明。
@@ -539,7 +553,7 @@ export const PICK_MEMBERS_RESULT = 'pick_members'
 /**
  * 「选择接收部门」结论码。
  *
- * 与「选择接收团队」是**同一族**的结论（当场指定接收方、命中即终结流程），差别只在**粒度**：
+ * 与「选择接收团队」是**同一族**的结论（当场指定接收方、随结论记进办理流水），差别只在**粒度**：
  *   · pick_members —— 选到**团队**（表里的 `group`），接收方记「团队名 + 团队负责人」；
  *   · pick_team    —— 选到**部门**（表里的 `parent`），接收方记「部门名 + 部门负责人」（`parentManager`）。
  *
@@ -633,14 +647,14 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
    * 引擎只看结论命中哪条分支，所以不配这些名单就等于"正常往前走"。
    */
   { value: 'enter_approval', label: '进入审批' },
-  // 「选择接收团队」：办理人当场指定由哪个团队接下这批货（命中即终结流程，
-  // 接收方是**结果**、不是下一环的审批人 —— 见 PICK_MEMBERS_RESULT 的说明）。
+  // 「选择接收团队」：办理人当场指定由哪个团队接下这批货（接收方是**结果**、
+  // 随结论记进办理流水 —— 见 PICK_MEMBERS_RESULT 的说明；流程是否结束由模板分支决定）。
   // 配套的是「允许没有审批人的环节」—— 模板里把接收环节留空，由上一环指定。
   // 白板上的「指定接收团队」就是这个环节。
   // （码值 `pick_members` 是历史叫法，原「选择接收组别」；老模板里的旧文案见 LEGACY_RESULT_TEXTS。）
   { value: PICK_MEMBERS_RESULT, label: '选择接收团队' },
   // 「选择接收部门」：粒度上移到部门（`parent`）—— 接收方是「部门 + 部门负责人」，
-  // 命中即终结流程（见 PICK_TEAM_RESULT 与 CLOSE_FLOW_RESULTS）。
+  // 随结论记进办理流水（见 PICK_TEAM_RESULT；流程是否结束由模板分支决定）。
   // 编辑器里的「审批结论」下拉直接读这张表，所以这一条加进来，模板里立刻可选。
   { value: PICK_TEAM_RESULT, label: '选择接收部门' },
   // —— 原因分类：来自「库存管理流程规范」白板的「筛选一级原因/二级原因」环节——
@@ -704,15 +718,27 @@ export const REJECT_RESULTS: ReadonlyArray<string> = ['reject']
 export const PENDING_RESULT = 'pending'
 
 /**
- * 命中即**终结流程**的结论：这一步办完流程就结束，后面的环节不再展开、也就没人有权限办。
+ * 命中即**终结流程**的结论 —— **2026-11-10 起为空**。
  *
- * 目前是「选择接收团队」与「选择接收部门」两条：接收方是**结果**（哪个团队 / 哪个部门接下这批货），
- * 不是下一环的审批人。所以模板里配这两条结论的分支，后面接什么都不会生效（建议直接连到结束节点）。
+ * 原先这里是「选择接收团队」（pick_members）与「选择接收部门」（pick_team）：办理人选完
+ * 接收方流程立即收尾，后面接什么环节都不生效。实测业务模板里「选完接收方后剩余还有 →
+ * 继续轮询 / 弃置段」的走法到不了（如单 1794219794216：剩余 520 件本应进弃置，
+ * 流程却在选完团队的瞬间按终结收尾），已按业务口径把这两个码改回**普通结论**：
+ * 流程是否结束完全由模板里这条结论命中的分支决定（连到结束节点就结束，后面还有环节就继续走）。
  *
- * 与 REJECT_RESULTS 的唯一区别在终态判定：这里的终结算**通过**（流程正常走完），
- * REJECT_RESULTS 算驳回。见 outcomeOf()。
+ * 导出保留但恒为空：closesFlow 已随之下线（引擎不再有"终结类结论"出口）。
+ * 旧单的展示层要认出"历史上因选接收方而结束"的单，用 LEGACY_CLOSE_FLOW_RESULTS。
  */
-export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT, PICK_TEAM_RESULT]
+export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = []
+
+/**
+ * **历史口径**：曾经「命中即终结流程」的结论码（变更缘由见 CLOSE_FLOW_RESULTS）。
+ *
+ * 只给**展示层**用，引擎（rebuildChain）不读它：
+ *   · 旧单（快照里没有 flow）的结束依据 —— 按它反推"这张单为什么停"（legacyFlowEndOf）；
+ *   · 列表的「已接收」档 —— 历史单与新单里"最后一条已办是选接收方"的识别（approvalStageOf）。
+ */
+export const LEGACY_CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT, PICK_TEAM_RESULT]
 
 /**
  * 「接收」类结论码：只有这两种结论下，办理流水里的 `extra.qty` 才表示**这一轮接收了多少件**。
@@ -763,8 +789,8 @@ export interface ReceiverTeam extends ApprovalChainItem {
 /**
  * 取「选择接收团队 / 选择接收部门」的办理结果（接收方列表），用于在时间线上**单独渲染节点**。
  *
- * 为什么单独取：命中 CLOSE_FLOW_RESULTS 的结论会终止流程，接收方**不是**任何一个
- * chain 环节的审批人（它不在 chain 里），所以只能从办理流水里取出来单独展示。
+ * 为什么单独取：接收方记在**办理流水的 extra.members** 里（它是"结论的成果"，
+ * 不是该环节的审批人名单），所以从流水里取出来单独展示。
  * 同一单可能被驳回重审过，取**最后一条**这类结论；两条结论都认（粒度不同，见 PICK_TEAM_RESULT）。
  *
  * 为什么返回数组：一批货可以**同时交给几个团队**（各自接一部分，数量记在成员的 `qty` 上）。
@@ -1003,6 +1029,11 @@ export function optionTextsToText (list?: string[]): string {
 export interface ApprovalFlowApprovalNode {
   id: string
   type: 'approval'
+  /**
+   * 环节名（画布上给这张卡片起的标题，如「流程11」「产品侵权」）。
+   * 没起名时省略 —— 时间线 / 流程概览显示「审批」兜底（见 collectStepNames）。
+   */
+  name?: string
   /** 该环节的审批人，多人时为会签 */
   nodes: ApprovalChainItem[]
   /**
@@ -1313,6 +1344,25 @@ export function findBranch (node: ApprovalFlowBranchNode, name: string): Approva
  *    要按组逐个分流，得在展开时把分支也按环复制（本次未做）。
  */
 export const CURRENT_GROUP_FIELD = 'current_group'
+
+/**
+ * 派生字段（运行期才有值）：**最近一次命中的分支名**（画布上的线路名称，如 弃置 / 全部接收 / 金额判断）。
+ *
+ * 用途：引用段以**条件分支**收尾时，段内不产生审批结论，外层引用卡片的出线按"结论"
+ * 永远匹配不上 —— 出线改用这个字段即可承接"段内走了哪条线"：
+ * 条件写 `条件分支 = 弃置`，或直接给外线起个与内层分支同名的名字（引擎按名兜底匹配，
+ * 见 rebuildChain 的 walkSteps / walkFlow）。
+ */
+export const BRANCH_NAME_FIELD = '条件分支'
+
+/** 按分支名找同名分支（trim 后完全相等才算命中；用于 :exits 的按名承接） */
+export function branchByName (branches: ApprovalBranch[], name: unknown): ApprovalBranch | undefined {
+  const key = String(name ?? '').trim()
+  if (!key) {
+    return undefined
+  }
+  return branches.find(b => String(b.name ?? '').trim() === key)
+}
 
 /** 分支的全部命中条件：优先用多条件 conditions，兼容旧的单条件 condition */
 export function branchConditions (b: ApprovalBranch): ConditionExpr[] {
@@ -1968,8 +2018,7 @@ export function collectStepOptionItems (
    * 两者都**不能**参与尾环节的选项推导，但段尾自己的结果分支（`:result`）照常生效。
    */
   function isRefExitGroup (id: unknown) {
-    const s = String(id ?? '')
-    return s.endsWith(':exits') || s.endsWith(':bound')
+    return isRefExitsGroupId(id)
   }
 
   /**
@@ -1982,9 +2031,23 @@ export function collectStepOptionItems (
    * id 形如 `<卡片id>:result#<环号>`）整个盖掉 —— 办理端只剩一条「继续下一组」，
    * 表现出来就是"不管选哪个结论，一律继续下一组"。
    */
-  function isLoopInjectedGroup (id: unknown) {
+  function isLoopInjectedGroup (id: unknown, branches?: ApprovalBranch[]) {
     const s = String(id ?? '')
-    return s.endsWith(':after-loop') || /:break:\d+$/.test(s)
+    if (s.endsWith(':after-loop') || /:break:\d+$/.test(s)) {
+      return true
+    }
+    /*
+     * **压缩过的单据**认不出 id 后缀：`compactFlowSnapshot` 会把组 id 换成 `bNN`
+     * （这一步已改为保留语义组 id，但**存量单**还是短 id）——用生成器写死的分支名兜底
+     * （见 utils/approvalRotation 的 breakBranchGroup / loopEndBranchGroup）：
+     *   · 跳出组 =「继续下一组」+「提前跳出轮询（第 N 环后）」
+     *   · 轮完组 =「轮询走完」
+     * 这三个名字是建单期注入时写死的、用户改不到（注入组不在编辑器里露脸），按名判定安全。
+     */
+    const names = (branches ?? []).map(b => String(b.name ?? '').trim())
+    return names.includes('轮询走完')
+      || names.includes('继续下一组')
+      || names.some(n => n.startsWith('提前跳出轮询'))
   }
 
   /** 分支内的步骤序列：branch 步骤归属于它前面那个审批步骤 */
@@ -2005,11 +2068,28 @@ export function collectStepOptionItems (
             }
           }
           prev = undefined
-        } else if (isLoopInjectedGroup(s.id)) {
+        } else if (isLoopInjectedGroup(s.id, s.branches)) {
           // 轮询注入的跳出组 / 轮完组：不参与上一环的结论推导，且不把后续分支组算到上一环头上
           prev = undefined
         } else if (prev) {
-          map[prev.id] = optionsOfApproval(prev, s.branches)
+          /*
+           * 推导出**空选项**时不覆盖：走到这里的组要么是纯条件组（各分支都绑业务条件、
+           * 没有结论码也没有无条件主线，见 optionsOf 的过滤），要么是注入形态
+           * （injectedOnly，故意返回 [] 让办理端回落结论目录）—— 它们都不是上一环的
+           * "办理结论"。前面如果已有真结果组写入过选项（如「结果分支 → 条件分支」连排），
+           * 直接赋值会把真选项洗掉。
+           *
+           * **归属只消费一次**：编译器给每个审批环节只生成**一个**结果分支组（紧跟环节本身），
+           * 之后同层再出现的分支组都是**下游路由**（条件分流 / 引用分流 / 轮询注入），
+           * 不该再算到这一环头上 —— 所以这里处理完就把 prev 清掉。
+           * 实测（快照被压缩的单据）：引用段首环 → 段内条件组（无条件兜底分支名"弃置"）→
+           * `:exits` 分流组，旧逻辑两组先后盖到首环头上，办理人看到的是下游的结论。
+           */
+          const opts = optionsOfApproval(prev, s.branches)
+          if (opts.length > 0) {
+            map[prev.id] = opts
+          }
+          prev = undefined
         }
         for (const b of s.branches) {
           collectSteps(b.steps)
@@ -2037,11 +2117,16 @@ export function collectStepOptionItems (
           }
         }
         prevTop = undefined
-      } else if (isLoopInjectedGroup(node.id)) {
+      } else if (isLoopInjectedGroup(node.id, node.branches)) {
         // 同上：轮询展开期注入的跳出组 / 轮完组不是上一环的办理结论
         prevTop = undefined
       } else if (prevTop) {
-        map[prevTop.id] = optionsOfApproval(prevTop, node.branches)
+        // 同 collectSteps 里的说明：空选项（纯条件组 / 注入形态）不覆盖已有选项；归属只消费一次
+        const opts = optionsOfApproval(prevTop, node.branches)
+        if (opts.length > 0) {
+          map[prevTop.id] = opts
+        }
+        prevTop = undefined
       }
       for (const b of node.branches) {
         collectSteps(b.steps)
@@ -2060,6 +2145,42 @@ export function collectStepOptionItems (
      * 提醒没有"办理结论"这一说，它后面那组选项本来就不该出现在任何环节里。
      */
     prevTop = undefined
+  }
+  return map
+}
+
+/**
+ * 环节 id → 模板里给这一环起的名字（没起名的不进表）。
+ *
+ * 时间线与办理卡片要显示「这是哪一环」（如「流程11」「产品侵权」「PMC审批」），
+ * 但 `runtimeOf` 的 `chain` 只有**成员**（`ApprovalChainItem[][]`），名字只存在 flow 的步骤上：
+ *   · 顶层审批节点的 `name`（画布卡片的标题）；
+ *   · 分支内步骤 / 轮询卡片内部步骤的 `name`（每环一份，id 带 `#ring` 后缀）。
+ * 页面据此按 `stepId` 回查后下发给 ApprovalNode（`step-name`），时间线才不会只剩「[部门] 姓名」。
+ */
+export function collectStepNames (flow: ApprovalFlow): Record<string, string> {
+  const map: Record<string, string> = {}
+  const take = (s: { id?: string, name?: string }) => {
+    const name = String(s.name ?? '').trim()
+    if (s.id && name) {
+      map[s.id] = name
+    }
+  }
+  const walk = (steps: ApprovalFlowStep[] | undefined) => {
+    for (const s of steps ?? []) {
+      take(s)
+      for (const b of s.branches ?? []) {
+        walk(b.steps ?? [])
+      }
+      walk(s.steps)
+    }
+  }
+  for (const node of flow) {
+    take(node as { id?: string, name?: string })
+    for (const b of (node as { branches?: ApprovalBranch[] }).branches ?? []) {
+      walk(b.steps ?? [])
+    }
+    walk((node as { steps?: ApprovalFlowStep[] }).steps)
   }
   return map
 }
@@ -2269,7 +2390,8 @@ export function compactBranchTerminal (map: BranchTerminalMap): BranchTerminalMa
 export interface FlowEndInfo {
   /**
    * 停止类型：
-   *   · closed   —— 命中终结类结论（CLOSE_FLOW_RESULTS，如「选择接收组别」）；
+   *   · closed   —— 命中终结类结论（**历史口径**：引擎已不再产生，旧单展示层按
+ *                LEGACY_CLOSE_FLOW_RESULTS 反推，见 legacyFlowEndOf）；
    *   · exit     —— 分支直达结束节点（连线画到「结束」）；
    *   · finished —— 所有环节都办完了；
    *   · stuck    —— 没分支命中 / 兜底主线缺失 / 疑似成环，**流程卡住**（异常，要人查模板）。
@@ -2689,13 +2811,10 @@ export function rebuildChain (
   }
 
   /**
-   * 该结论是否**终结流程**（见 CLOSE_FLOW_RESULTS）。
-   * 命中就不再往后展开：后面的环节不进 chain、也就没人有权限办 ——
-   * 「选择接收组别」就是这种：接收方是结果，不是下一环的审批人。
+   * 「终结类结论」已下线（2026-11-10）：选接收方（pick_members / pick_team）改回普通结论，
+   * 流程是否结束由模板分支决定 —— 原 CLOSE_FLOW_RESULTS 出口连同 closesFlow 一并移除，
+   * 历史口径只留在展示层（LEGACY_CLOSE_FLOW_RESULTS）。
    */
-  function closesFlow (d: NodeDecision | undefined): boolean {
-    return !!d && CLOSE_FLOW_RESULTS.includes(d.result)
-  }
 
   /** 生成一个 chain 环节并回填其结论；返回结论（undefined = 该环节待办） */
   function pushStep (stepId: string): NodeDecision | undefined {
@@ -2733,13 +2852,7 @@ export function rebuildChain (
       currentStep = chain.length - 1
       return false
     }
-    // 重审时选了终结类结论 → 同样到此结束
-    if (closesFlow(d)) {
-      done = true
-      terminalBranch = null
-      markEnd('closed', `重审时选了终结类结论「${resultLabelOf(d.result)}」，流程到此结束`)
-      return false
-    }
+    // 重审选「选接收方」也已不再终结流程（2026-11-10）：按普通结论续走模板分支
     const form = formOf(d, stepId)
     const idx = flowIndexById.get(stepId)
     if (idx !== undefined) {
@@ -2809,10 +2922,34 @@ export function rebuildChain (
         throw new Error('流程里的「引用模板」步骤没有在建单时展开，单据数据不完整（见 utils/templateRef）')
       }
       if (s.type === 'branch' && s.branches?.length) {
-        const b = matchBranch(s.branches, form)
+        let b = matchBranch(s.branches, form)
+        if (!b && isRefExitsGroupId(s.id)) {
+          /*
+           * 引用段的走向由**条件分支**收尾时，外层出线按"结论"匹配必然落空 ——
+           * 条件分支只产出"走了哪条线"，不产出审批结论。这里按**最后命中的分支名**
+           * 找同名出线承接（画布上内外同名 = 同一走向：实测模板内层「弃置」「全部接收」
+           * 与外层出线同名），命中的前提是作者给外线起了同一个名字。
+           */
+          b = branchByName(s.branches, form[BRANCH_NAME_FIELD]) ?? null
+        }
         if (!b) {
+          /*
+           * 引用卡片「按结论分流」组未命中：段内最后办出来的结论，画布上**没有给它接线**
+           * —— 语义是"这一段到此为止"，主流程从引用卡片的位置继续往后走
+           * （与"引用卡片没接出线 = 顺序穿过"同一口径），**不能判 stuck**。
+           * 引用段的结论由段内环节产生，画布作者只给关心的结论接了线
+           * （实测：美一组部门轮询段以「规划接收团队」收尾，卡片只接了
+           * 「全部接收 / 弃置」两条线，旧逻辑整单卡死在"流转中止"）。
+           */
+          if (isRefExitsGroupId(s.id)) {
+            continue
+          }
           markEnd('stuck', '流转中止：这个结论没有命中任何一条分支，也没配兜底主线', '单据停在当前环节 —— 请检查模板里该结论绑到了哪条线上')
           return false
+        }
+        // 记录本次命中的分支名：后续（尤其引用段末尾的 :exits）可以按它承接走向
+        if (b.name) {
+          form[BRANCH_NAME_FIELD] = b.name
         }
         // 跳出循环优先于回退：两者都是"跳转"，但 exitTo 表示向前跳出本段循环
         if (b.exitTo) {
@@ -2843,13 +2980,7 @@ export function rebuildChain (
         currentStep = chain.length - 1
         return false
       }
-      // 终结类结论：分支内的步骤同样到此为止
-      if (closesFlow(d)) {
-        done = true
-        terminalBranch = null
-        markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`)
-        return false
-      }
+      // 「选接收方」也已不再终结流程（2026-11-10）：分支内同样按普通结论续走
       form = formOf(d, s.id)
     }
     return true
@@ -2919,20 +3050,26 @@ export function rebuildChain (
           currentStep = chain.length - 1
           return false
         }
-        // 终结类结论（如「选择接收组别」）：这一步办完流程即结束，后面接的环节不会生效
-        if (closesFlow(d)) {
-          done = true
-          terminalBranch = null
-          markEnd('closed', `本环节的结论「${resultLabelOf(d.result)}」是终结类结论，流程到此结束`)
-          return false
-        }
+        // 「选接收方」也已不再终结流程（2026-11-10）：按普通结论续走模板分支
         form = formOf(d, node.id)
         i++
         continue
       }
       if (node.type === 'branch') {
-        const b = matchBranch(node.branches, form)
+        let b = matchBranch(node.branches, form)
+        if (!b && isRefExitsGroupId(node.id)) {
+          // 条件分支收尾按"分支名"承接外层出线（口径见 walkSteps 里的同款说明）
+          b = branchByName(node.branches, form[BRANCH_NAME_FIELD]) ?? null
+        }
         if (!b) {
+          /*
+           * 引用卡片「按结论分流」组未命中 → 穿过继续（口径见 walkSteps 里的同款说明）：
+           * 段内结论没接线 = 这一段结束，主流程接着走，不判 stuck。
+           */
+          if (isRefExitsGroupId(node.id)) {
+            i++
+            continue
+          }
           /*
            * 一条分支都没命中，且这个分支组**没有兜底主线**（模板允许不配主线：
            * 每条出线各自绑结论 / 条件，见 utils/approvalFlow 的 collectBranchesRaw）。
@@ -2946,6 +3083,10 @@ export function rebuildChain (
           markEnd('stuck', '流转中止：这个结论没有命中任何一条分支，也没配兜底主线', '单据停在当前环节 —— 请检查模板里该结论绑到了哪条线上')
           currentStep = chain.length - 1
           return false
+        }
+        // 记录本次命中的分支名：后续（尤其引用段末尾的 :exits）可以按它承接走向
+        if (b.name) {
+          form[BRANCH_NAME_FIELD] = b.name
         }
         // 跳出循环优先于回退：两者都是"跳转"，但 exitTo 表示向前跳出本段循环
         if (b.exitTo) {
@@ -3054,22 +3195,25 @@ export interface FlowGraph {
  * **建单期成员瘦身**：把 flow 里所有成员裁成"身份 + 展示"真正要用的那几个字段。
  *
  * 为什么要有这一步：成员对象来自通讯录选人（见 components/OrgTree.vue 的 OrgSelectedUser），
- * 上面带着头像 URL（一个就 ~165 B）与 is_leader / is_tenant_manager 这类**只有选人界面**才看的标记。
+ * 上面带着 email / 部门路径 / is_leader 这类可以**现查或只有选人界面**才看的字段。
  * 而单据快照会把这**同一份**记录按环节复制很多遍（组间轮询还要按组各一份）——
  * 实测一张单里 97 个成员对象，去重后只有 15 个人，其余全是重复。
  *
- * 裁掉头像之后展示层怎么显示：按 `open_id`（退化用 `email`）现查
- * （见 stores/avatarDirectory）；老单自带 avatar 照旧直显。两种形状读取方都支持。
+ * **2026-11-10 口径（最终版）**：快照里每个成员只留 `open_id + name + type（+ role）`。
+ * avatar / email / department / department_path 全部裁掉 —— 需要时按 `open_id`（退化 email）从
+ * 组织架构缓存现查（见 stores/avatarDirectory：头像 `avatarOf`、档案 `detailOf`，与头像同一份
+ * 数据、同一次请求）；老单自带这些字段照旧直显（读取方统一 `m.avatar || avatarOf(m)` 兜底写法）。
+ * 认人（sameApprover / personKeyOf）已改为 **open_id 优先**，不依赖 email。
  *
- * 保留：`open_id`（查头像 / 发飞书通知都优先用它）、`name`、`email`、`type`、
- * `department`、`department_path`（时间线要显示部门）、`role`（动态审批人来源，备查）。
+ * 保留：`open_id`（认人 / 查档案 / 发飞书通知的稳定标识）、`name`、`type`、
+ * `role`（动态审批人来源，备查）。
  * 办理信息（result / opinion / files…）本来就不在 flow 成员上 —— 那些由 rebuildChain 写进 chain。
  *
- * ⚠️ 只作用于**写进单据的那一份** flow：模板画布里的成员照旧带着头像等字段（编辑器要原样回显）。
+ * ⚠️ 只作用于**写进单据的那一份** flow：模板画布里的成员照旧带着 email 等字段（编辑器要原样回显）。
  *
  * @param openIdOf 通讯录反查（见 utils/orgDirectory 的 memberOpenId）：老模板画布里的成员
- *                 **只有邮箱/姓名、没有 open_id**，建单时按它补上 —— 否则发通知只能退回邮箱，
- *                 没有邮箱的人就永远收不到（飞书发消息本来 open_id / email 都支持）。
+ *                 **只有邮箱/姓名、没有 open_id**，建单时按它补上 —— open_id 是瘦身后唯一
+ *                 稳定的认人 / 现查键，缺了它的人在展示与通知两侧都会退化。
  */
 export function slimFlowMembers (
   flow: ApprovalFlow,
@@ -3084,17 +3228,8 @@ export function slimFlowMembers (
     if (m.name) {
       out.name = m.name
     }
-    if (m.email) {
-      out.email = m.email
-    }
     if (m.type) {
       out.type = m.type
-    }
-    if (m.department) {
-      out.department = m.department
-    }
-    if (m.department_path) {
-      out.department_path = m.department_path
     }
     if (m.role) {
       out.role = m.role
@@ -3123,6 +3258,203 @@ export function slimFlowMembers (
     return out
   }
   return flow.map(node)
+}
+
+/**
+ * 单据 chain.flow 的**快照引用形状**（模板版本化瘦身）：
+ * flow 本体存进 `flow_snapshots` 集合（按内容 hash 全局去重，见该集合迁移），
+ * 单据里只留 `{ snap: 记录id }`。读侧在**数据访问层**解包还原成数组
+ * （前端 utils/flowSnapshot 的 materializeOrders、服务端 server/mineOrders 的同款），
+ * 下游 runtimeOf / 页面拿到的始终是数组，对此无感。
+ */
+export interface FlowSnapshotRef {
+  snap: string
+}
+
+/** chain.flow 是不是快照引用（数组 = 老格式内嵌 flow，原样透传） */
+export function isFlowRef (flow: unknown): flow is FlowSnapshotRef {
+  return Boolean(flow) && !Array.isArray(flow) && typeof (flow as FlowSnapshotRef).snap === 'string'
+}
+
+/**
+ * **建单快照压缩**：成员瘦身（slimFlowMembers）之后的第二刀 —— 在写库前对 flow 再过一遍，
+ * 裁掉运行期不需要的字段、把 uuid 换成短 id。实测一张 ~230KB 的 flow 能降近一半：
+ *
+ *   · **id 短化（最大头）**：branch/step 的 uuid（36 字符 × 全图上千个 ≈ 70KB/单）换成
+ *     `b1..bN` / `s1..sN`。id 是办理记录的外键（decisions.stepId、branchTerminal 的键、
+ *     loopBackTo / exitTo / afterLoop / breakTo 的目标都在引用它），所以两遍遍历：
+ *     先收集分配短 id，再全图改写（含那些引用）；映射返回给调用方，供 branchTerminal
+ *     等表外键同步换（renameBranchTerminalKeys）。b / s 两个前缀是独立命名空间，互不串线。
+ *   · **condition 裁掉**：单条件时代的兼容残留，画布写入方已注明「以 conditions 为准」
+ *     （见 createStream 的写入注释），引擎也只经 branchConditions 读（conditions 优先、
+ *     退化 condition）。压缩时归并进 conditions；老单自带的 condition 照旧兼容。
+ *   · **默认值裁掉**：logic:'and'（matchBranch 缺省 'and'）、isEnd:false（isExit 缺省即
+ *     非出口）、type:'approval'（walkFlow 缺省按审批）、空 members（stepMembersOf ?? []）。
+ *     steps 的空数组**不裁**：walkBranch 直接 for-of、没有空值兜底，保留原形状最稳。
+ *
+ * ⚠️ 只作用于**写进单据的那一份** flow；模板画布照旧带 uuid（编辑器要原样回显 / 拖拽）。
+ * ⚠️ 只在**新建单**时做：老单的 uuid / condition 等照旧，引擎对两种形状都兼容。
+ */
+export interface CompactFlowSnapshotResult {
+  flow: ApprovalFlow
+  /** 旧 branch id → 短 id：branchTerminal 出口表的键要跟着换（renameBranchTerminalKeys） */
+  branchIdMap: Record<string, string>
+  /** 旧 step id → 短 id：decisions 的 stepId 引用要跟着换（建单时 decisions 为空，完备起见返回） */
+  stepIdMap: Record<string, string>
+}
+
+/**
+ * **语义化分支组**：id 后缀本身就是语义，不是用户数据。
+ *
+ *   · `<卡片id>:break:<环号>` / `<卡片id>:after-loop` —— 组间轮询在建单期注入（utils/approvalRotation）
+ *   · `<卡片id>:exits` / `<卡片id>:bound`          —— 引用模板的按结论分流（utils/templateRef 新旧两代）
+ *
+ * 这些组**不参与上一环的结论推导**，判定依据就是 id 后缀（见 collectStepOptionItems 的
+ * isLoopInjectedGroup / isRefExitGroup）。所以压缩**绝不能把它们换成 bNN**：
+ * 后缀一丢，运行期就只能把这组当成"上一环的结果分支"，表现为
+ * **轮询环节的办理结论只剩「继续下一组」一条**（实测反馈）。
+ */
+function isSemanticGroupId (id: unknown): boolean {
+  const s = String(id ?? '')
+  return s.endsWith(':after-loop') || /:break:\d+$/.test(s) || s.endsWith(':exits') || s.endsWith(':bound')
+}
+
+/**
+ * 引用卡片「按结论分流」组的 id 形态（`:exits` = 现编译器 / `:bound` = 旧编译器，
+ * 见 utils/templateRef 的 expandList）。引擎与选项推导共用这一个判定 —— 各写一份必然漂。
+ *
+ * ⚠️ 只认**未被压缩**的 id：语义组 id 在 compactFlowSnapshot 里保留后缀（见 isSemanticGroupId），
+ * 存量短 id 单据认不出（那张单只能修数据）。
+ */
+export function isRefExitsGroupId (id: unknown): boolean {
+  const s = String(id ?? '')
+  return s.endsWith(':exits') || s.endsWith(':bound')
+}
+
+export function compactFlowSnapshot (flow: ApprovalFlow): CompactFlowSnapshotResult {
+  const branchIdMap: Record<string, string> = {}
+  const stepIdMap: Record<string, string> = {}
+  let branchSeq = 0
+  let stepSeq = 0
+
+  /* 第一遍：收集全图 id，按出现顺序分配短 id（语义化组跳过：后缀要留着给运行期判定） */
+  const collectBranch = (b: ApprovalBranch) => {
+    if (b.id && !isSemanticGroupId(b.id) && !(b.id in branchIdMap)) {
+      branchIdMap[b.id] = `b${++branchSeq}`
+    }
+    for (const s of b.steps ?? []) {
+      collectStep(s)
+    }
+  }
+  const collectStep = (s: ApprovalFlowStep) => {
+    /*
+     * 语义化分支组（`:exits` / `:break:N` / `:after-loop`）在流程里是**嵌在 steps 里的
+     * `type:'branch'` 节点**（见 utils/templateRef 的 expandList、utils/approvalRotation），
+     * 走的是这条 step 收集路径 —— 不跳过的话组 id 被压成 sNN，后缀一丢，
+     * isRefExitGroup / isLoopInjectedGroup 就认不出它们（isRefExitGroup 连名字兜底都没有），
+     * 分流组会被当成"上一审批环节的办理结论"（实测：引用段首环的选项变成
+     * 引用卡片的两条出线「全部接收 / 弃置」，段内真正的结论一个不剩）。
+     * collectBranch 那边早有同款检查（bNN 命名空间），这里补齐 sNN 的。
+     */
+    if (s.id && !isSemanticGroupId(s.id) && !(s.id in stepIdMap)) {
+      stepIdMap[s.id] = `s${++stepSeq}`
+    }
+    for (const b of s.branches ?? []) {
+      collectBranch(b)
+    }
+    for (const s2 of s.steps ?? []) {
+      collectStep(s2)
+    }
+  }
+  for (const n of flow) {
+    const node = n as { branches?: ApprovalBranch[], steps?: ApprovalFlowStep[] }
+    for (const b of node.branches ?? []) {
+      collectBranch(b)
+    }
+    for (const s of node.steps ?? []) {
+      collectStep(s)
+    }
+  }
+
+  /*
+   * 旧 step id → 短 id。参数**必填**（调用点都在"该字段存在"的分支里）：返回类型跟着是 string，
+   * loopBackTo / exitTo / afterLoop / breakTo 的目标字段是 `{ stepId: string }`，可空返回会把
+   * 整条 compactBranch 判成类型不兼容（TS2322）。
+   */
+  const stepIdOf = (id: string): string => stepIdMap[id] ?? id
+
+  /* 第二遍：重建对象（重建顺便完成裁剪与键序归整） */
+  const compactBranch = (b: ApprovalBranch): ApprovalBranch => {
+    // conditions 为准：把 condition（若有）归并进来，单条件时代的重复就此消失
+    const conditions = b.conditions?.length ? b.conditions : (b.condition ? [b.condition] : [])
+    return {
+      id: branchIdMap[b.id] ?? b.id,
+      name: b.name,
+      ...(conditions.length ? { conditions } : {}),
+      ...(b.logic === 'or' ? { logic: b.logic } : {}),
+      ...(b.isEnd === true ? { isEnd: true } : {}),
+      ...(b.members?.length ? { members: b.members } : {}),
+      ...(b.options?.length ? { options: b.options } : {}),
+      ...(b.offerWhen?.length ? { offerWhen: b.offerWhen } : {}),
+      ...(b.optionGroups?.length ? { optionGroups: b.optionGroups } : {}),
+      ...(b.loopBackTo?.stepId ? { loopBackTo: { stepId: stepIdOf(b.loopBackTo.stepId) } } : {}),
+      ...(b.exitTo?.stepId ? { exitTo: { stepId: stepIdOf(b.exitTo.stepId) } } : {}),
+      steps: (b.steps ?? []).map(compactStep),
+    }
+  }
+  const compactStep = (s: ApprovalFlowStep): ApprovalFlowStep => {
+    // 顺手归一 nodes → members（引用模板搬来的步骤只带 nodes、members 是空的，见 stepMembersOf 说明）
+    const members = stepMembersOf(s)
+    return {
+      id: stepIdMap[s.id] ?? s.id,
+      ...(s.name ? { name: s.name } : {}),
+      ...(s.type && s.type !== 'approval' ? { type: s.type } : {}),
+      ...(members.length ? { members } : {}),
+      ...(s.content ? { content: s.content } : {}),
+      ...(s.probe ? { probe: s.probe } : {}),
+      ...(s.rotation ? { rotation: s.rotation } : {}),
+      ...(s.afterLoop?.stepId ? { afterLoop: { stepId: stepIdOf(s.afterLoop.stepId) } } : {}),
+      ...(s.breakWhen?.length ? { breakWhen: s.breakWhen } : {}),
+      ...(s.breakTo?.stepId ? { breakTo: { stepId: stepIdOf(s.breakTo.stepId) } } : {}),
+      ...(s.refTemplateId ? { refTemplateId: s.refTemplateId } : {}),
+      ...(s.branches?.length ? { branches: s.branches.map(compactBranch) } : {}),
+      ...(s.steps?.length ? { steps: s.steps.map(compactStep) } : {}),
+      ...(s.optionGroups?.length ? { optionGroups: s.optionGroups } : {}),
+    }
+  }
+
+  /* 顶层节点：数量少、id 从不被引用，只把里面的 branches / steps 换成压缩版，其余原样 */
+  const out = flow.map((n) => {
+    const node = n as { branches?: ApprovalBranch[], steps?: ApprovalFlowStep[] }
+    if (!node.branches?.length && !node.steps?.length) {
+      return n
+    }
+    const next = { ...n } as Record<string, unknown>
+    if (node.branches?.length) {
+      next.branches = node.branches.map(compactBranch)
+    }
+    if (node.steps?.length) {
+      next.steps = node.steps.map(compactStep)
+    }
+    // 重建后的节点形状与入参同构（只换了 branches / steps），中间态没有足够的类型重叠
+    return next as unknown as typeof n
+  })
+  return { flow: out, branchIdMap, stepIdMap }
+}
+
+/**
+ * branchTerminal 出口表的键（branch id）跟着短 id 换 —— compactFlowSnapshot 的配套动作。
+ * 查不到映射的键原样保留，所以对已重映射过的表再跑一遍是**幂等**的（防缓存对象被误改两次）。
+ */
+export function renameBranchTerminalKeys (
+  terminal: BranchTerminalMap,
+  branchIdMap: Record<string, string>,
+): BranchTerminalMap {
+  const out: BranchTerminalMap = {}
+  for (const [id, isEnd] of Object.entries(terminal)) {
+    out[branchIdMap[id] ?? id] = isEnd
+  }
+  return out
 }
 
 /** 把带分支的流程拍平成线性 chain：分支节点优先取无条件默认分支（审批结果分支即主线），否则取第一个。

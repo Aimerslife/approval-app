@@ -165,15 +165,26 @@ export function parseTemplateJson (raw: string): TemplatePayload {
   if (!Array.isArray(chain)) {
     throw new Error('流程数据（chain）格式不对：应为数组')
   }
-  if (chain.length === 0) {
-    throw new Error('流程是空的：这个文件里没有可导入的审批环节')
-  }
   if (flow !== undefined && flow !== null && !Array.isArray(flow)) {
     throw new Error('流程结构（flow）格式不对：应为数组')
   }
   const graphBox = graph === undefined || graph === null ? null : asRecord(graph)
   if (graph !== undefined && graph !== null && !graphBox) {
     throw new Error('画布快照（graph）格式不对：应为对象')
+  }
+
+  /*
+   * "流程是空的"要看**三要素整体**，不能只看 chain：
+   *
+   * 拍平链（chain）是**运行期派生数据** —— 模板记录常常只有 flow / graph
+   * （编辑器画的是 graph、建单展开读的是 flow，chain 留空数组是正常形态，
+   * 实测一张「美一组部门轮询」模板导出就是这样，旧逻辑把它误判成空流程拒收）。
+   * 只有 chain、flow、graph **全都**没有内容，才真的没得导入。
+   */
+  const hasFlow = Array.isArray(flow) && flow.length > 0
+  const graphNodes = Array.isArray(graphBox?.nodes) ? (graphBox.nodes as unknown[]).length : 0
+  if (chain.length === 0 && !hasFlow && graphNodes === 0) {
+    throw new Error('流程是空的：这个文件里没有可导入的审批环节')
   }
 
   return {

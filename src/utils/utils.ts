@@ -1,7 +1,7 @@
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { branchTerminalMapOf, compactBranchTerminal, flowToChain, slimFlowMembers } from '@/types/approval'
+import { branchTerminalMapOf, compactBranchTerminal, compactFlowSnapshot, flowToChain, renameBranchTerminalKeys, slimFlowMembers } from '@/types/approval'
 // 通讯录索引：给"只有邮箱/姓名"的成员补 open_id（见 utils/orgDirectory）；与建单主路径同一口径
 import { buildOrgDirectory, memberOpenId } from '@/utils/orgDirectory'
 import { createApprocalModel, getApprovalFirstByFilter } from '@/utils/collection'
@@ -195,10 +195,12 @@ export async function generateApprovalChain () {
   // 成员同样瘦身 + 按通讯录补 open_id（与建单主路径同一口径，见 types/approval 的 slimFlowMembers）
   const dir = buildOrgDirectory((await fetchOrgTreeCache().catch(() => null))?.data?.tree)
   const slim = slimFlowMembers(expanded.flow, m => memberOpenId(dir, m))
+  // 快照压缩与主路径同一口径（见 types/approval 的 compactFlowSnapshot）：出口表键跟着短 id 换
+  const compact = compactFlowSnapshot(slim)
   const res2 = await createApprocalModel({
-    chain: flowToChain(slim),
-    flow: slim,
-    branchTerminal: compactBranchTerminal(branchTerminalMapOf(res?.chain)),
+    chain: flowToChain(compact.flow),
+    flow: compact.flow,
+    branchTerminal: renameBranchTerminalKeys(compactBranchTerminal(branchTerminalMapOf(res?.chain)), compact.branchIdMap),
     decisions: [],
   })
   console.log(res2)

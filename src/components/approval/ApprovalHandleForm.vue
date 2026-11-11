@@ -175,7 +175,7 @@ import type {
   NodeSubmitPayload,
 } from '@/types/approval'
 // 审批类型（选中结论后要填什么）：办理期**只读单据快照**，见 utils/approvalTypes 文件头的边界说明
-import type { ApprovalTypeTemplate, TypeField } from '@/utils/approvalTypes'
+import type { ApprovalTypeTemplate } from '@/utils/approvalTypes'
 import {
   APPROVAL_RESULTS,
   filterOfferedOptions,
@@ -187,7 +187,7 @@ import {
 // 环节负责人口径（mainOf）与「连续同人环节」的类型都来自这里，别在组件里另写一套
 import { type ApprovalNextStep, mainOf, type RotationReceipt } from '@/utils/approvalRuntime'
 // REASON_OPTIONS：选项树的叶子就是「原因」本身，办理时按同一份候选补出 reason_* / 分类
-import { isFieldVisible, REASON_OPTIONS, SECOND_REASON_OPTIONS, typeTemplateFromSnapshot } from '@/utils/approvalTypes'
+import { isFieldVisible, REASON_OPTIONS, SECOND_REASON_OPTIONS, type TypeField, type TypeLimitSource, typeTemplateFromSnapshot } from '@/utils/approvalTypes'
 // 「选择接收组别」的候选：团队表（utils/organazation）——不是整棵飞书通讯录，见组件说明
 import TeamPicker from '../TeamPicker.vue'
 // 「选择接收团队」的平铺清单也认同一张团队表：候选从这儿取，别在组件里另抄一份
@@ -1090,6 +1090,40 @@ watch(
 )
 
 /**
+ * 选中「选择接收部门」时**直接展开部门面板**，不用再点一次同名按钮。
+ *
+ * 这条处理方式是一对一交接（`control='team'` 且 `pick='team'`，口径同 OptionFormRenderer 的
+ * qtyEditableOf），候选面板本来就该随结论一起出现：原来要"点单选项 → 再点按钮"两步，
+ * 而按钮与单选项同名，现场点完单选以为没反应（截图反馈：选完「选择接收部门」还要再点一次）。
+ *
+ * 只在**该字段刚出现**（换结论 / 换环节）时补开一次：面板已经展开、或用户自己关掉后
+ * 不会因为表单其它变化又被弹回来；已经选过部门（chips 非空）也不弹。
+ *
+ * ⚠️ 必须写在 `childIsSecondReason` 声明**之后**（与上面那条 watch 同一个 TDZ 坑）：
+ * `immediate: true` 会在 setup 阶段读 `typeFields`（→ childIsSecondReason），放前面就是
+ * "Cannot access 'childIsSecondReason' before initialization" —— 表单 setup 直接崩，
+ * 界面上点「办理」毫无反应。实测踩过（放在 startPick 旁边，正好在 600 多行）。
+ */
+watch(
+  () => typeFields.value.map(f => `${f.key}:${f.control}:${f.pick ?? ''}`).join('|'),
+  () => {
+    if (pickingField.value) {
+      return
+    }
+    const pick = typeFields.value.find(f => f.control === 'team' && f.pick === 'team')
+    if (!pick) {
+      return
+    }
+    const chosen = typeValues.value[pick.key]
+    if (Array.isArray(chosen) && chosen.length > 0) {
+      return
+    }
+    pickingField.value = pick
+  },
+  { immediate: true },
+)
+
+/**
  * 处理方式一变（或它带的树变了）就**清空**一级 / 二级，避免留下上一棵树里的选择。
  *
  * ⚠️ 这里以前是"默认选树里的第一个叶子（连二级也取第一个）"—— 那等于替办理人做了决定：
@@ -1266,14 +1300,15 @@ function receiverQtyError (extra: Record<string, unknown>): string {
   /*
    * 校验口径与清单末尾的剩余显示一致（OptionFormRenderer 的 freshQtyTotalOf）：
    * 预填的历史接收量（receiverSeedBaseline）是前面环节已经接收掉的，上限里扣过一次，
-   * 这里只校验**超出基准的部分**（本次新分）—— 沿用之前的分配原样提交不该被拦。
+   * 这里按**净变化**（当前值 − 基准，可正可负）统计 —— 基准内挪动（A 行少分、B 行补上，
+   * 总量不变）是正常调整，逐行取正会把挪动误判成新分拦下来。
    */
   const total = totalQtyOf(raw)
   const fresh = list.reduce((sum, m) => {
     if (!m || typeof m !== 'object') return sum
     const n = Number(String((m as { qty?: unknown }).qty ?? '').trim()) || 0
     const base = receiverSeedBaseline.value[String((m as { name?: unknown }).name ?? '')] ?? 0
-    return sum + Math.max(0, n - base)
+    return sum + (n - base)
   }, 0)
   if (fresh > cap) {
     const name = usingRemaining.value ? '剩余接收数量' : '总库存数量'
@@ -1342,8 +1377,8 @@ function collectResult(): { result: string, result_label: string, extra: Record<
       if (!isFieldVisible(field, typeValues.value)) {
         continue
       }
-      const value = typeValues.value[field.key]
-      if (value === undefined || value === null || String(value).trim() === '') {
+      const value = typedFieldValueOf(field)
+      if (value === undefined) {
         continue
       }
       extra[field.key] = field.key === 'members' ? membersForStore(value) : value
@@ -1371,8 +1406,8 @@ function collectResult(): { result: string, result_label: string, extra: Record<
     if (!isFieldVisible(field, typeValues.value)) {
       continue
     }
-    const value = typeValues.value[field.key]
-    if (value === undefined || value === null || String(value).trim() === '') {
+    const value = typedFieldValueOf(field)
+    if (value === undefined) {
       continue
     }
     extra[field.key] = field.key === 'members' ? membersForStore(value) : value
@@ -1389,6 +1424,50 @@ function collectResult(): { result: string, result_label: string, extra: Record<
   }
 
   return { result, result_label: resultLabelOf(result, extra), extra }
+}
+
+/**
+ * 类型字段的上限值（数值）：`receive_cap` = 剩余（没传时退总库存，与 receiveCapText 同源）、
+ * `stock_qty` = 总库存、`stock_amount` = 总金额。取不到（老单没关联产品）返回 undefined。
+ *
+ * 给 collectResult 的锁死字段兜底用 —— 与渲染器的 limitValueOf 是同一套口径，别写岔。
+ */
+function fieldCapOf (field: { limit?: TypeLimitSource }): number | undefined {
+  const text = field.limit === 'stock_qty'
+    ? stockQtyText.value
+    : field.limit === 'stock_amount'
+      ? stockAmountText.value
+      : receiveCapText.value
+  const n = Number(String(text).replace(/,/g, ''))
+  return Number.isFinite(n) ? n : undefined
+}
+
+/**
+ * 类型字段提交时的取值：**表单值优先**；锁死字段按上限兜底。
+ *
+ * ⚠️ 锁死字段（`readonlyWhenFull` / `prefillFromLimit` 的数量框，「全部接收」就是这一类，
+ * 语义"数量定死为剩余"）的表单值可能被**换结论的竞态**冲掉：渲染器随结论 `:key` 重建时
+ * immediate 预填 emit 先于父级"换结论清空"的 watch 执行，写进去的值又被 `{}` 盖掉；
+ * 之后 `limitSignature` 不再变化，预填不会重跑。而显示层有兜底（渲染器 displayValueOf
+ * 永远显示上限）、v-form 校验用的也是显示值 —— 于是**框里看着有数、提交却没落**。
+ * 后果（实测一张单）：「全部接收」的 extra.qty 缺失 → 接收台账不累计这一环 →
+ * 已接收/剩余虚高，下一环的「前面团队接收」与清单预填也拿不到它。
+ * 这里按上限补上，与显示层同一口径。
+ */
+function typedFieldValueOf (field: TypeField): unknown {
+  const raw = typeValues.value[field.key]
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    // **原样返回**：members 是数组，一旦 String() 化，membersForStore 会原样透传字符串，
+    // 提交链路就报「请选择接收团队」（实测踩过）—— 兜底逻辑只该作用于锁死的数量框。
+    return raw
+  }
+  if (field.control === 'number' && (field.readonlyWhenFull === true || field.prefillFromLimit === true)) {
+    const cap = fieldCapOf(field)
+    if (cap !== undefined) {
+      return String(cap)
+    }
+  }
+  return undefined
 }
 
 /**

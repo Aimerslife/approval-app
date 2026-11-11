@@ -4,6 +4,8 @@ import type { DeptApproverOverride, GroupApproverOverride } from '@/utils/groupA
 import type { WarehouseRow } from '@/utils/warehouse'
 import pb from '@/pocketbase.ts'
 import { APPROVAL_STATUS, branchTerminalMapOf, rebuildChain } from '@/types/approval'
+// 流程快照层（模板版本化）：写侧引用化 + 读侧解包，见 utils/flowSnapshot 的文件头
+import { chainFlowRefForStore, materializeOrders } from '@/utils/flowSnapshot'
 import { sendArrivedNotifies } from '@/utils/notifySteps'
 /*
  * 清单请求的请求键：本文件好几处读的是**同一张表的不同用途**，不给键的话会互相取消
@@ -231,11 +233,18 @@ export async function createApprocalModel (
    */
   const creator = pb.authStore.record?.id
   try {
+    /*
+     * **快照引用化**（模板版本化瘦身）：flow 本体存进 flow_snapshots（按内容 hash 去重，
+     * 同模板同团队的多张单共享同一份），单据里只留 { snap: id }。
+     * 失败自动退回内嵌 flow（见 flowSnapshot），建单不能被瘦身卡住。
+     * notifyOnCreate 仍用原 data —— 通知要在建出来的链路上跑引擎，引用解不了。
+     */
+    const stored = await chainFlowRefForStore(data)
     const res = await pb.collection('approval_chain').create<ApprovalOrder>({
       order_no,
       // 新单必然是「进行中」，终态由 rebuildChain 的 outcome 在办理时写入
       status: APPROVAL_STATUS.PENDING,
-      chain: data,
+      chain: stored,
       ...(opts.relation ? { relation: opts.relation } : {}),
       ...(opts.syncKey ? { sync_key: opts.syncKey } : {}),
       ...(creator ? { creator } : {}),
@@ -253,7 +262,12 @@ export async function createApprocalModel (
       )
     }
     await notifyOnCreate(data, res)
-    return res
+    /*
+     * 出口解包：与四个读单函数同一口径 —— 写库时 flow 已被引用化成 { snap }，
+     * 这里不解包的话，调用方（useTaskStarter 等）拿到的 chain.flow 是引用对象，
+     * runtimeOf / 结论选项 / 后续办理全部退化（"审批结论与前端不搭配"的根因之一）。
+     */
+    return (await materializeOrders([res]))[0] ?? res
   } catch (error: any) {
     console.error('增加审批流失败:', error.response?.data ?? error.data ?? error)
     return error
@@ -335,7 +349,8 @@ export async function getOrdersByRow (biRowId: string, syncKey?: string): Promis
     sort: '-created',
     requestKey: PB_REQUEST_KEY.orderByRow,
   })
-  return res.items
+  // 出口解包：引用形状的 chain.flow 就地还原成数组（下游 runtimeOf 只认数组）
+  return materializeOrders(res.items)
 }
 
 /** 每个分块里最多放多少个条件（每行贡献 1~2 个，见下） */
@@ -386,7 +401,7 @@ export async function getOrdersByRows (
       out.push(item)
     }
   }
-  return out
+  return materializeOrders(out)
 }
 
 /**
@@ -660,12 +675,14 @@ export async function getApprovalOrder (): Promise<ApprovalOrder[]> {
     // 取全量而不是前 10 条：首页表格是**前端分页**，分页器的页数要按总条数算，
     // 只取 10 条会让页数永远只有 1 页、第 2 页之后就看不到任何单。
     // 审批单的数量级很小（每条一行、json 里带流程快照），一次取回没有压力。
-    return await pb.collection('approval_chain').getFullList<ApprovalOrder>({
+    const items = await pb.collection('approval_chain').getFullList<ApprovalOrder>({
       filter: '',
       expand: 'relation',
       sort: '-created',
       requestKey: PB_REQUEST_KEY.orderList,
     })
+    // 出口解包：引用形状的 chain.flow 就地还原成数组（下游 runtimeOf 只认数组）
+    return materializeOrders(items)
   } catch (error) {
     console.error(error)
     return []
@@ -680,10 +697,13 @@ export async function getApprovalOrder (): Promise<ApprovalOrder[]> {
  */
 export async function getApprovalOrderByNo (orderNo: string): Promise<ApprovalOrder | undefined> {
   try {
-    return await pb.collection('approval_chain').getFirstListItem<ApprovalOrder>(
+    const found = await pb.collection('approval_chain').getFirstListItem<ApprovalOrder>(
       pb.filter('order_no = {:no}', { no: orderNo }),
       { expand: 'relation' },
     )
+    // 出口解包（单张走批量函数，复用同一份缓存口径）
+    const [order] = await materializeOrders([found])
+    return order
   } catch (error) {
     console.error('按单号查审批单失败:', error)
     return undefined
@@ -696,9 +716,26 @@ export async function getApprovalOrderByNo (orderNo: string): Promise<ApprovalOr
  */
 export async function updateApprovalOrder (id: string, data: Partial<ApprovalOrder>) {
   try {
-    const res = await pb.collection('approval_chain').update<ApprovalOrder>(id, data)
+    /*
+     * 写回同样**引用化**：办理代码拿着的是解包后的 chain（flow 已是数组），原样写回会把
+     * 整份 flow 又塞回单里 —— 引用化让它恢复成 { snap }（hash 相同复用同一快照，天然幂等）。
+     */
+    const payload = { ...data }
+    if (payload.chain) {
+      payload.chain = await chainFlowRefForStore(payload.chain)
+    }
+    const res = await pb.collection('approval_chain').update<ApprovalOrder>(id, payload)
     console.log('更新审批订单成功', id)
-    return res
+    /*
+     * 出口解包：**写回时 flow 已被引用化成 { snap }**（见上面的说明），而调用方拿到的
+     * updated 会直接铺回页面内存（approvalPage 的 `{...order, ...updated}`、useNodeSubmit
+     * 的 latest、useApprovalSelect 的 onUpdated）—— 不解包的话 chain.flow 从此是引用对象：
+     *   · runtimeOf 退化（时间线 / 当前环节错乱）；
+     *   · collectStepResultOptions / collectStepOptionItems 取不到 flow → 办理面板的
+     *     「审批结论」下拉全空（现场反馈的"结论没和前端搭配"）；
+     *   · 再点提交时 useNodeSubmit 的 !flow?.length 判真 → 弹「审批单数据未加载」。
+     */
+    return (await materializeOrders([res]))[0] ?? res
   } catch (error) {
     console.error('更新审批订单失败:', error)
     throw error

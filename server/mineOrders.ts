@@ -1,4 +1,5 @@
-import type { ApprovalChainItem, ApprovalOrder } from '../src/types/approval'
+import type { ApprovalChainItem, ApprovalFlow, ApprovalOrder } from '../src/types/approval'
+import { isFlowRef } from '../src/types/approval'
 /*
  * 「我的审批」的四个分类判据**直接复用前端那一套纯函数** —— 这是本模块最重要的约定：
  *   · orderPendingOn  —— 当前待办环节的负责人是他（待办）
@@ -136,5 +137,59 @@ async function readAllOrders (): Promise<ApprovalOrder[]> {
       break
     }
   }
-  return out
+  return materializeFlowRefs(out)
+}
+
+/**
+ * 出口解包：引用形状的 chain.flow（`{ snap: id }`，见 utils/flowSnapshot 的文件头）就地还原成数组
+ * —— 四档判据（orderPendingOn 等）内部是 runtimeOf(order)，只认数组。
+ *
+ * 与前端 materializeOrders 的**唯一差别**在传输层（这里拿管理员凭据走 raw fetch，
+ * 前端走 SDK），口径完全一致：批量拉、缺快照显性报错（mine 接口的判据全靠链路重算，
+ * 悄悄置空会让单据"消失"，宁可把部署问题暴露出来）。
+ */
+async function materializeFlowRefs (orders: ApprovalOrder[]): Promise<ApprovalOrder[]> {
+  const snapIds = new Set<string>()
+  for (const order of orders) {
+    const ref = (order.chain as { flow?: unknown } | undefined)?.flow
+    if (isFlowRef(ref)) {
+      snapIds.add(ref.snap)
+    }
+  }
+  if (snapIds.size === 0) {
+    return orders
+  }
+  const token = await adminToken()
+  const flows = new Map<string, ApprovalFlow>()
+  const ids = [...snapIds]
+  for (let i = 0; i < ids.length; i += 80) {
+    const url = new URL('/api/collections/flow_snapshots/records', PB_URL)
+    url.searchParams.set('perPage', '500')
+    // raw fetch 没有 pb.filter：单引号转义成 \'（PB 字符串字面量的转义口径）；
+    // id 是 PB 自产的 15 位记录 id，防御转义只为不信任任何拼接值
+    const filter = ids.slice(i, i + 80).map(id => `id='${id.replace(/'/g, String.raw`\'`)}'`).join('||')
+    url.searchParams.set('filter', filter)
+    const res = await fetch(url.toString(), { headers: { Authorization: token } })
+    if (!res.ok) {
+      throw new Error(`读取流程快照失败：HTTP ${res.status}`)
+    }
+    const body: { items?: Array<{ id: string, flow: unknown }> } = await res.json()
+    for (const row of body.items ?? []) {
+      if (Array.isArray(row.flow)) {
+        flows.set(row.id, row.flow as ApprovalFlow)
+      }
+    }
+  }
+  for (const order of orders) {
+    const chain = order.chain as { flow?: unknown } | undefined
+    if (!chain || !isFlowRef(chain.flow)) {
+      continue
+    }
+    const flow = flows.get(chain.flow.snap)
+    if (!flow) {
+      throw new Error(`流程快照缺失：${chain.flow.snap}（检查 flow_snapshots 集合与 1792000000 迁移）`)
+    }
+    chain.flow = flow
+  }
+  return orders
 }

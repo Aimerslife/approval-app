@@ -1,5 +1,5 @@
-import { ref } from 'vue'
 import { defineStore } from 'pinia'
+import { ref } from 'vue'
 import { fetchOrgTreeCache } from '@/api/api'
 import { buildOrgDirectory } from '@/utils/orgDirectory'
 
@@ -29,9 +29,24 @@ export interface AvatarLookup {
   email?: string
 }
 
+/**
+ * 按人补全的档案（链路成员瘦身后，email / department / department_path 不再进快照，
+ * 展示与推送匹配需要它们时由这里按 open_id（退化 email）查回 —— 与头像同一份数据、同一次请求）。
+ */
+export interface MemberDetail {
+  name: string
+  email: string
+  department: string
+  department_path: string
+}
+
+const EMPTY_DETAIL: MemberDetail = { name: '', email: '', department: '', department_path: '' }
+
 export const useAvatarDirectory = defineStore('avatarDirectory', () => {
   const byOpenId = ref<Record<string, string>>({})
   const byEmail = ref<Record<string, string>>({})
+  /** open_id / email / mobile → 成员档案（含 email 与部门，见 MemberDetail） */
+  const byDetail = ref<Record<string, MemberDetail>>({})
   /** 目录加载：一个会话一次（失败后置空，下次 ensure 再试） */
   let loading: Promise<void> | null = null
 
@@ -51,22 +66,52 @@ export const useAvatarDirectory = defineStore('avatarDirectory', () => {
     return ''
   }
 
+  /**
+   * 这个人的档案（email / department / department_path）：查不到返回全空串字段，
+   * 调用方按 `m.email || detail.email` 的口径兜底（老单自带字段照旧直显）。
+   */
+  function detailOf (person?: AvatarLookup | null): MemberDetail {
+    if (!person) {
+      return EMPTY_DETAIL
+    }
+    const id = person.open_id?.trim()
+    if (id && byDetail.value[id]) {
+      return byDetail.value[id]
+    }
+    const mail = person.email?.trim().toLowerCase()
+    if (mail && byDetail.value[mail]) {
+      return byDetail.value[mail]
+    }
+    return EMPTY_DETAIL
+  }
+
   async function load (): Promise<void> {
     try {
       const res = await fetchOrgTreeCache()
       // 索引口径与建单期"给老成员补 open_id"共用一份（见 utils/orgDirectory）
       const dir = buildOrgDirectory(res?.data?.tree)
       for (const p of dir.all) {
-        if (!p.avatar) {
-          continue
-        }
         if (p.open_id) {
           byOpenId.value[p.open_id] = p.avatar
+          byDetail.value[p.open_id] = {
+            name: p.name,
+            email: p.email,
+            department: p.department,
+            department_path: p.department_path,
+          }
         }
         // email / mobile 都当"人"的键：通讯录里没有邮箱的人，选人结果里存的是手机号
         // （见 components/OrgTree.vue 的 subtitle = email || mobile）
         for (const key of p.contacts) {
           byEmail.value[key] = p.avatar
+          if (!byDetail.value[key]) {
+            byDetail.value[key] = {
+              name: p.name,
+              email: p.email,
+              department: p.department,
+              department_path: p.department_path,
+            }
+          }
         }
       }
     } catch (error) {
@@ -89,5 +134,5 @@ export const useAvatarDirectory = defineStore('avatarDirectory', () => {
     return loading
   }
 
-  return { byOpenId, byEmail, avatarOf, ensure }
+  return { byOpenId, byEmail, byDetail, avatarOf, detailOf, ensure }
 })

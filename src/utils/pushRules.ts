@@ -18,6 +18,8 @@
 /** 一个推送对象（人）。字段与通讯录选人的结果对齐（见 components/OrgTree.vue 的 OrgSelectedUser） */
 export interface PushPerson {
   name: string
+  /** 飞书 open_id：链路成员瘦身（见 types/approval 的 slimFlowMembers）后的**首选身份键** */
+  open_id?: string
   email?: string
   avatar?: string
   department?: string
@@ -176,8 +178,13 @@ export function pushCadenceText (rules: PushRules): string {
   return `超时 ${r.overdueHours} 个工作日小时起，每 ${r.intervalHours} 小时催一次（${freq}，不早于 ${r.sendTime}）`
 }
 
-/** 一个人的身份键：**邮箱优先**、缺邮箱退回姓名（与 types/approval 的 sameApprover 同一口径） */
-export function personKeyOf (p: { name?: string, email?: string }): string {
+/** 一个人的身份键：**open_id 优先**（链路成员瘦身后唯一稳定的键，与 sameApprover 同口径）、
+ * 缺 open_id 退回邮箱、再退姓名 */
+export function personKeyOf (p: { name?: string, email?: string, open_id?: string }): string {
+  const openId = String(p?.open_id ?? '').trim()
+  if (openId) {
+    return `open_id:${openId}`
+  }
   const email = String(p?.email ?? '').trim().toLowerCase()
   if (email) {
     return `email:${email}`
@@ -198,10 +205,14 @@ export function normalizePerson (raw: unknown): PushPerson | null {
   const str = (v: unknown) => String(v ?? '').trim()
   const name = str(o.name)
   const email = str(o.email)
-  if (!name && !email) {
+  const openId = str(o.open_id)
+  if (!name && !email && !openId) {
     return null
   }
   const out: PushPerson = { name: name || email }
+  if (openId) {
+    out.open_id = openId
+  }
   if (email) {
     out.email = email
   }
@@ -272,9 +283,9 @@ export function normalizePushRules (raw: unknown): PushRules {
   }
 }
 
-/** 这个人是否在白名单里（判定口径见 personKeyOf） */
+/** 这个人是否在白名单里（判定口径见 personKeyOf：open_id 优先） */
 export function isWhitelisted (
-  person: { name?: string, email?: string },
+  person: { name?: string, email?: string, open_id?: string },
   whitelist: readonly PushPerson[],
 ): boolean {
   const key = personKeyOf(person)
@@ -287,7 +298,7 @@ export function isWhitelisted (
  * 白名单是**排除**语义，所以无论收件人是从哪来的（当前审批人 / 固定收件人 / 提醒环节的提醒对象），
  * 发之前都要过这一道 —— 三处各写一遍过滤等于三处都可能漏。
  */
-export function excludeWhitelist<T extends { name?: string, email?: string }> (
+export function excludeWhitelist<T extends { name?: string, email?: string, open_id?: string }> (
   people: readonly T[],
   whitelist: readonly PushPerson[],
 ): T[] {
@@ -333,13 +344,13 @@ export function shouldPushNow (rules: PushRules, now: Date): { ok: boolean, reas
  * @param approvers 当前待办环节还没办的人（服务端从 chain 里读出来的）
  * @param rules     页面里配的规则
  */
-export function resolveReceivers<T extends { name?: string, email?: string }> (
+export function resolveReceivers<T extends { name?: string, email?: string, open_id?: string }> (
   approvers: readonly T[],
   rules: PushRules,
-): Array<{ name?: string, email?: string }> {
+): Array<{ name?: string, email?: string, open_id?: string }> {
   const useApprovers = rules.receiverMode === 'approver' || rules.receiverMode === 'both'
   const useCustom = rules.receiverMode === 'custom' || rules.receiverMode === 'both'
-  const people: Array<{ name?: string, email?: string }> = [
+  const people: Array<{ name?: string, email?: string, open_id?: string }> = [
     ...(useApprovers ? approvers : []),
     ...(useCustom ? rules.receivers : []),
   ]
