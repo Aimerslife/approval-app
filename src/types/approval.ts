@@ -1460,7 +1460,7 @@ export function collapseConditionValue (c: BranchCondition): void {
  * 条件**右侧**「引用另一个字段」的前缀：`@字段名`。
  *
  * 用途：把原本写死的比较值换成**另一个字段的值**，例如
- * 「金额 > 上一环节填的金额」「总库存金额 > 参考MSKU」。
+ * 「金额 > 上一环节填的金额」「总库存金额 > 总库存数量」。
  * 取数范围就是求值上下文（`FlowContext` / 办理时的 form）里有的东西：
  * BI 行字段、派生指标（毛利率 / 海外仓库存金额）、办理时填的 amount / qty 等。
  *
@@ -2455,28 +2455,63 @@ function qtyNum (v: unknown): number | undefined {
 export function receivedQuantities (
   decisions: NodeDecision[] = [],
   ctx?: Record<string, unknown> | null,
-): { received: number, total?: number, remaining?: number } {
+): { received: number, assigned: number, total?: number, remaining?: number } {
   // stepId → 该环节**最后一次**接收的数量（回退重审时覆盖，不叠加）
   const byStep = new Map<string, number>()
+  // stepId → 该环节**最后一次**净分配的数量（负责人分配环节的扣减，见下）
+  const assignedByStep = new Map<string, number>()
+  // 决策序上「此前环节已收合计」：给旧分配决策的净额兜底用（同环节重办按覆盖修正）
+  const recvSeq = new Map<string, number>()
+  let receivedSoFar = 0
   for (const d of decisions) {
-    if (!RECEIVE_RESULTS.includes(d.result)) {
+    if (RECEIVE_RESULTS.includes(d.result)) {
+      const n = qtyNum(d.extra?.qty)
+      if (n !== undefined) {
+        receivedSoFar += n - (recvSeq.get(d.stepId) ?? 0)
+        recvSeq.set(d.stepId, n)
+        byStep.set(d.stepId, n)
+      }
       continue
     }
-    const n = qtyNum(d.extra?.qty)
-    if (n !== undefined) {
-      byStep.set(d.stepId, n)
+    /*
+     * 负责人分配（pick_members）也要占住剩余 —— 否则「分配了 150 件」之后剩余纹丝不动，
+     * 多出来的货会按未扣减的剩余走进弃置段（实测单 1794376788797：总量 550、已收 50、
+     * 分配 150，剩余一直显示 500，业务实际应剩 400）。
+     *
+     * 扣的是**净分配量**（`extra.assigned_qty`，提交时写：毛合计 − 预填基准）而不是毛合计：
+     * 分配清单里会把「该团队此前已收的数量」预填进来占位（美1组收过 50，清单里原样带出 50），
+     * 那部分在前面环节的台账里已经扣过，再按毛合计扣就重复了（本单：150 − 50 = 100，
+     * 剩余 500 − 100 = 400，正好是业务口径）。
+     *
+     * 旧决策（2026-11-11 之前提交的）没有 assigned_qty，按「毛合计 − 此前已收合计」兜底 ——
+     * 预填基准本来就来自此前接收，多数单据上两者相等、兜底即精确；先分配后接收的模板上
+     * 它会偏差（接收发生在分配之后，兜底扣全额），那种单请在办理端重新提交一次分配环节。
+     */
+    if (d.result === PICK_MEMBERS_RESULT) {
+      const gross = qtyNum(d.extra?.qty)
+      let net = qtyNum(d.extra?.assigned_qty)
+      if (net === undefined && gross !== undefined) {
+        net = Math.max(0, gross - receivedSoFar)
+      }
+      if (net !== undefined && net > 0) {
+        assignedByStep.set(d.stepId, net)
+      }
     }
   }
   let received = 0
   for (const n of byStep.values()) {
     received += n
   }
+  let assigned = 0
+  for (const n of assignedByStep.values()) {
+    assigned += n
+  }
 
   const total = qtyNum(ctx?.[STOCK_QTY_FIELD])
   if (total === undefined) {
-    return { received }
+    return { received, assigned }
   }
-  return { received, total, remaining: Math.max(0, total - received) }
+  return { received, assigned, total, remaining: Math.max(0, total - received - assigned) }
 }
 
 /**
@@ -2552,11 +2587,13 @@ export function rebuildChain (
   const round = new Map<string, number>()
 
   /**
-   * 已被这条链路**消费掉**的接收类结论（按推进顺序）。
+   * 已被这条链路**消费掉**的接收 / 分配类结论（按推进顺序）。
    *
    * 已接收 / 剩余由它算出（见 withReceivedQuantities）—— 不能直接拿全部 decisions 去算：
    * 那会把"还没走到"的环节填过的数量也算进来，剩余数量在时间线上就成了**未来值**。
    * 同一环节回退重审会 push 两次，receivedQuantities 按 stepId 取最后一次，正好覆盖。
+   * 负责人分配（pick_members）也在内：它占住的是**净分配量**（见 receivedQuantities），
+   * 「分配后剩余 > 0 → 走弃置段」这类分支条件必须按扣过分配的剩余选路。
    */
   const consumedReceiveDecisions: NodeDecision[] = []
 
@@ -2822,8 +2859,8 @@ export function rebuildChain (
     const step = (membersById.get(stepId) ?? []).map(m => ({ ...m }))
     if (d) {
       lastResult = d.result
-      // 接收类结论：记进"已走到的接收流水"，后续环节的 已接收/剩余 由它算
-      if (RECEIVE_RESULTS.includes(d.result)) {
+      // 接收类 / 负责人分配结论：记进"已走到的流水"，后续环节的 已接收/剩余/已分配 由它算
+      if (RECEIVE_RESULTS.includes(d.result) || d.result === PICK_MEMBERS_RESULT) {
         consumedReceiveDecisions.push(d)
       }
       // 结论记在审批人上，ApprovalNode 读 manager 的这些字段来展示

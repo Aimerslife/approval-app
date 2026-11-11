@@ -5,7 +5,7 @@ import { flowContextOfOrder } from '@/utils/approvalFlow'
 import { lastHandledOf, mainOf, runtimeOf } from '@/utils/approvalRuntime'
 // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
 import { toProductView } from '@/utils/biRowFields'
-import { formatDate, formatTimeDiff } from '@/utils/utils'
+import { formatDate, formatTimeDiff, trimTextDecimals } from '@/utils/utils'
 
 /**
  * 审批单「表格行」的组装与列定义。
@@ -98,7 +98,12 @@ export function toApprovalRow (order: ApprovalOrder): ApprovalRow {
    */
   const finished = Number(order.status ?? APPROVAL_STATUS.PENDING) !== APPROVAL_STATUS.PENDING
   const last = finished ? lastHandledOf(rt.chain) : undefined
-  const conclusion = last ? (last.result_label || last.result || '—') : '—'
+  /*
+   * 结论文案里可能拼着件数 / 金额（「部分接收 1.2000000000000002 件」）：展示前裁到两位小数。
+   * 新记录在拼标签时已经裁过（见 ApprovalHandleForm 的 numText），这里兜的是老单 ——
+   * 表格的「审批结论」列是归档给人看的，不能留着浮点尾巴。
+   */
+  const conclusion = last ? trimTextDecimals(last.result_label || last.result || '—') : '—'
   const conclusionDetail = last
     ? [
       last.name || '',

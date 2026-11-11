@@ -24,12 +24,55 @@ export const PRODUCT_HEADERS: ProductHeader[] = PRODUCT_FIELDS.map(({ title, key
   sortable,
 }))
 
+/** 卡片内的一个小节：同组字段再按单位分行（如账龄分布的「数量 / 金额」） */
+export interface ProductGroupSection {
+  /** 卡片上的行标题 */
+  label: string
+  keys: string[]
+}
+
+export interface ProductGroup {
+  label: string
+  icon: string
+  /**
+   * 组内**全部**字段。设置面板、整组拖拽都按它平铺；
+   * 有 `sections` 时必须等于各小节 keys 的并集（缺了会出现「设置里没有、卡片上有」）。
+   */
+  keys: string[]
+  /** 卡片内再分行显示：同一批区间只差单位时用，否则挤成一片分不清哪格是数量哪格是金额 */
+  sections?: ProductGroupSection[]
+  /**
+   * 右侧**独立块**的字段（如 SKU 组的近一年月平均销量 / 毛利率）：汇总类指标，
+   * 业务要求与逐月明细视觉分开 —— 卡片上切成左右两块，主体在左、这些在右；
+   * 设置面板与整组拖拽仍把 keys + asideKeys 当作一组平铺。
+   */
+  asideKeys?: string[]
+}
+
+/**
+ * 账龄分布的分行口径。
+ *
+ * 数量与金额是**同一批库龄区间**（原来分成「账龄分布（数量）」「账龄分布（金额）」两张卡），
+ * 分两张卡时读一个区间要上下对照，所以合成一张卡、卡内用「数量 / 金额」两行分开：
+ * 两个单位一混排，字面上只差个括号，读者很容易把金额当成件数。
+ */
+const AGING_SECTIONS: ProductGroupSection[] = [
+  {
+    label: '数量',
+    keys: ['3个月内[0-90]', '3-6个月内[91-180]', '6-9个月内[181-270]', '9-12个月内[271-365]', '1年以上[365+]'],
+  },
+  {
+    label: '金额',
+    keys: ['3个月内[0-90]（金额）', '3-6个月内[91-180](金额)', '6-9个月内[181-270](金额)', '9-12个月内[271-365](金额）', '一年以上[365+](金额)'],
+  },
+]
+
 // 产品字段分组（key 与 PRODUCT_HEADERS 完全一致），用于卡片分组排版
-export const PRODUCT_GROUPS: { label: string, icon: string, keys: string[] }[] = [
+export const PRODUCT_GROUPS: ProductGroup[] = [
   {
     label: '基本信息',
     icon: 'mdi-tag-outline',
-    keys: ['主MODEL', '参考MSKU', '最早开售日期-SKU', '拓业部最早时间-SPU'],
+    keys: ['主MODEL', '最早开售日期-SKU', '拓业部最早时间-SPU'],
   },
   {
     label: '组织与属性',
@@ -49,19 +92,27 @@ export const PRODUCT_GROUPS: { label: string, icon: string, keys: string[] }[] =
       '海外仓库存金额'],
   },
   {
-    label: '账龄分布（数量）',
+    label: '账龄分布',
     icon: 'mdi-chart-timeline-variant',
-    keys: ['3个月内[0-90]', '3-6个月内[91-180]', '6-9个月内[181-270]', '9-12个月内[271-365]', '1年以上[365+]'],
-  },
-  {
-    label: '账龄分布（金额）',
-    icon: 'mdi-cash-multiple',
-    keys: ['3个月内[0-90]（金额）', '3-6个月内[91-180](金额)', '6-9个月内[181-270](金额)', '9-12个月内[271-365](金额）', '一年以上[365+](金额)'],
+    sections: AGING_SECTIONS,
+    // 数量 + 金额并集：设置面板 / 整组拖拽按 keys 平铺，别漏掉金额那一半
+    keys: AGING_SECTIONS.flatMap(s => s.keys),
   },
   {
     label: 'SKU 回款 / 毛利',
     icon: 'mdi-currency-usd',
-    keys: ['SKU1月前回款', 'SKU2月前回款', 'SKU3月前回款', 'SKU上年回款', 'SKU1月前毛利润', 'SKU2月前毛利润', 'SKU3月前毛利润', 'SKU近一年月平均销量',
+    /*
+     * 左块固定两行（回款一行、毛利一行）：右块收窄成内容自适应宽后，
+     * 主体变宽，flex-wrap 的随机换行（可能 3+2+2）不如按类目分行整齐。
+     * label 留空 → 行首不出标题（字段名本身已带「回款 / 毛利润」字样，再写一遍是冗余）。
+     */
+    sections: [
+      { label: '', keys: ['SKU1月前回款', 'SKU2月前回款', 'SKU3月前回款', 'SKU上年回款'] },
+      { label: '', keys: ['SKU1月前毛利润', 'SKU2月前毛利润', 'SKU3月前毛利润'] },
+    ],
+    keys: ['SKU1月前回款', 'SKU2月前回款', 'SKU3月前回款', 'SKU上年回款', 'SKU1月前毛利润', 'SKU2月前毛利润', 'SKU3月前毛利润'],
+    // 汇总指标独立在右侧（见 ProductGroup.asideKeys）
+    asideKeys: ['SKU近一年月平均销量',
       // 派生指标：SKU3月前毛利润 / SKU3月前回款 × 100（见 biRowFields.deriveFlowFields）
       '毛利率(SKU3月前)'],
   },
@@ -108,8 +159,6 @@ export function generateMockData (count = 1): Record<string, unknown>[] {
         case '主MODEL': { row[key] = `MDL-${String.fromCharCode(65 + (i % 3))}${i}`; break
         }
         case '产品名称': { row[key] = products[i % products.length]; break
-        }
-        case '参考MSKU': { row[key] = 50_000 + i * 137; break
         }
         case '最早开售日期-SKU': { row[key] = date(2023, (i % 12) + 1, (i % 28) + 1); break
         }

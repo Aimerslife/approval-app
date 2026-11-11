@@ -69,6 +69,23 @@ export function shareValueText (totalAmount: unknown, totalQty: unknown, qty: un
   return formatNumber((amount / total) * n)
 }
 
+/**
+ * 句子里拼着数字的文本：把**长尾小数**就地裁到两位。
+ *
+ * 用途：结论标签这类"数字被拼进句子"的文本（「部分接收 12.345678 件」）。
+ * 历史记录里已经存着浮点尾巴（`0.30000000000000004`），展示时兜一刀即可，不必回库改数据；
+ * 新记录在拼标签时就已经裁过（见 ApprovalHandleForm 的 numText）—— 这里防的是老单。
+ *
+ * 只认「至少三位小数」的纯数字串：整数、一两位小数原样不动；
+ * **不加千分位**（句子里的数目加逗号读着别扭，与 numText 一致）。
+ */
+export function trimTextDecimals (text: unknown): string {
+  return String(text ?? '').replace(/\d+\.\d{3,}/g, (m) => {
+    const n = Number(m)
+    return Number.isFinite(n) ? String(Number(n.toFixed(2))) : m
+  })
+}
+
 /** 这个值算不算"填了"：空串 / null / undefined 都不算（0 算，它是有效值） */
 function isFilledNumber (value: unknown): boolean {
   return value !== null && value !== undefined && String(value).trim() !== ''

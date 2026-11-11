@@ -6,7 +6,25 @@ import { toApprovalRow } from '@/utils/approvalRows'
 import { rotationReceiptsOf, runtimeOf, stepStartTimesOf } from '@/utils/approvalRuntime'
 // PB 的 bi_rows 记录 → 界面用的中文 key 产品对象
 import { toProductView } from '@/utils/biRowFields'
-import { formatDate, formatTimeDiff, shareValueText } from '@/utils/utils'
+import { formatDate, formatNumber, formatTimeDiff, shareValueText, trimTextDecimals } from '@/utils/utils'
+
+/**
+ * 数量 / 金额单元格的展示文本：最多两位小数（带千分位，与金额列同一套 formatNumber）。
+ *
+ * 为什么要裁：合计是浮点累加出来的 —— 各团队 `0.1 + 0.2` 会得到
+ * `0.30000000000000004`，原样写进归档表就是脏数据；数量本来也是整数居多，
+ * 所以用「最多两位」而不是固定两位（整数不显示 .00）。
+ *
+ * ⚠️ 只用于**展示**：折算金额（shareValueText）要拿原值算，别把带千分位的文本喂回去。
+ */
+function numberText (value: unknown): string {
+  const text = String(value ?? '').trim()
+  if (text === '') {
+    return ''
+  }
+  const n = Number(text.replace(/,/g, ''))
+  return Number.isFinite(n) ? formatNumber(n) : text
+}
 
 /**
  * 审批结束后的「审批信息表」：把一张单整理成可以**直接导出 PDF** 的三段表格。
@@ -128,15 +146,17 @@ function stepRowsOf (
     if (!who.handled_at && !who.result) {
       continue
     }
-    const qty = String(who.extra?.qty ?? '').trim()
+    // 展示用文本（两位小数）；折算金额仍用**原值**，带千分位的文本喂进去会算不出数
+    const qtyText = numberText(who.extra?.qty)
     steps.push({
       index: steps.length + 1,
       approver: who.name || '—',
       department: deptTextOf(who),
-      result: resultLabelOf(who.result_label, who.result),
+      // 结论标签里拼着件数 / 金额：裁到两位小数（老单里可能存着浮点尾巴）
+      result: trimTextDecimals(resultLabelOf(who.result_label, who.result)),
       opinion: String(who.opinion ?? '').trim() || '—',
-      qty: qty || '—',
-      amount: (qty ? amountOf(qty) : '') || '—',
+      qty: qtyText || '—',
+      amount: (qtyText ? amountOf(who.extra?.qty) : '') || '—',
       at: formatDate(who.handled_at) || '—',
       duration: who.handled_at ? formatTimeDiff(startTimes[i], who.handled_at) : '—',
     })
@@ -160,7 +180,7 @@ function receiptRowsOf (
     const missing = qty === undefined || qty === ''
     return {
       name,
-      qty: missing ? '—' : String(qty),
+      qty: missing ? '—' : numberText(qty),
       amount: (missing ? '' : amountOf(qty)) || '—',
       note,
     }
@@ -169,15 +189,15 @@ function receiptRowsOf (
     const missing = r.qty === undefined
     return {
       name: r.group,
-      qty: missing ? '—' : String(r.qty),
+      qty: missing ? '—' : numberText(r.qty),
       amount: (missing ? '' : amountOf(r.qty)) || '—',
-      note: [r.resultLabel, r.byName].filter(Boolean).join(' · '),
+      note: trimTextDecimals([r.resultLabel, r.byName].filter(Boolean).join(' · ')),
     }
   }
   return [
     ...rotationReceiptsOf(rt.chain, m => m.department || deptOf?.(m) || '').map(r => groupRowOf(r)),
-    receiptRowOf('团队接收合计', ledger.received, `总库存数量 ${stockQty || '—'}`),
-    receiptRowOf('剩余', ledger.remaining, `总库存金额 ${stockAmount || '—'}`),
+    receiptRowOf('团队接收合计', ledger.received, `总库存数量 ${numberText(stockQty) || '—'}`),
+    receiptRowOf('剩余', ledger.remaining, `总库存金额 ${numberText(stockAmount) || '—'}`),
   ]
 }
 

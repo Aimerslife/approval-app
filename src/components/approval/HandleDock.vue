@@ -188,6 +188,7 @@ const allowedResults = computed(() => {
 const nextSteps = computed(() => (pendingGroup.value
   ? nextStepsOf(pendingGroup.value, props.optionItems, props.resultOptions)
   : []))
+
 const optionContext = computed(() => (pendingGroup.value
   ? optionContextOf(props.order, props.chain, pendingGroup.value.indexes[0])
   : {}))
@@ -226,6 +227,14 @@ const formProps = computed(() => ({
   typeTemplates: props.order?.chain?.types,
   // 轮询卡片后面接的审批：开头列出前面各团队接了多少（见 rotationReceiptsOf）
   rotationReceipts: rotationReceipts.value,
+  /*
+   * 中间态（同一人连续多环、选完结论立即把后续环节铺出来）由**表单自己**推演：
+   * 它拿到整张单 + 两张选项表，就能按 rebuildChain 模拟出后续每一环（见 utils/approvalPreview）。
+   * 外壳只负责把数据交下去 —— 时间线与办理面板的 currentStep 始终是真实的，不会被预览污染。
+   */
+  order: props.order,
+  optionItems: props.optionItems,
+  resultOptions: props.resultOptions,
   showCancel: true,
 }))
 

@@ -1,7 +1,7 @@
 <template>
   <div class="handle-form">
-    <!-- 同一审批人连续多环：前面几环已经办过的，先列出来，免得以为重复了 -->
-    <div v-if="doneActions.length > 0" class="d-flex flex-column ga-3">
+    <!-- 同一审批人连续多环：前面几环已经办过的，先列出来，免得以为重复了（子表单不重复列） -->
+    <div v-if="doneActions.length > 0 && !chained" class="d-flex flex-column ga-3">
       <div v-for="(d, di) in doneActions" :key="di" class="pa-3 rounded bg-[#F6F7F9]">
         <div class="d-flex align-center flex-wrap gap-2">
           <v-chip color="success" label size="x-small" variant="flat">已办</v-chip>
@@ -27,7 +27,7 @@
       </div>
     </div>
 
-    <v-alert v-if="waitingNext" class="mb-3" density="compact" type="info" variant="tonal">
+    <v-alert v-if="waitingNext && !chained" class="mb-3" density="compact" type="info" variant="tonal">
       已提交，正在进入下一环节（还是你办理）…
     </v-alert>
 
@@ -39,7 +39,8 @@
         同一个数在同一个弹窗里出现两三次，反而看不出哪个是整单的、哪个是本环的。
         本环还能接多少仍然标在数量框旁边（价值 …（剩余 12759 件）），两者分工明确。
       -->
-      <div v-if="stockQtyText || stockAmountText" class="approval-total mb-3 text-[11px] text-medium-emphasis">
+      <!-- 整单总量只在最外层说一次：下一环节子表单里再列一遍纯属重复 -->
+      <div v-if="!chained && (stockQtyText || stockAmountText)" class="approval-total mb-3 text-[11px] text-medium-emphasis">
         <span v-if="stockQtyText">总件数 <b>{{ stockQtyText }}</b> 件</span>
         <span v-if="receivedQtyText">已接收 <b>{{ receivedQtyText }}</b> 件</span>
         <span v-if="stockAmountText">总金额 <b>￥{{ stockAmountText }}</b></span>
@@ -74,7 +75,7 @@
         </div>
       </template>
 
-      <div v-if="pickedGroups.length > 0" class="mt-2 d-flex align-center ga-3 mb-3">
+      <div v-if="pickedGroups.length > 0" class="mt-2 d-flex align-center ga-3">
         <span class="field-label shrink-0">办理选项</span>
 
         <v-select v-model="pickedLeaf" class="filter-select flex-grow-1" density="compact" hide-details
@@ -116,8 +117,28 @@
       </div>
     </v-form>
 
-    <!-- 备注 / 审批意见：与上方「label + 控件」同一栅格（左边空出 label 列，右边撑满） -->
-    <div class="mt-2  d-flex align-center ga-3">
+    <!--
+      同一人连续多环的「中间态」：选完结论立即把后续环节**全部铺出来**（可填），
+      但都只是本地状态 —— 点「提交」时按顺序一起推进审批流（见 submitQueue）。
+
+      · 不画「下一环节 / 同一审批人 / 提交后自动进入」这类标题：业务要求直接接着上面表单项往下排；
+      · 多环靠 previewSteps 逐层推演（子表单选完结论，后面自动再铺一环），中间不需要再点提交；
+      · **环与环之间不画分割线**（业务要求整块看着像一张表，别切成几段）：区分靠 mt-3 的留白，
+        `chained` 那一层自己的标题区也不再额外加线；
+      · 必须放在外层 v-form 之外：子表单自带 v-form，嵌套 form 标签不合法。
+    -->
+    <template v-if="!chained">
+      <div v-for="(step, si) in previewSteps" :key="`${step.index}-${si}`" class="mt-3">
+        <ApprovalHandleForm :ref="el => setChildRef(si, el)" chained :allowed-options="step.allowedOptions"
+          :allowed-results="step.allowedResults" :data="step.data" :index="step.index"
+          :option-context="step.optionContext" :receiver-team="receiverTeam" :remaining-qty="remainingQty"
+          :stock-amount="stockAmount" :stock-qty="stockQty" :type-templates="typeTemplates"
+          @option-change="draft => onChildDraft(si, draft)" />
+      </div>
+    </template>
+
+    <!-- 备注 / 审批意见：连续多环**共用最下面这一份**（子表单不再各带一个） -->
+    <div v-if="!chained" class="mt-2 d-flex align-center ga-3">
       <span class="field-label shrink-0 self-start">意见/备注<span v-if="opinionRequired" class="text-error">
           *</span></span>
 
@@ -126,8 +147,8 @@
         rows="2" variant="outlined" />
     </div>
 
-    <!-- 附件：只保留回形针图标，点击文字同样能唤起选择框 -->
-    <div class="remark-row d-flex align-center ga-1">
+    <!-- 附件：只保留回形针图标，点击文字同样能唤起选择框（只属于本次提交，子表单不带） -->
+    <div v-if="!chained" class="remark-row d-flex align-center ga-1">
       <v-file-input ref="fileInputRef" v-model="attachment" class="attachment-input" density="compact" hide-input>
         <template #prepend>
           <v-icon color="#1055C9" size="15">mdi-paperclip</v-icon>
@@ -147,17 +168,22 @@
     </div>
 
     <!-- 提交被拦下的原因（没选办理选项 / 结论在模板里没有后置环节）：贴在按钮上方，别只弹一下 snackbar -->
-    <v-alert v-if="formError" class="mb-2" density="compact" type="warning" variant="tonal">
+    <v-alert v-if="formError && !chained" class="mb-2" density="compact" type="warning" variant="tonal">
       {{ formError }}
     </v-alert>
 
-    <div class="d-flex align-center ga-2">
+    <div v-if="!chained" class="d-flex align-center ga-2">
       <v-spacer />
-      <v-btn size="small" variant="tonal" @click="emit('cancel')">取消</v-btn>
+      <!-- 回退上一级：替代原来下拉里的「驳回」（见 handleRejectBack） -->
+      <v-btn v-if="canRejectBack" :disabled="submitting || waitingNext" size="small" variant="tonal"
+        @click="handleRejectBack" color="error">
+        驳回
+      </v-btn>
 
+      <!-- 有中间态预览环时，点一次会把后续几环一起推进 —— 文案要说清楚（行为见 submitQueue） -->
       <v-btn color="primary" :disabled="waitingNext" :loading="submitting || waitingNext" size="small"
-        :text="waitingNext ? '正在进入下一环节…' : (hasNextAction ? '提交并继续下一个' : '提交')" variant="tonal"
-        @click="handleConfirm" />
+        :text="waitingNext ? '正在进入下一环节…' : '提交'"
+        variant="tonal" @click="handleConfirm" />
     </div>
 
     <v-overlay v-model="overlay" class="d-flex align-center justify-center" @click:outside="overlay = false">
@@ -172,8 +198,11 @@ import type {
   ApprovalNodeOption,
   ApprovalOptionGroup,
   ApprovalOptionLeaf,
+  ApprovalOrder,
   NodeSubmitPayload,
 } from '@/types/approval'
+// 中间态：把"已选结论"假装成一条流水重算链路（纯函数：不写库、不发通知），见 utils/approvalPreview
+import { type DraftDecisionInput, previewNextStepOf } from '@/utils/approvalPreview'
 // 审批类型（选中结论后要填什么）：办理期**只读单据快照**，见 utils/approvalTypes 文件头的边界说明
 import type { ApprovalTypeTemplate } from '@/utils/approvalTypes'
 import {
@@ -234,6 +263,37 @@ interface ApprovalHandleFormProps {
    * 没有轮询环时为空数组，界面上那一行不显示。
    */
   rotationReceipts?: RotationReceipt[]
+  /**
+   * 审批单本身：**中间态推演**要它（flow + decisions + context 才能算出"提交后会走到哪"）。
+   *
+   * 只在最外层需要（子表单不传）：为空时不渲染任何预览环，行为与改造前一致。
+   */
+  order?: ApprovalOrder | null
+  /**
+   * 各环节的办理选项 / 可结论（页面下发的两张表，按 stepId 索引）。
+   *
+   * 中间态要渲染**后续几个环节**各自的选项，按预览出来的 stepId 现查 —— 所以整张表要带下来。
+   */
+  optionItems?: Record<string, ApprovalNodeOption[]>
+  resultOptions?: Record<string, string[]>
+  /** 连锁模式：作为「后续环节」的子表单渲染（隐藏按钮区 / 意见 / 附件 / 已办回显 / 自己的预览环） */
+  chained?: boolean
+}
+
+/** 「下一环节」的渲染参数：由 HandleDock 的 previewStep 组装（stepId / 选项都已查好） */
+interface PreviewStepProps {
+  /** 该环节在 chain 中的下标（提交时原样回传） */
+  index: number
+  /** 该环节的 stepId（HandleDock 据此查选项表，这里只做传递） */
+  stepId: string
+  /** 该环节的成员（`data[0]` 那条 manager 就是办理人） */
+  data: ApprovalChainItem[]
+  /** 该环节的办理选项（与 allowedOptions 同构） */
+  allowedOptions?: ApprovalNodeOption[]
+  /** 该环节可选的审批结论 */
+  allowedResults?: string[]
+  /** 该环节的选项条件上下文（`result` = 上一环节刚选的结论） */
+  optionContext?: Record<string, unknown>
 }
 
 const props = withDefaults(defineProps<ApprovalHandleFormProps>(), {
@@ -249,6 +309,10 @@ const props = withDefaults(defineProps<ApprovalHandleFormProps>(), {
   stockAmount: '',
   receiverTeam: '',
   rotationReceipts: () => [],
+  order: null,
+  optionItems: () => ({}),
+  resultOptions: () => ({}),
+  chained: false,
 })
 
 const emit = defineEmits<{
@@ -256,9 +320,26 @@ const emit = defineEmits<{
   /** 这一环彻底办完了（且后面没有同人的动作）—— 弹窗据此关闭；内联面板没人监听也无妨 */
   (e: 'finish'): void
   (e: 'cancel'): void
+  /**
+   * 当前选中的结论变化（含"还没选"→ null）。
+   *
+   * 外壳拿它去算「如果现在提交会走到哪」——只有下一环还是同一人时，
+   * 才会把 previewStep 传回来渲染（见 utils/approvalPreview）。
+   * ⚠️ 这里只报结论码，不带 extra：预览阶段不收集字段值，也不做任何校验。
+   */
+  (e: 'option-change', draft: { index: number, result: string, result_label: string } | null): void
 }>()
 
 /* ==================== 表单状态 ==================== */
+
+/**
+ * 「驳回」的结论码：必须与保存期注入的驳回分支条件
+ * （`{ field: 'result', op: 'eq', value: 'reject' }`）一致。
+ *
+ * 声明放在最前：下面的 computed（optionItems / canRejectBack）在 **setup 期间**
+ * 就会被 immediate watch 触发求值，声明在后会撞 TDZ（Cannot access before initialization）。
+ */
+const REJECT_RESULT = 'reject'
 
 const radios = ref('deal')
 const opinion = ref('')
@@ -316,6 +397,72 @@ const hasNextAction = computed(() => {
   const i = actionSteps.value.findIndex(s => s.index === activeStep.value?.index)
   return i !== -1 && i < actionSteps.value.length - 1
 })
+
+/* ==================== 中间态：后续环节的推演与渲染 ==================== */
+
+/**
+ * 后续环节的推演（同一审批人连续多环）。
+ *
+ * 做法：把「当前选中的结论 + 各子表单已选的结论」当成一串流水喂给 rebuildChain
+ * （见 utils/approvalPreview：纯函数，不写库、不发通知），算出"如果现在提交会依次走到哪"。
+ * 只要下一环还是同一个人，就把它铺成一个可填写的子表单；子表单选完结论后，
+ * 同一个循环继续往后推 —— 三环、四环都能一路铺出来，中间不需要再点提交。
+ */
+const childDrafts = ref<Array<{ index: number, result: string, result_label: string } | null>>([])
+const childRefs = ref<Array<{ validate: () => Promise<string>, collect: () => SubmitBody } | undefined>>([])
+
+/** 当前环自己的草稿（还没选结论时为空 → 不推演） */
+const selfDraft = computed<DraftDecisionInput | null>(() => {
+  const step = activeStep.value
+  const result = selectedResult.value
+  return step && result ? { index: step.index, result, result_label: labelOf(result) } : null
+})
+
+/** 要渲染的后续环节列表（逐层推演；上限 12 环，防止模板成环时死循环） */
+const previewSteps = computed<PreviewStepProps[]>(() => {
+  const order = props.order
+  // 子表单只渲染自己那一环：预览链由最外层统一铺开（见模板里的 v-for）
+  if (props.chained || !order || !selfDraft.value) {
+    return []
+  }
+  const out: PreviewStepProps[] = []
+  const drafts: DraftDecisionInput[] = [selfDraft.value]
+  for (let depth = 0; depth < 12; depth++) {
+    const next = previewNextStepOf(order, drafts)
+    if (!next) {
+      break
+    }
+    out.push({
+      index: next.index,
+      stepId: next.stepId,
+      data: next.data,
+      allowedOptions: props.optionItems[next.stepId] ?? [],
+      allowedResults: props.resultOptions[next.stepId] ?? [],
+      optionContext: next.optionContext,
+    })
+    // 这一层还没选结论：铺到这里为止（用户选完才会继续往后推）
+    const child = childDrafts.value[depth]
+    if (!child || child.index !== next.index || !child.result) {
+      break
+    }
+    drafts.push({ index: child.index, result: child.result, result_label: child.result_label })
+  }
+  return out
+})
+
+/** 子表单实例登记（v-for 的模板 ref）：提交时的校验与取值都要用它 */
+function setChildRef (depth: number, el: unknown) {
+  childRefs.value[depth] = (el ?? undefined) as { validate: () => Promise<string>, collect: () => SubmitBody } | undefined
+}
+
+/** 某个子表单换了结论：记下来重算后面能铺几环（它之后的草稿一并作废） */
+function onChildDraft (depth: number, draft: { index: number, result: string, result_label: string } | null) {
+  const next = childDrafts.value.slice(0, depth)
+  if (draft?.result) {
+    next[depth] = draft
+  }
+  childDrafts.value = next
+}
 
 /* ==================== 已办动作回显 ==================== */
 
@@ -440,7 +587,26 @@ const optionItems = computed<ApprovalNodeOption[]>(() => {
     return offered
   }
   const enabled = offered.filter(o => typeTemplateFromSnapshot(props.typeTemplates, o.result).enabled !== false)
-  return enabled.length > 0 ? enabled : offered
+  const usable = enabled.length > 0 ? enabled : offered
+  /*
+   * 「驳回」不再作为办理下拉里的选项：回退交回按钮区的「回退上级」（见 handleRejectBack）。
+   * 但**过滤光了要退回原样** —— 有些老模板只配了驳回一条出线，去掉就彻底无路可走了。
+   */
+  const withoutReject = usable.filter(o => o.result !== REJECT_RESULT)
+  return withoutReject.length > 0 ? withoutReject : usable
+})
+
+/**
+ * 本环节有没有「回退上一级」出口 —— 按钮「回退上级」据此显示 / 隐藏。
+ *
+ * 判据：模板给这一环配了 reject 分支（保存期会把它绑成 loopBackTo 回退），
+ * 或环节级选项树标了 canReject（那条分支不在树里，见 ApprovalNodeOption.canReject）。
+ * 看的是**未过滤**的选项：reject 已从下拉里摘掉，但出口本身还在。
+ */
+const canRejectBack = computed(() => {
+  const step = activeStep.value
+  const raw = step?.allowedOptions?.length ? step.allowedOptions : []
+  return raw.some(o => o.result === REJECT_RESULT || (o.nodeLevel && o.canReject))
 })
 
 /**
@@ -532,6 +698,27 @@ watch(
       emit('finish')
     }
   },
+)
+
+/**
+ * 结论一变就把「当前这一环 + 选中的结论」报给外壳。
+ *
+ * 外壳据此模拟重算链路（utils/approvalPreview，纯函数、不落库）判断下一环是不是
+ * 还是同一个人；是的话会把 previewStep 传回来 —— 下一环节会在面板里**立即渲染**，
+ * 而真正的数据推进仍然只发生在点「提交」时（见 handleConfirm）。
+ */
+watch(
+  [() => activeStep.value?.index, () => selectedResult.value],
+  () => {
+    const step = activeStep.value
+    const result = selectedResult.value
+    if (!step || !result) {
+      emit('option-change', null)
+      return
+    }
+    emit('option-change', { index: step.index, result, result_label: labelOf(result) })
+  },
+  { immediate: true },
 )
 
 /* ==================== 补充信息（数量 / 金额 / 原因） ==================== */
@@ -918,6 +1105,28 @@ function textOf(value: unknown): string {
 }
 
 /**
+ * 数字的**展示**文本：小数最多两位。
+ *
+ * 为什么需要：件数 / 金额是浮点累加出来的（团队清单各组合计、`0.1 + 0.2`），
+ * 不裁的话结论标签会写成「部分接收 0.30000000000000004 件」，一路带进时间线、
+ * 表格的「结论 / 审批结论」列和归档表 —— 归档时这串尾巴就是脏数据。
+ *
+ * 只用于拼**文案**：`extra.qty` 等落库值仍是原值（台账与分支条件按它算），别拿这个函数去改记录。
+ * 不用千分位：它出现在句子里（「部分接收 1,234.5 件」读着别扭）。
+ */
+function numText(value: unknown): string {
+  const text = textOf(value).trim()
+  if (text === '') {
+    return ''
+  }
+  const n = Number(text.replace(/,/g, ''))
+  if (!Number.isFinite(n)) {
+    return text
+  }
+  return String(Number(n.toFixed(2)))
+}
+
+/**
  * 多团队交接：把各团队填的接收数量**合计**写进 `qty`。
  *
  * 为什么要合计：接收台账、分支条件、时间线都按 `extra.qty` 看"这一环接了多少件"；
@@ -936,6 +1145,34 @@ function withReceiverQty (extra: Record<string, unknown>) {
   const total = totalQtyOf(extra.members)
   if (total > 0) {
     extra.qty = String(total)
+  }
+}
+
+/**
+ * 负责人分配（pick_members）的**净分配量**快照：毛合计 − 预填基准。
+ *
+ * `extra.qty` 是**毛**合计（含清单里预填的"该团队此前已收"占位量，见 defaultQtyOf），
+ * 而剩余扣减只该算**这次新分出去**的部分 —— 预填的那部分在前面环节的台账里已经扣过。
+ * 引擎按流水重算剩余时就读这个字段（见 types/approval 的 receivedQuantities），
+ * 不写的话旧单兜底口径会接管（多数单据等价，但先分配后接收的模板上会偏差）。
+ *
+ * 顺手把**扣完之后的剩余**也写进 extra（remaining_qty）：时间线上分配环节直接
+ * 「已分配 X · 剩余 Y」，不用翻到弃置段才知道还剩多少。引擎不依赖它（自己重算）。
+ */
+function withAssignedQty (extra: Record<string, unknown>) {
+  if (extra.members === undefined) {
+    return
+  }
+  const list = Array.isArray(extra.members) ? extra.members : [extra.members]
+  const net = list.reduce((sum: number, m) => {
+    const n = Number(String((m as { qty?: unknown } | null)?.qty ?? '').trim()) || 0
+    const base = receiverSeedBaseline.value[String((m as { name?: unknown } | null)?.name ?? '')] || 0
+    return sum + Math.max(0, n - base)
+  }, 0)
+  extra.assigned_qty = String(net)
+  const cap = Number(String(receiveCapText.value).replace(/,/g, ''))
+  if (Number.isFinite(cap)) {
+    extra.remaining_qty = String(Math.max(0, cap - net))
   }
 }
 
@@ -1000,8 +1237,8 @@ function withRecycleLedger(extra: Record<string, unknown>): Record<string, unkno
  * 值从 `extra` 取（键名仍是 qty / amount，与改造前一致）。
  */
 function recycleLabel(base: string, extra: Record<string, unknown>): string {
-  const qty = textOf(extra.qty).trim()
-  const amount = textOf(extra.amount).trim()
+  const qty = numText(extra.qty)
+  const amount = numText(extra.amount)
   const parts = [qty ? `${qty} 件` : '', amount ? `￥${amount}` : ''].filter(Boolean)
   return parts.length > 0 ? `${base} ${parts.join(' / ')}` : base
 }
@@ -1019,20 +1256,37 @@ function recycleLabel(base: string, extra: Record<string, unknown>): string {
 
 const pickedGroups = computed<ApprovalOptionGroup[]>(() => selectedOption.value?.groups ?? [])
 
-/** 「驳回」的结论码：必须与保存期注入的驳回分支条件（`{ field:'result', op:'eq', value:'reject' }`）一致 */
-const REJECT_RESULT = 'reject'
+/* 「驳回」的结论码声明在表单状态区（REJECT_RESULT）：computed 会在 setup 期间被求值，别放这儿 */
 
+/**
+ * 办理选项（选项树的扁平清单）。
+ *
+ * 「驳回」不再出现在这里：
+ *   · 树里配了 link=reject 的叶子一并滤掉；
+ *   · 以前给环节级树补的那条「其它 / 驳回」也不再补（见 canRejectBack —— 回退改由按钮承担）。
+ * 全被滤光时退回原清单：宁可多摆一个，也不能让办理人无路可走。
+ */
 const optionMenuItems = computed(() => {
+  const groups = pickedGroups.value
+  const withoutReject = groups.map(g => ({ title: g.title || '未分类', items: (g.items ?? []).filter(i => i.link !== REJECT_RESULT) }))
+  // 树里只配了驳回：退回原清单，不能让办理人连一个选项都没有
+  const allFiltered = withoutReject.every(g => g.items.length === 0) && groups.some(g => (g.items ?? []).length > 0)
+  const source = allFiltered
+    ? groups.map(g => ({ title: g.title || '未分类', items: g.items ?? [] }))
+    : withoutReject
+
   const list: Array<ApprovalOptionLeaf | { type: 'subheader', text: string }> = []
-  for (const g of pickedGroups.value) {
-    list.push({ type: 'subheader', text: g.title || '未分类' }, ...g.items)
-  }
-  const hasRejectLeaf = pickedGroups.value.some(g => (g.items ?? []).some(i => i.link === REJECT_RESULT))
-  if (selectedOption.value?.nodeLevel && selectedOption.value?.canReject && !hasRejectLeaf) {
-    list.push({ type: 'subheader', text: '其它' }, { text: '驳回', link: REJECT_RESULT })
+  for (const g of source) {
+    list.push({ type: 'subheader', text: g.title }, ...g.items)
   }
   return list
 })
+
+/** 下拉清单里的第一个**叶子**（跳过类别标题），用作默认值；没有叶子时返回 null */
+function firstLeafOf (items: Array<ApprovalOptionLeaf | { type: 'subheader', text: string }>): ApprovalOptionLeaf | null {
+  const hit = items.find(i => (i as { type?: string }).type !== 'subheader')
+  return (hit as ApprovalOptionLeaf | undefined) ?? null
+}
 
 /** 二级候选项：**只有选中了带二级的一级选项才有值** */
 const leafChildren = computed(() => pickedLeaf.value?.children ?? [])
@@ -1124,21 +1378,31 @@ watch(
 )
 
 /**
- * 处理方式一变（或它带的树变了）就**清空**一级 / 二级，避免留下上一棵树里的选择。
+ * 处理方式一变（或它带的树变了）就**校正**一级 / 二级 —— 但只在"当前选择已经失效"时校正。
  *
- * ⚠️ 这里以前是"默认选树里的第一个叶子（连二级也取第一个）"—— 那等于替办理人做了决定：
- *    选项树动辄十几二十个叶子，下拉合着的时候根本看不出已经选了一个，点「提交」就把
- *    一个**没人选过**的结论写进流水、并按它走分支。现场反馈的"审批选项错了"就是这个。
- *    现在一律留空，由办理人自己选（提交前有必选校验，见 handleConfirm）。
+ * 口径（现行需求）：**默认选中树里的第一个叶子**，二级跟着取它的第一项 ——
+ * 下拉一出现就已经是个合法结论，办理人不动它也能直接提交。
+ * 所以下拉必须把选中文案显示出来（别用 placeholder 盖住已选值），
+ * 否则就会出现"看着是空的、其实已经选了一个"的老问题（见 handleConfirm 的必选兜底）。
  *
- * ⚠️ 这两条 watch 必须写在 pickedGroups / pickedChild **声明之后**：
- * `const` 是不提升的，放到前面会在模块初始化时就抛"used before declaration"。
+ * ⚠️ 这里的判断是**必须的**：`selectedOption` 是 computed，`selectItems` 一旦重算就会返回
+ * 新对象 —— 无条件 `pickedLeaf = 第一个叶子` 会把办理人**刚选的**叶子打回第一个，
+ * 现象就是"办理选项选不中 / 选了又跳回去"（同人连续多环时预览环重算也会触发它）。
  */
 watch(
   [selectedOption, pickedGroups],
   () => {
-    pickedLeaf.value = null
-    pickedChild.value = ''
+    const leaves = optionMenuItems.value
+    const current = pickedLeaf.value
+    // 选中的叶子在这棵树里还找得到（按文案 + 链路比，不按对象身份）就不动它
+    const stillValid = !!current && leaves.some(i => (i as { type?: string }).type !== 'subheader'
+      && (i as ApprovalOptionLeaf).text === current.text
+      && (i as ApprovalOptionLeaf).link === current.link)
+    if (stillValid) {
+      return
+    }
+    pickedLeaf.value = firstLeafOf(leaves)
+    pickedChild.value = pickedLeaf.value?.children?.[0] ?? ''
   },
   { immediate: true, deep: true },
 )
@@ -1214,8 +1478,9 @@ function resetFormState() {
    * （pickedGroups 取的就是选中项的 groups），下一环要等 props 变化才恢复。
    */
   selectedOptionKey.value = selectItems.value[0]?.key ?? ''
-  pickedLeaf.value = null
-  pickedChild.value = ''
+  // 一级 / 二级与挂载时同一口径：树里的第一个叶子 + 它的第一项二级
+  pickedLeaf.value = firstLeafOf(optionMenuItems.value)
+  pickedChild.value = pickedLeaf.value?.children?.[0] ?? ''
   // 审批类型表单整份清空：下一环要填的字段可能完全不同（渲染器会按新结论重新预填）
   typeValues.value = {}
   // 换环节了，上个环节各团队填过的数量不能再当默认值（那不是"这个团队这次接多少"）
@@ -1384,6 +1649,9 @@ function collectResult(): { result: string, result_label: string, extra: Record<
       extra[field.key] = field.key === 'members' ? membersForStore(value) : value
     }
     withReceiverQty(extra)
+    if (leaf.link === PICK_MEMBERS_RESULT) {
+      withAssignedQty(extra)
+    }
     if ((type.effects ?? []).includes('receive_ledger')) {
       withReceiveLedger(extra, extra.qty)
     }
@@ -1413,6 +1681,9 @@ function collectResult(): { result: string, result_label: string, extra: Record<
     extra[field.key] = field.key === 'members' ? membersForStore(value) : value
   }
   withReceiverQty(extra)
+  if (result === PICK_MEMBERS_RESULT) {
+    withAssignedQty(extra)
+  }
 
   const effects = type.effects ?? []
   if (effects.includes('receive_ledger')) {
@@ -1485,15 +1756,15 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
        * 模板自己配了结论文案（custom）时以它为准，不擅自改人写的字。
        */
       if (!custom && receiverShortOfCap(extra)) {
-        return `部分接收 ${textOf(extra.qty) || 0} 件`
+        return `部分接收 ${numText(extra.qty) || 0} 件`
       }
       return custom || '全部接收'
     }
     case 'part_receive': {
-      return `部分接收 ${textOf(extra.qty) || 0} 件`
+      return `部分接收 ${numText(extra.qty) || 0} 件`
     }
     case RECEIVE_QTY_RESULT: {
-      return `接收 ${textOf(extra.qty) || 0} 件`
+      return `接收 ${numText(extra.qty) || 0} 件`
     }
     case 'recycle':
     case 'supplier_recycle':
@@ -1533,7 +1804,7 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
        * 多团队时按「、」串起来（`选择接收团队：美1组（负责人 A）30 件、欧洲组（负责人 B）20 件`）。
        */
       const parts = list.map(m => {
-        const qty = String(m.qty ?? '').trim()
+        const qty = numText(m.qty)
         return `${m.name ?? ''}${m.manager ? `（${isDept ? '部门负责人' : '团队负责人'} ${m.manager}）` : ''}${qty ? ` ${qty} 件` : ''}`
       }).filter(text => text.trim() !== '')
       return parts.length > 0 ? `${title}：${parts.join('、')}` : title
@@ -1554,66 +1825,107 @@ function resultLabelOf(result: string, extra: Record<string, unknown>): string {
   }
 }
 
-async function handleConfirm() {
-  // 正在提交 / 上一环刚提交、同人的下一环还没传回来：都不该再发一次
-  if (submitting.value || waitingNext.value) return
-  const step = activeStep.value
-  if (!step) return
+/** 一个环节的提交体（不含 done 回调）：连锁提交时按顺序排队用 */
+interface SubmitBody {
+  index: number
+  result: string
+  result_label: string
+  extra: Record<string, unknown>
+  opinion: string
+  files: File[]
+}
 
+/**
+ * 本环节的校验（返回错误文案，空串 = 通过）。
+ *
+ * 抽出来是因为它有两个调用方：本组自己的「提交」（handleConfirm），
+ * 以及连锁提交时父级对**下一环节子表单**的校验（defineExpose 的 validate）。
+ */
+async function validateSelf (): Promise<string> {
   /*
-   * 选项树必须由办理人自己选一个叶子。
-   * 以前默认预选第一个，这里就"永远有值"；现在不预选了，不选就提交会带上空结论
-   * （result 为空 → 流程里没有分支命中 → 停在原地），所以先拦下来说清楚。
+   * 选项树兜底：正常情况下已有默认第一项（见上面处理那条 watch），这里留一道是给
+   * "树里一个可选叶子都没有"（全被驳回过滤掉 / 模板没配）的情况 ——
+   * 那时代码还是会提交空结论（result 为空 → 流程里没有分支命中 → 停在原地），先拦下来说清楚。
    */
-  formError.value = ''
-  opinionError.value = ''
   if (hasNodeLevelTree.value && !pickedLeaf.value) {
-    formError.value = '请选择「办理选项」后再提交'
-    return
+    return '请选择「办理选项」后再提交'
   }
 
   if (handleForm.value) {
     const { valid } = await handleForm.value.validate()
-    if (!valid) return
+    // 字段自己的红字已经显示，这里只回一个非空标记，别再叠一句文案
+    if (!valid) return ' '
   }
 
   /*
    * 「外部环境」类必须写意见/备注（见 opinionRequired 的说明）。
    * 放在渲染器校验**之后**：先解决字段本身的问题，再补这段说明，两处红字不会一起炸。
    */
-  if (opinionRequired.value && opinion.value.trim() === '') {
+  // 子表单（后续环）不校验意见：整份连锁提交共用最下面那一条（见 handleConfirm）
+  if (!props.chained && opinionRequired.value && opinion.value.trim() === '') {
     opinionError.value = OPINION_REQUIRED_HINT
-    formError.value = OPINION_REQUIRED_HINT
-    return
+    return OPINION_REQUIRED_HINT
   }
-  const { result, result_label, extra } = collectResult()
+
+  const { result, extra } = collectResult()
   // 兜底的同一件事：没有有效结论就别发请求（空结论会让单据卡在本环节）
   if (!result) {
-    formError.value = '请选择「办理选项」后再提交'
-    return
+    return '请选择「办理选项」后再提交'
   }
+
   /*
    * 接收团队的数量：清单里摊着全部团队，但不能一个都不填就提交 ——
    * 那样"这环把货交给谁、各接多少"完全没记录，后面查台账也查不到（见 receiverQtyError）。
    */
-  const qtyError = receiverQtyError(extra)
-  if (qtyError) {
-    formError.value = qtyError
-    return
-  }
-  submitting.value = true
-  emit('submit', {
-    // 提交的是**当前动作**那一环（同一审批人连续多环时，可能是本人这组的第 2、3 环）
-    index: step.index,
+  return receiverQtyError(extra)
+}
+
+/** 收集本环节的提交体（不含 done）：连锁提交时按顺序排队用 */
+function collectBody (): SubmitBody {
+  const { result, result_label, extra } = collectResult()
+  return {
+    index: activeStep.value?.index ?? -1,
     result,
     result_label,
     extra,
     opinion: opinion.value.trim(),
     files: attachment.value ? [attachment.value] : [],
-    done: (ok: boolean, info?: { sameApproverNext?: boolean }) => {
-      submitting.value = false
-      if (!ok) return
+  }
+}
 
+/**
+ * 顺序提交：本环 → 中间态渲染出来的下一环（同一人连续环节）。
+ *
+ * 为什么可以一次点提交推进多环：每一环的 stepId 都由提交侧按**最新 decisions**
+ * 现算（见 composables/useNodeSubmit），上一环写库后下一环的 index 依然有效；
+ * 中途失败就停在那儿（第一环已落库、下一环仍是待办），重新打开接着办即可。
+ */
+function submitQueue (queue: SubmitBody[]) {
+  const body = queue.shift()
+  if (!body) {
+    submitting.value = false
+    emit('finish')
+    return
+  }
+  emit('submit', {
+    ...body,
+    done: (ok: boolean, info?: { sameApproverNext?: boolean }) => {
+      if (!ok) {
+        submitting.value = false
+        return
+      }
+      // 队列里还有（中间态渲染出来的下一环）：继续推进，先不解除"提交中"
+      if (queue.length > 0) {
+        /*
+         * 必须让出这一轮再发下一次：done 是**同步**回调，此刻 useNodeSubmit 还在
+         * 它自己的 try 里（submitting 尚未复位，见 useNodeSubmit 的 finally）——
+         * 直接递归 emit 会被它的"正在提交"判据拦下（payload.done(false)），
+         * 表现为"第一环落库、第二环静默没提交"。微任务排在 finally 之后，正好。
+         */
+        queueMicrotask(() => submitQueue(queue))
+        return
+      }
+      submitting.value = false
       if (hasNextAction.value || info?.sameApproverNext) {
         waitingNext.value = true
         return
@@ -1624,11 +1936,95 @@ async function handleConfirm() {
   })
 }
 
+async function handleConfirm() {
+  // 正在提交 / 上一环刚提交、同人的下一环还没传回来：都不该再发一次
+  if (submitting.value || waitingNext.value) return
+  const step = activeStep.value
+  if (!step) return
+
+  formError.value = ''
+  opinionError.value = ''
+  const error = await validateSelf()
+  if (error) {
+    if (error.trim()) {
+      formError.value = error
+    }
+    return
+  }
+
+  /*
+   * 逐环校验 + 取值：本环 → 中间态铺出来的后续几环（同一人连续环节，可能三环以上）。
+   * 全部通过才发第一次请求；任何一环不过都停在原地，审批流数据一点都不会动。
+   */
+  const queue: SubmitBody[] = [collectBody()]
+  for (let i = 0; i < previewSteps.value.length; i++) {
+    const child = childRefs.value[i]
+    if (!child) {
+      continue
+    }
+    const childError = await child.validate()
+    if (childError) {
+      formError.value = childError.trim()
+        ? `第 ${i + 2} 个动作：${childError}`
+        : `第 ${i + 2} 个动作还有必填项没填完`
+      return
+    }
+    queue.push(child.collect())
+  }
+
+  /*
+   * 意见 / 附件只有最下面那一份（连续多环共用）：
+   *   · 意见写进每一环的流水 —— 一次办理只留一条说明，与现场习惯一致；
+   *   · 附件只挂第一环（附件按环节 index 上传成独立文件记录，逐环重传会多出好几份）。
+   */
+  const sharedOpinion = opinion.value.trim()
+  queue.forEach((body, i) => {
+    body.opinion = sharedOpinion
+    if (i > 0) {
+      body.files = []
+    }
+  })
+
+  submitting.value = true
+  submitQueue(queue)
+}
+
 /**
- * 给外壳用：弹窗关闭时把"等待下一环"清掉 ——
- * 否则下次打开还是禁用状态（提交成功后马上关窗是最常见的操作）。
+ * 回退上级：等价于以「驳回」结论提交本环 —— 模板里那条分支要么回退到上一个别人办的环节
+ * （loopBackTo），要么直接终结流程。
+ *
+ * 以前它是办理下拉里的一个选项，现在挪到提交旁边（业务要求，见模板按钮区）；
+ * 因此这里不校验下拉与类型字段，意见写了下就带上。
  */
-defineExpose({ reset: resetFormState })
+function handleRejectBack () {
+  if (submitting.value || waitingNext.value) return
+  const step = activeStep.value
+  if (!step) {
+    return
+  }
+  formError.value = ''
+  opinionError.value = ''
+  submitting.value = true
+  submitQueue([{
+    index: step.index,
+    result: REJECT_RESULT,
+    result_label: '回退上级',
+    extra: {},
+    opinion: opinion.value.trim(),
+    files: attachment.value ? [attachment.value] : [],
+  }])
+}
+
+/**
+ * 给外壳用：
+ *   · reset —— 弹窗关闭时把"等待下一环"清掉（否则下次打开还是禁用状态）；
+ *   · validate / collect —— 连锁提交时父级（同一组件的外层实例）据此逐环校验与排队。
+ */
+defineExpose({
+  reset: resetFormState,
+  validate: validateSelf,
+  collect: collectBody,
+})
 </script>
 
 <style scoped lang="scss">

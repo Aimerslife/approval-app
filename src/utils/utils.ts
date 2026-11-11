@@ -160,7 +160,7 @@ export function formatTimeDiff (time?: string | null, end?: string | number | Da
  * 实现刻意放在零依赖的 ./number 里（utils.ts 会连带拉进 pocketbase.ts，
  * 在浏览器外无法加载，不利于单测），这里只做统一出口。
  */
-export { formatDatas, formatNumber, parseFormattedNumber, shareValueText } from './number'
+export { formatDatas, formatNumber, parseFormattedNumber, shareValueText, trimTextDecimals } from './number'
 
 /*
  * getPinyinInitials 已移到 utils/pinyin.ts，并改成**动态**加载：

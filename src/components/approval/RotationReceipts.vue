@@ -16,6 +16,7 @@
 
 <script lang="ts" setup>
   import type { RotationReceipt } from '@/utils/approvalRuntime'
+  import { trimTextDecimals } from '@/utils/utils'
 
   const props = withDefaults(defineProps<{
     items: RotationReceipt[]
@@ -31,7 +32,8 @@
    *   · 没填数量（「不接收」这类结论）→ 结论文案 —— 不能显示成 0 件，那是"接了 0 件"，语义不同。
    */
   function qtyTextOf (r: RotationReceipt) {
-    return r.qty !== undefined ? `${r.qty} 件` : r.resultLabel
+    // 件数是浮点累加出来的，小数只留两位（0.30000000000000004 → 0.3）
+    return r.qty !== undefined ? `${trimTextDecimals(r.qty)} 件` : trimTextDecimals(r.resultLabel)
   }
 
   /** 悬浮说明：谁、什么时候办的（时间线/详情里"为什么是这个数"要能追） */

@@ -35,7 +35,6 @@
                 <div v-if="visible('SKU')">SKU：{{ row.SKU }}</div>
                 <div v-if="visible('SPU')">SPU：{{ row.SPU }}</div>
                 <div v-if="visible('主MODEL')">主MODEL：{{ row['主MODEL'] }}</div>
-                <div v-if="visible('参考MSKU')">参考MSKU：{{ row['参考MSKU'] }}</div>
               </template>
 
               <template #saleTimeDefault="{ row }">
@@ -366,7 +365,7 @@
    */
   const COLUMN_FIELDS: Record<string, string[]> = {
     图片链接: ['图片链接'],
-    productInfo: ['产品名称', '是否属于灯具', 'SKU', 'SPU', '主MODEL', '参考MSKU'],
+    productInfo: ['产品名称', '是否属于灯具', 'SKU', 'SPU', '主MODEL'],
     saleTime: ['最早开售日期-SKU', '拓业部最早时间-SPU'],
     productGroup: ['供应商', '组长', '团队', '部门'],
     platform: ['仓位', '店铺', '平台'],

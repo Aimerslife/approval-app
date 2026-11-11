@@ -247,7 +247,7 @@ import { type ApprovalNextStep, mainOf, type RotationReceipt } from '@/utils/app
 import { buildColorScale, discardColorStep, hexToRgb, pickColorStep } from '@/utils/color'
 import { ensurePinyin, pinyinInitials } from '@/utils/pinyin'
 // shareValueText：按「总金额 ÷ 总数量 × 数量」折算货值（口径与办理表单里的「价值」同一份）
-import { formatDate, formatTimeDiff, shareValueText } from '@/utils/utils'
+import { formatDate, formatTimeDiff, shareValueText, trimTextDecimals } from '@/utils/utils'
 // 表单主体：本项目没有「组件自动导入」，模板里用到的组件必须显式 import，
 // 否则编译成 resolveComponent 后运行时解析不到（控制台警告 + 表单整块不渲染）
 import ApprovalHandleForm from './approval/ApprovalHandleForm.vue'
@@ -581,7 +581,7 @@ const rotationQtyText = computed(() => {
     return ''
   }
   const carriesQty = (r: { label: string }) => /件\s*$/.test(r.label)
-  const textOf = (r: { qty?: number, label: string }) => (r.qty !== undefined ? `${r.qty} 件` : r.label)
+  const textOf = (r: { qty?: number, label: string }) => (r.qty !== undefined ? `${trimTextDecimals(r.qty)} 件` : r.label)
   if (list.length === 1) {
     const only = list[0]
     return carriesQty(only) ? only.label : `本组接收 ${textOf(only)}`
@@ -703,7 +703,7 @@ const pickedReceivers = computed<ReceiverTeam[]>(() => {
 
 /** 该接收方接了多少件（老单 / 选部门没有这个字段 → 空串，不渲染） */
 function receiverQtyOf(r: ReceiverTeam): string {
-  return String(r.qty ?? '').trim()
+  return trimTextDecimals(String(r.qty ?? '').trim())
 }
 
 /**
@@ -746,7 +746,8 @@ function extraItemsOf(extra?: Record<string, unknown>) {
           .join('、')
         : typeof v === 'boolean'
           ? (v ? '已确认' : '未确认')
-          : String(v),
+          // 数量 / 金额可能带着浮点尾巴（`0.30000000000000004`）：明细只显示两位小数
+          : trimTextDecimals(v),
     }))
     .filter(item => item.value !== '')
 }
@@ -761,7 +762,8 @@ const resultChips = computed(() =>
   actionSteps.value
     .map(s => mainOf(s.data))
     .filter(m => !!m?.result)
-    .map(m => String(m?.result_label || m?.result || '')),
+    // 结论标签可能拼着件数 / 金额：小数只留两位（老单里存着浮点尾巴）
+    .map(m => trimTextDecimals(m?.result_label || m?.result || '')),
 )
 
 /**
@@ -783,14 +785,20 @@ const ledgerChips = computed(() =>
     }
     const out: string[] = []
     const remaining = extra.remaining_qty
-    if (remaining !== undefined && remaining !== null && remaining !== '') {
-      out.push(`已接收 ${String(extra.received_qty ?? '—')} · 剩余 ${String(remaining)} 件`)
+    // 负责人分配环节（withAssignedQty）：只有净分配量与扣完后的剩余，没有"已接收" —— 别显示成「已接收 —」
+    const assigned = extra.assigned_qty
+    if (assigned !== undefined && assigned !== null && assigned !== '') {
+      out.push(`已分配 ${trimTextDecimals(assigned)} 件${remaining !== undefined && remaining !== null && remaining !== '' ? ` · 剩余 ${trimTextDecimals(remaining)} 件` : ''}`)
+    }
+    else if (remaining !== undefined && remaining !== null && remaining !== '') {
+      // 各环接收是浮点累加出来的：小数只留两位（0.30000000000000004 → 0.3）
+      out.push(`已接收 ${trimTextDecimals(extra.received_qty ?? '—')} · 剩余 ${trimTextDecimals(remaining)} 件`)
     }
     const stockQty = extra.stock_qty
     if (stockQty !== undefined && stockQty !== null && stockQty !== '') {
       const amount = extra.stock_amount
-      const amountText = amount === undefined || amount === null || amount === '' ? '' : ` / ￥${String(amount)}`
-      out.push(`总 ${String(stockQty)} 件${amountText}`)
+      const amountText = amount === undefined || amount === null || amount === '' ? '' : ` / ￥${trimTextDecimals(amount)}`
+      out.push(`总 ${trimTextDecimals(stockQty)} 件${amountText}`)
     }
     return out
   }),

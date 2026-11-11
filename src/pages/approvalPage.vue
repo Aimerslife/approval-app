@@ -167,7 +167,14 @@
       </v-col>
 
       <v-col cols="8">
-        <v-sheet class="pl-3 mt--11">
+        <!--
+          右栏产品卡：**卡片自己滚**（字段区内部滚动，滚动条在卡片左侧，见 ProductInfoCard），
+          整页滚动只发生在左栏时间线。
+
+          这一格只管「停在哪」：sticky 到页头下方（top 见 .product-pane）；
+          高度由卡片自己按视口算（ProductInfoCard 的 .product-card = 100vh − 上下留白）。
+        -->
+        <v-sheet class="pl-3 mt--11 product-pane">
           <ProductInfoCard :headers="headers" :product="product" @send-img="handleImg" />
         </v-sheet>
       </v-col>
@@ -403,6 +410,7 @@
     barWidth.value = rect.width + 23
     barLeft.value = rect.left
   }
+
   const orderDatas = ref<ApprovalOrder | null>(null)
 
   /**
@@ -879,6 +887,20 @@
 }
 
 /* 面板本体的样式（圆角 / 限高 / 内部滚动）在 HandleDock 里，这里只管固定定位与阴影 */
+
+/*
+ * 右栏产品卡：sticky 停在页头下方，卡片自己滚（字段区内部滚动，滚动条在卡片左侧）。
+ *
+ * 高度不在这里给 —— 由卡片自己算（ProductInfoCard 的 .product-card = 100vh − 上下留白）。
+ * top 必须与卡片里 $product-card-top 是同一个值（96 = 页头 sticky top 32 + 页头 56 + 间隙 8），
+ * 否则卡片会被页头压住一截，或者底部白留一条。
+ */
+.product-pane {
+  position: sticky;
+  top: 50px;
+  /* sticky 需要有高度上限才谈得上"内部滚动"：高度由卡片给 */
+  overflow: hidden;
+}
 
 :deep(.v-timeline--vertical.v-timeline--side-end) {
   grid-template-columns: 0 min-content 1fr;
