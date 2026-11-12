@@ -24,10 +24,10 @@ export interface NotifySendResult {
 }
 
 /**
- * 一条**计划中**的到达通知（还没发）—— 沙盒预演 / 排查用。
+ * 一条**计划中**的到达通知（还没发）—— 排查/预演用。
  *
  * 与 NotifySendResult 的区别：那个是"发完之后的结果统计"，这个是"发之前算出来的清单"，
- * 所以能回答沙盒最关心的问题：这一推进**会发给谁、文案是什么、哪几条被跳过**。
+ * 能回答：这一推进**会发给谁、文案是什么、哪几条被跳过**。
  */
 export interface NotifyPlanItem {
   stepId: string
@@ -116,8 +116,7 @@ export async function sendArrivedNotifies (opts: {
   /*
    * "这一轮该发什么"全部在纯函数里算完（见下方 planArrivedNotifies）——
    * 本函数只负责**把它发出去**：白名单 / 测试闸门 / 逐个发送 / 失败收集。
-   * 拆开的好处：沙盒（pages/sandbox）能拿同一份计划做预演，
-   * 不必复制一套"谁会收到"的判断，两处也就不会算出不同结果。
+   * 拆开后"谁会收到"的判断只有一份，排查时可以直接拿计划对答案。
    */
   const plan = planArrivedNotifies(opts)
 
@@ -272,7 +271,7 @@ export async function sendArrivedNotifies (opts: {
  * 算一轮「到达通知」该发什么 —— **纯函数，不发任何消息**。
  *
  * 口径与注意事项见上面 sendArrivedNotifies 的文件头（发送侧只是把这份计划执行一遍）。
- * 沙盒（pages/sandbox）拿它做预演："这一次推进本来会发给谁、文案长什么样、哪几条被跳过"。
+ * 排查时拿它对答案："这一次推进本来会发给谁、文案长什么样、哪几条被跳过"。
  */
 export function planArrivedNotifies (opts: {
   flow: ApprovalFlow

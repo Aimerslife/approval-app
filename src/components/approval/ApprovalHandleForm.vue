@@ -221,7 +221,7 @@ import { isFieldVisible, REASON_OPTIONS, SECOND_REASON_OPTIONS, type TypeField, 
 import TeamPicker from '../TeamPicker.vue'
 // 「选择接收团队」的平铺清单也认同一张团队表：候选从这儿取，别在组件里另抄一份
 import { teamRowsForReceiver } from '@/utils/organazation'
-// 表单字段的**唯一渲染器**：审批类型页预览、沙盒、办理页三处共用同一份实现
+// 表单字段的**唯一渲染器**：审批类型页预览、办理页两处共用同一份实现
 import OptionFormRenderer from './OptionFormRenderer.vue'
 // 前面轮询各团队的接收汇总（与审批详情 / 时间线共用同一份展示口径）
 import RotationReceipts from './RotationReceipts.vue'
@@ -579,7 +579,7 @@ const optionItems = computed<ApprovalNodeOption[]>(() => {
    *
    * 为什么必须在这里做：模板把结论摆上来（optionItems 来自 flow 分支），而"这个结论还启不启用"
    * 是审批类型页配的 —— 两处不联动时，页面上会出现明明已经停用的选项，选中走完还是一条死线。
-   * 与沙盒（pages/sandbox.vue 的 visibleOptions）**同一套口径**：
+   * 口径：
    *   · 选项树（nodeLevel）不过滤：它的叶子是模板里一条条配出来的，不归审批类型管；
    *   · 全被停用时退回原列表：宁可多摆一个，也不能让人无路可走。
    */

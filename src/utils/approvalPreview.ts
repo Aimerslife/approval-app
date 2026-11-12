@@ -14,7 +14,7 @@ import { mainOf, sameApprover } from '@/utils/approvalRuntime'
  * 业务上同一个人的连续环节通常可以一次办完，用户希望能先看到下一环节。
  *
  * 做法：把当前选中的结论**假装成一条流水**喂给 `rebuildChain`（纯函数：不写库、
- * 不发通知，与 composables/useSandbox 的 submit 是同一手法），得到"假如提交了会走到哪"。
+ * 不发通知），得到"假如提交了会走到哪"。
  * 只有当下一环**仍是同一人**时才交给办理面板渲染；点提交之前，任何数据都不落库。
  *
  * ⚠️ 三条口径必须与提交侧 `composables/useNodeSubmit` 完全一致，否则预览的环

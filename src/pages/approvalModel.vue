@@ -109,14 +109,6 @@
           </template>
         </v-data-table>
 
-        <!-- 新区块的拖拽落点：拖模板进来弹命名框，填名即建区（区块随模板而生，不设空区块） -->
-        <div v-if="topTab === 'template' && tab === 'main' && mainChians.length" class="model-new-section"
-          :class="{ 'model-new-section--over': newSectionOver }" @dragover.prevent="newSectionOver = true"
-          @dragleave="onNewSectionDragLeave" @drop.prevent="onDropNewSection($event)">
-          <v-icon icon="mdi-plus" size="14" />
-          把模板拖到这里，新建区块
-        </div>
-
         <v-data-table v-else class="text-body-small model-table" density="compact" :headers="typeHeaders"
           hide-default-footer hover item-value="code" :items="typeRows" :loading="typeLoading">
           <template #item="{ item }">
@@ -159,6 +151,16 @@
             </tr>
           </template>
         </v-data-table>
+
+        <!-- 新区块的拖拽落点：拖模板进来弹命名框，填名即建区（区块随模板而生，不设空区块）。
+             ⚠️ 必须放在两张 v-data-table 之后：它自带 v-if，若插在模板表与类型表之间，
+             类型表的 v-else 会配到它——切「副本」页签时它隐藏、类型表就被渲染出来。 -->
+        <div v-if="topTab === 'template' && tab === 'main' && mainChians.length" class="model-new-section"
+          :class="{ 'model-new-section--over': newSectionOver }" @dragover.prevent="newSectionOver = true"
+          @dragleave="onNewSectionDragLeave" @drop.prevent="onDropNewSection($event)">
+          <v-icon icon="mdi-plus" size="14" />
+          把模板拖到这里，新建区块
+        </div>
       </div>
       <div v-if="topTab === 'template'" class="sheet-tab-bar">
         <div v-if="tab === 'copy' && rows.length" class="mb-1 text-[12px] text-medium-emphasis">
