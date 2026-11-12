@@ -19,7 +19,8 @@
         <div class="d-flex align-center ga-2">
           <template v-if="topTab === 'template'">
             <!-- 导入 / 导出 JSON：用来在环境之间搬模板（文件格式见 utils/templateJson） -->
-            <v-btn class="me-2 text-none" prepend-icon="mdi-file-import-outline" variant="tonal" @click="openImport" size="small">
+            <v-btn class="me-2 text-none" prepend-icon="mdi-file-import-outline" variant="tonal" @click="openImport"
+              size="small">
               <span class="mb-1">导入 JSON</span>
             </v-btn>
             <v-btn class="me-2 text-none" color="primary" prepend-icon="mdi-plus" variant="flat" size="small"
@@ -33,8 +34,8 @@
           <template v-else>
             <!-- 尺寸与字号走全局 .filter-select / .filter-menu（28px / 12px，与其它筛选下拉同一档） -->
             <v-select v-model="scopeKey" class="scope-select filter-select" density="compact" hide-details
-              item-title="title" item-value="value" :items="scopeItems"
-              :menu-props="{ contentClass: 'filter-menu' }" variant="outlined" />
+              item-title="title" item-value="value" :items="scopeItems" :menu-props="{ contentClass: 'filter-menu' }"
+              variant="outlined" />
             <v-chip class="me-2" color="primary" label size="small" :variant="typeCustom ? 'tonal' : 'text'">
               {{ typeCustom ? '已自定义' : '默认' }}
             </v-chip>
@@ -49,69 +50,73 @@
         剩下的位置留给底部页签，页签就能一直贴在窗口最下方（见 model-sheet 的说明）。
       -->
       <div class="model-sheet-scroll">
-        <v-data-table v-if="topTab === 'template'" class="text-body-small model-table" density="compact" :headers="headers"
-          hide-default-footer hover item-value="name" :items="rows" :loading="loading">
-          <!-- 各页签的空态分开说：副本页签空 = 还没复制过，正本页签空才是真没建过模板 -->
+        <v-data-table v-if="topTab === 'template'" class="text-body-small model-table" density="compact"
+          :custom-key-sort="customKeySort"
+          :group-by="tab === 'main' ? [{ key: 'sectionName', order: 'asc' }] : undefined" :headers="headers"
+          hide-default-footer hover item-value="name" :items="rows" :loading="loading" open-all>
+          <!--
+            表头自定义：Vuetify 分组模式下会往内部列里注入 key='data-table-group' 的「Group」列，
+            直接渲染就是 6 列表头 vs 5 列数据行 → 整体错位一列（占位列/width:0 都治不了，
+            auto 表格布局按「每行第 N 个 cell」组列）。这里自己滤掉注入列渲染 5 个 th，
+            列序与数据行完全一致。
+          -->
+          <template #headers="{ columns }">
+            <tr>
+              <th v-for="col in columns.filter(c => c.key !== 'data-table-group')" :key="String(col.key)"
+                class="v-data-table__td v-data-table-column--align-start v-data-table__th text-body-small">
+                <div class="v-data-table-header__content">
+                  <span>{{ col.title }}</span>
+                </div>
+              </th>
+            </tr>
+          </template>
           <template #no-data>
             <div class="py-6 text-center text-medium-emphasis">
               {{ tab === 'copy' ? '还没有副本：在正本里点「复制」会生成一张带「- 副本」后缀的草稿' : '还没有审批模板，点右上角「新模板」开始' }}
             </div>
           </template>
 
-          <template #item="{ item }">
-            <tr class="text-no-wrap">
-              <td>{{ item.name }}</td>
-
-              <td>
-                <strong :class="item.status == 0 ? 'text-error' : 'text-success'">{{ item.status == 0 ? '未启用' : '启用'
-                  }}</strong>
-              </td>
-
-              <td style="min-width: 360px">
-                <!-- 表格里展示紧凑版流程概览（主线成员 + 分支组/条件/嵌套/loopBackTo）；点「查看」再看完整流程图 -->
-                <div class="d-flex align-center" style="gap: 6px">
-                  <v-icon-btn icon="mdi-chart-sankey-variant" size="24" title="查看流程图" variant="plain"
-                    @click="openPreview(item)">
-                    <v-icon color="#1055C9" size="16" />
-                  </v-icon-btn>
-
-                  <FlowMiniMap :chain="item.chain.chain" :flow="item.chain.flow" style="flex: 1; min-width: 0" />
+          <!-- 区块组头（原生分组行的自定义渲染）：本体是「点开/收起」，hover 浮现改名/删除；同时是拖拽落点 -->
+          <template #group-header="{ item, toggleGroup, isGroupOpen }">
+            <tr class="model-group" :class="{ 'model-group--drop': dropTarget === item.value }"
+              @click="toggleGroup(item)" @dragover.prevent="dropTarget = item.value"
+              @dragleave="onGroupDragLeave(item.value, $event)" @drop.prevent="onDropToGroup(item.value, $event)">
+              <td :colspan="visibleColspan">
+                <div class="model-group__inner">
+                  <v-icon size="16">{{ isGroupOpen(item) ? 'mdi-folder-open-outline' : 'mdi-folder-outline' }}</v-icon>
+                  <span class="model-group__name">{{ item.value || '未分组' }}</span>
+                  <span class="sheet-tab-count">{{ item.items.length }}</span>
+                  <v-spacer />
+                  <!-- 区块操作只对真区块开放；未分组没有名字、也不能删 -->
+                  <template v-if="item.value">
+                    <v-icon-btn icon="mdi-pencil" size="24" title="重命名区块" variant="plain"
+                      @click.stop="openRenameSection(item.value)">
+                      <v-icon size="16" />
+                    </v-icon-btn>
+                    <v-icon-btn icon="mdi-delete-outline" size="24" title="删除区块（模板移回未分组）" variant="plain"
+                      @click.stop="openDeleteSection(item.value)">
+                      <v-icon size="16" />
+                    </v-icon-btn>
+                  </template>
                 </div>
-              </td>
-
-              <td>
-                <span class="text-grey">{{ formatDate(item.created) }}</span>
-              </td>
-
-              <td class="text-start">
-                <v-icon-btn icon="mdi-pencil" size="24" variant="plain" @click="goEdit(item.id)">
-                  <v-icon size="16" />
-                </v-icon-btn>
-
-                <v-icon-btn icon="mdi-delete-outline" size="24" variant="plain" @click="removeParten(item.id)">
-                  <v-icon size="16" />
-                </v-icon-btn>
-
-                <v-icon-btn icon="mdi-content-copy" size="24" title="复制成副本" variant="plain"
-                  @click="copyParten(item.id)">
-                  <v-icon size="15" />
-                </v-icon-btn>
-
-                <!-- 副本专属：改名去掉「- 副本」后缀，就移进正本（见 promoteParten） -->
-                <v-icon-btn v-if="isTemplateCopy(item.name)" icon="mdi-arrow-up-bold-box-outline" size="24"
-                  title="改名并移入正本" variant="plain" @click="promoteParten(item)">
-                  <v-icon color="#1867C0" size="16" />
-                </v-icon-btn>
-
-                <!-- 导出成 JSON：文件里只有名字 + 启停 + 三要素，拿去别的环境用「导入 JSON」还原 -->
-                <v-icon-btn icon="mdi-file-export-outline" size="24" title="导出为 JSON" variant="plain"
-                  @click="exportOne(item)">
-                  <v-icon color="#1055C9" size="16" />
-                </v-icon-btn>
               </td>
             </tr>
           </template>
+
+          <template #item="{ item }">
+            <TemplateModelRow :item="item" :draggable="tab === 'main'" @copy="copyParten" @edit="goEdit"
+              @export="exportOne" @preview="openPreview" @promote="promoteParten" @remove="removeParten" />
+          </template>
         </v-data-table>
+
+        <!-- 新区块的拖拽落点：拖模板进来弹命名框，填名即建区（区块随模板而生，不设空区块） -->
+        <div v-if="topTab === 'template' && tab === 'main' && mainChians.length" class="model-new-section"
+          :class="{ 'model-new-section--over': newSectionOver }" @dragover.prevent="newSectionOver = true"
+          @dragleave="onNewSectionDragLeave" @drop.prevent="onDropNewSection($event)">
+          <v-icon icon="mdi-plus" size="14" />
+          把模板拖到这里，新建区块
+        </div>
+
         <v-data-table v-else class="text-body-small model-table" density="compact" :headers="typeHeaders"
           hide-default-footer hover item-value="code" :items="typeRows" :loading="typeLoading">
           <template #item="{ item }">
@@ -141,14 +146,13 @@
               </td>
 
               <td class="text-start">
-                <v-icon-btn icon="mdi-pencil" size="24" title="编辑这一类的填写项" variant="plain"
-                  @click="goTypeEdit(item)">
+                <v-icon-btn icon="mdi-pencil" size="24" title="编辑这一类的填写项" variant="plain" @click="goTypeEdit(item)">
                   <v-icon size="16" />
                 </v-icon-btn>
 
                 <!-- 只有当前作用域这一层真的覆盖过才有「恢复默认」：否则它本来就跟着上一层走 -->
-                <v-icon-btn v-if="item.overridden" icon="mdi-restore" size="24" title="恢复默认（删掉这一层的覆盖）"
-                  variant="plain" @click="resetType(item)">
+                <v-icon-btn v-if="item.overridden" icon="mdi-restore" size="24" title="恢复默认（删掉这一层的覆盖）" variant="plain"
+                  @click="resetType(item)">
                   <v-icon size="16" />
                 </v-icon-btn>
               </td>
@@ -196,12 +200,73 @@
             <span class="text-[14px] ml-1">移入正本</span>
           </v-card-title>
           <v-card-text>
-            <v-text-field v-model="streamName" clearable hint="名字里不能再带「- 副本」；改好确认，这张就出现在正本里"
-              label="正本名称" persistent-hint :rules="[streamNameRule]" variant="outlined" />
+            <v-text-field v-model="streamName" clearable hint="名字里不能再带「- 副本」；改好确认，这张就出现在正本里" label="正本名称"
+              persistent-hint :rules="[streamNameRule]" variant="outlined" />
           </v-card-text>
           <template #actions>
             <v-btn class="ms-auto" color="error" size="small" text="取消" @click="dialog = false" />
             <v-btn color="primary" size="small" text="移入正本" variant="tonal" @click="promoteNode" />
+          </template>
+        </v-card>
+      </template>
+
+      <!-- 新建区块命名（拖拽落到虚线区触发）：填名即建区并把模板移入 -->
+      <template v-else-if="currentPanel == 'sectionNew'">
+        <v-card min-width="420">
+          <v-card-title>
+            <v-icon size="18">mdi-folder-plus-outline</v-icon>
+            <span class="text-[14px] ml-1">新建区块</span>
+          </v-card-title>
+          <v-card-text>
+            <v-text-field v-model="pendingNewName" clearable hide-details="auto" label="区块名称" placeholder="例如：财务类、行政类"
+              variant="outlined" />
+            <div class="text-[12px] text-medium-emphasis mt-3">将把模板「{{ currentItemName }}」移入新区块。</div>
+          </v-card-text>
+          <template #actions>
+            <v-btn class="ms-auto" color="error" size="small" text="取消" @click="dialog = false" />
+            <v-btn color="primary" :loading="sectionBusy" size="small" text="创建并移入" variant="tonal"
+              @click="newSectionConfirm" />
+          </template>
+        </v-card>
+      </template>
+
+      <!-- 区块改名：组内模板的 section 一并更新 -->
+      <template v-else-if="currentPanel == 'sectionRename'">
+        <v-card min-width="420">
+          <v-card-title>
+            <v-icon size="18">mdi-pencil</v-icon>
+            <span class="text-[14px] ml-1">重命名区块</span>
+          </v-card-title>
+          <v-card-text>
+            <v-text-field v-model="sectionRenameNew" clearable hide-details="auto" label="区块名称" variant="outlined" />
+            <div class="text-[12px] text-medium-emphasis mt-3">
+              区块「{{ sectionRenameOld }}」里的 {{ renameGroupSize }} 张模板将一并改名。
+            </div>
+          </v-card-text>
+          <template #actions>
+            <v-btn class="ms-auto" color="error" size="small" text="取消" @click="dialog = false" />
+            <v-btn color="primary" :loading="sectionBusy" size="small" text="确认" variant="tonal"
+              @click="renameSectionConfirm" />
+          </template>
+        </v-card>
+      </template>
+
+      <!-- 删除区块：模板全部移回未分组（模板本身不动） -->
+      <template v-else-if="currentPanel == 'sectionDelete'">
+        <v-card min-width="420">
+          <v-card-title>
+            <v-icon size="18">mdi-delete-outline</v-icon>
+            <span class="text-[14px] ml-1">删除区块</span>
+          </v-card-title>
+          <v-card-text>
+            <span class="text-[13px]">
+              区块「{{ sectionDeleteName }}」里的 {{ deleteGroupSize }} 张模板将移回「未分组」，模板本身不受影响。确认删除？
+            </span>
+          </v-card-text>
+          <template #actions>
+            <v-btn class="ms-auto" color="error" size="small" text="取消" @click="dialog = false" />
+            <v-btn color="primary" :loading="sectionBusy" size="small" text="确认" variant="tonal"
+              @click="deleteSectionConfirm" />
           </template>
         </v-card>
       </template>
@@ -216,8 +281,8 @@
 
           <v-card-text>
             <v-file-input v-model="importFile" accept=".json,application/json" density="compact" hide-details="auto"
-              label="选择模板 JSON 文件" prepend-icon="" prepend-inner-icon="mdi-file-upload-outline"
-              variant="outlined" @update:model-value="readImportFile" />
+              label="选择模板 JSON 文件" prepend-icon="" prepend-inner-icon="mdi-file-upload-outline" variant="outlined"
+              @update:model-value="readImportFile" />
 
             <!-- 解析成功才给名称 / 摘要：解析失败时下面只有一条原因，不给"看起来能提交"的输入框 -->
             <template v-if="importPayload">
@@ -312,8 +377,9 @@
 import type { ApprovalModal } from '@/types/approval'
 import type { ApprovalTypeOverrideMap } from '@/utils/approvalTypes'
 import type { ApprovalTypeScope } from '@/utils/approvalTypeStore'
-import FlowMiniMap from '@/components/FlowMiniMap.vue'
 import FlowPreview from '@/components/FlowPreview.vue'
+// 表格行（名称/状态/流程概览/操作）：正本按区块分节后有 N 张小表，行渲染统一抽到这里复用
+import TemplateModelRow from '@/components/approval/TemplateModelRow.vue'
 import { addApproval, deleteApproval, findTemplatesUsing, getApproval, getApprovalOptions, updateApprovalModel } from '@/utils/collection'
 // 「审批类型」页签：结论码清单与"选中后要填什么"的解析口径，与设置页共用同一份（见 utils/approvalTypes）
 import { resolveTypeTemplates, typeCategoryOf, typeFieldsSummaryOf } from '@/utils/approvalTypes'
@@ -327,7 +393,6 @@ import {
   type TemplatePayload,
   uniqueTemplateName,
 } from '@/utils/templateJson'
-import { formatDate } from '@/utils/utils'
 const router = useRouter()
 const chians = ref<ApprovalModal[]>([])
 
@@ -360,8 +425,17 @@ const tab = ref<'main' | 'copy'>('main')
 const mainChians = computed(() => chians.value.filter(t => !isTemplateCopy(t.name)))
 /** 副本：复制出来的那一批草稿 */
 const copyChians = computed(() => chians.value.filter(t => isTemplateCopy(t.name)))
-/** 当前页签要显示的数据 */
-const rows = computed(() => (tab.value === 'copy' ? copyChians.value : mainChians.value))
+/**
+ * 当前页签要显示的数据。
+ * 正本行补一个派生字段 sectionName（undefined/空格都归一成 ''，即「未分组」）——
+ * 交给 v-data-table 的 group-by 用，保证旧数据（无 section 字段）和空值只归进一个组。
+ */
+const rows = computed(() => {
+  if (tab.value === 'copy') {
+    return copyChians.value
+  }
+  return mainChians.value.map(t => ({ ...t, sectionName: String(t.section ?? '').trim() }))
+})
 /** 页签本身（带条数，省得两边来回切着数） */
 const sheetTabs = computed(() => [
   { value: 'main' as const, title: '正本', icon: 'mdi-file-check-outline', count: mainChians.value.length },
@@ -394,6 +468,22 @@ const headers = [
   { title: '创建时间', key: 'created' },
   { title: '操作', key: 'action', align: 'start' },
 ] as const
+/** 组头行的 td colspan 用（表头与数据行都是 5 列） */
+const visibleColspan = headers.length
+
+/**
+ * 组序固定：未分组（''）永远排最后，其余区块按中文名序。
+ * group-by 的项默认 order=false，sortItems 会直接跳过它 —— 组顺序退化为「数据首次出现序」，
+ * 刷新一次漂一次；所以 group-by 项显式给 order:'asc'，让它真走这条比较器。
+ */
+const customKeySort = {
+  sectionName: (a: string, b: string) => {
+    if (!a && !b) return 0
+    if (!a) return 1
+    if (!b) return -1
+    return a.localeCompare(b, 'zh')
+  },
+}
 
 /* ==================== 审批类型（第二页签） ==================== */
 
@@ -704,6 +794,200 @@ async function removeNode() {
   dialog.value = false
 }
 
+/* ==================== 区块集合（正本按区块分组：v-data-table 原生 group + 拖拽） ==================== */
+
+/** 「未分组」是空 section 的展示名，是保留字 —— 不允许真的建叫这个名字的区块 */
+const LOOSE_LABEL = '未分组'
+
+/** 现有区块名（新建 / 改名查重用；区块随模板而生，组内最后一个移走区块自然消失） */
+const sectionNames = computed(() => [
+  ...new Set(mainChians.value.map(t => String(t.section ?? '').trim()).filter(Boolean)),
+])
+
+/** 某区块（'' = 未分组）下的模板 */
+const itemsOfSection = (name: string) =>
+  mainChians.value.filter(t => String(t.section ?? '').trim() === name)
+
+/* ---- 拖拽移动：拖到区块组头 = 移入该区块（组头即落点，折叠与否都能落） ---- */
+
+/** 拖拽悬停中的区块名（组头高亮用） */
+const dropTarget = ref<string | null>(null)
+
+/**
+ * dragleave 只在真正离开组头整行时才清除高亮 —— 移到行内子元素上也会触发
+ * dragleave（此时 relatedTarget 还在行内），不能见 leave 就清。
+ */
+function onGroupDragLeave(section: string, e: DragEvent) {
+  const to = e.relatedTarget as Node | null
+  const el = e.currentTarget as HTMLElement
+  if ((!to || !el.contains(to)) && dropTarget.value === section) {
+    dropTarget.value = null
+  }
+}
+
+/** 落到区块组头：同一区块直接忽略，否则更新这条模板的 section */
+async function onDropToGroup(section: string, e: DragEvent) {
+  dropTarget.value = null
+  const id = e.dataTransfer?.getData('application/x-approval-template') ?? ''
+  if (!id) return
+  const t = mainChians.value.find(x => x.id === id)
+  if (!t || String(t.section ?? '').trim() === section) return
+  const res = await updateApprovalModel(id, { section })
+  if (!res) {
+    notify('移动失败，请稍后重试', 'error')
+    return
+  }
+  notify(section ? `「${t.name}」已移入区块「${section}」` : `「${t.name}」已移出区块`, 'success')
+  await getDatas()
+}
+
+/* ---- 拖到表格下方虚线区 = 新建区块并移入（区块随模板而生，不设空区块） ---- */
+
+/** 虚线落点的悬停态 */
+const newSectionOver = ref(false)
+
+/** 落点后的命名弹窗：把哪张模板移进新区块 */
+const currentItemName = ref('')
+const pendingNewId = ref('')
+const pendingNewName = ref('')
+const sectionBusy = ref(false)
+
+/** dragleave 真正离开虚线区才取消悬停高亮（同组头逻辑） */
+function onNewSectionDragLeave(e: DragEvent) {
+  const to = e.relatedTarget as Node | null
+  const el = e.currentTarget as HTMLElement
+  if (!to || !el.contains(to)) {
+    newSectionOver.value = false
+  }
+}
+
+function onDropNewSection(e: DragEvent) {
+  newSectionOver.value = false
+  const id = e.dataTransfer?.getData('application/x-approval-template') ?? ''
+  if (!id) return
+  const t = mainChians.value.find(x => x.id === id)
+  if (!t) return
+  pendingNewId.value = id
+  currentItemName.value = t.name
+  pendingNewName.value = ''
+  currentPanel.value = 'sectionNew'
+  dialog.value = true
+}
+
+async function newSectionConfirm() {
+  const name = pendingNewName.value.trim()
+  if (!name) {
+    notify('请填写区块名称', 'error')
+    return
+  }
+  if (name === LOOSE_LABEL) {
+    notify(`区块名不能叫「${LOOSE_LABEL}」`, 'error')
+    return
+  }
+  if (sectionNames.value.includes(name)) {
+    notify(`已经有叫「${name}」的区块了 —— 想移进去，直接把模板拖到它的组头上`, 'error')
+    return
+  }
+  sectionBusy.value = true
+  try {
+    const res = await updateApprovalModel(pendingNewId.value, { section: name })
+    if (!res) {
+      notify('移动失败，请稍后重试', 'error')
+      return
+    }
+    notify(`「${currentItemName.value}」已移入新区块「${name}」`, 'success')
+    dialog.value = false
+    await getDatas()
+  } finally {
+    sectionBusy.value = false
+  }
+}
+
+/* ---- 区块改名 / 删除区块（都是对组内模板的批量 section 更新） ---- */
+
+const sectionRenameOld = ref('')
+const sectionRenameNew = ref('')
+const renameGroupSize = ref(0)
+const sectionDeleteName = ref('')
+const deleteGroupSize = ref(0)
+
+function openRenameSection(name: string) {
+  sectionRenameOld.value = name
+  sectionRenameNew.value = name
+  renameGroupSize.value = itemsOfSection(name).length
+  currentPanel.value = 'sectionRename'
+  dialog.value = true
+}
+
+async function renameSectionConfirm() {
+  const next = sectionRenameNew.value.trim()
+  if (!next) {
+    notify('区块名称不能为空', 'error')
+    return
+  }
+  if (next === sectionRenameOld.value) {
+    dialog.value = false
+    return
+  }
+  if (next === LOOSE_LABEL) {
+    notify(`区块名不能叫「${LOOSE_LABEL}」`, 'error')
+    return
+  }
+  if (sectionNames.value.includes(next)) {
+    notify(`已经有叫「${next}」的区块了（改名成同名区块等于合并，这里暂不支持）`, 'error')
+    return
+  }
+  const group = itemsOfSection(sectionRenameOld.value)
+  if (!group.length) {
+    notify('区块不存在，请刷新后重试', 'error')
+    return
+  }
+  sectionBusy.value = true
+  try {
+    const results = await Promise.all(group.map(t => updateApprovalModel(t.id, { section: next })))
+    if (results.some(r => !r)) {
+      notify('部分模板改名失败，请刷新后重试', 'error')
+      await getDatas()
+      return
+    }
+    notify(`区块已改名为「${next}」`, 'success')
+    dialog.value = false
+    await getDatas()
+  } finally {
+    sectionBusy.value = false
+  }
+}
+
+function openDeleteSection(name: string) {
+  sectionDeleteName.value = name
+  deleteGroupSize.value = itemsOfSection(name).length
+  currentPanel.value = 'sectionDelete'
+  dialog.value = true
+}
+
+/** 删区块 = 组内模板的 section 置空（移回未分组），模板本身不受影响 */
+async function deleteSectionConfirm() {
+  const group = itemsOfSection(sectionDeleteName.value)
+  if (!group.length) {
+    notify('区块不存在，请刷新后重试', 'error')
+    return
+  }
+  sectionBusy.value = true
+  try {
+    const results = await Promise.all(group.map(t => updateApprovalModel(t.id, { section: '' })))
+    if (results.some(r => !r)) {
+      notify('部分模板移出失败，请刷新后重试', 'error')
+      await getDatas()
+      return
+    }
+    notify(`区块「${sectionDeleteName.value}」已删除，组内模板移回未分组`, 'success')
+    dialog.value = false
+    await getDatas()
+  } finally {
+    sectionBusy.value = false
+  }
+}
+
 /* ==================== JSON 导出 / 导入 ==================== */
 
 /**
@@ -807,6 +1091,14 @@ onMounted(() => {
 .model-table :deep(td),
 .model-table :deep(th) {
   height: 56px;
+}
+
+/*
+ * 分组下的模板行整体左缩进 10px（tr 上 margin 在表格布局无效，
+ * 落在首列 padding：默认 16px + 10 = 26px）；组头行有自己的 padding: 0 !important，不受影响。
+ */
+.model-table :deep(tr.row-draggable td:first-child) {
+  padding-left: 40px;
 }
 
 /*
@@ -978,5 +1270,69 @@ onMounted(() => {
   background: rgba(var(--v-theme-on-surface), 0.08);
   font-size: 11px;
   line-height: 16px;
+}
+
+/*
+ * 区块组头（v-data-table 原生分组行的自定义渲染，2026-11-12）：
+ * 本体是「点开/收起」，hover 浮现改名/删除；拖拽悬停时整行高亮成虚线落点。
+ */
+.model-group {
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-group td {
+  padding: 0 !important;
+  
+  border-bottom: none !important;
+}
+
+.model-group__inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+}
+
+.model-group__name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.model-group .v-icon-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.model-group:hover .v-icon-btn {
+  opacity: 1;
+}
+
+.model-group--drop td {
+  background: rgba(var(--v-theme-primary), 0.14);
+  outline: 2px dashed rgb(var(--v-theme-primary));
+  outline-offset: -2px;
+}
+
+/* 新区块的拖拽落点（表格下方虚线框）：hover 中高亮成主色 */
+.model-new-section {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 44px;
+  margin: 4px 0 12px;
+  border: 1.5px dashed rgba(var(--v-theme-on-surface), 0.25);
+  border-radius: 8px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  font-size: 12px;
+  transition: all 0.15s;
+}
+
+.model-new-section--over {
+  border-color: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.08);
 }
 </style>

@@ -3679,6 +3679,12 @@ export interface ApprovalModal {
   chain: { chain: ApprovalChain, flow?: ApprovalFlow, graph?: FlowGraph }
   name: string
   status: number
+  /**
+   * 模板所属的**区块**（模板管理页正本按它分节展示；空 / 缺 = 未分组）。
+   * 只做组织归类：建单查模板仍按名字精确匹配（见 pages/workStream 的 taskTemplateNameOf），
+   * 改区块不影响任何已建的单。2026-11-12 起才有，旧数据没有这个字段。
+   */
+  section?: string
   created: string
   id: string
   updated: string
