@@ -1,6 +1,7 @@
 import type { ApprovalBranch, ApprovalChain, ApprovalChainItem, ApprovalFlow, ApprovalNodeOption, ApprovalOrder, FlowEndFacts, FlowEndInfo } from '@/types/approval'
 import { APPROVAL_RESULTS, APPROVAL_STATUS, branchTerminalMapOf, firstResultValueOf, isRefExitsGroupId, LEGACY_CLOSE_FLOW_RESULTS, mainOf, mergeExtraMembers, rebuildChain, RECEIVE_RESULTS, sameApprover } from '@/types/approval'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
+import { deptOfPerson, deptOfTeam, isDeptName } from '@/utils/organazation'
 
 /*
  * 环节负责人（mainOf）与「同一审批人」判定（sameApprover）：实现在 types/approval
@@ -850,4 +851,100 @@ export function discardMarkOf (
     }
   }
   return undefined
+}
+
+/* ==================== 流转范围（订单号旁的「内部 / 外部流转」标识） ==================== */
+
+/**
+ * 审批单的流转范围：
+ *   internal = 内部流转 —— 整条办理流水里出现过的团队始终落在**同一个部门**；
+ *   external = 外部流转 —— 流水里出现过**跨部门**的流转。
+ */
+export type FlowScope = 'internal' | 'external'
+
+/**
+ * 判定一张审批单是「内部流转」还是「外部流转」（业务定稿 2026-11-12）。
+ *
+ * ## 口径
+ *
+ * 「同一团队」= **同一部门**（sameTeamGroups 的宽口径：B2C 下的美1 / 美2 / 美3 组互为同一团队）。
+ * 参与判定的团队来自两处：
+ *   ① 数据行的「团队」列（快照 `团队` / 旧字段 `组别`）—— 单据的业务归属（流转的起点）；
+ *   ② 链上**每一条已办**记录的办理人 —— 他所在的团队。
+ *      还没办的不算（那不是已发生的流转；抄送 / 飞书提醒环没有办理痕迹，天然落空）。
+ * 识别出的部门只有 **一个** → internal；出现 **两个以上** → external。
+ *
+ * ## 返回 null 的场合（调用方不显示标识）
+ *
+ * 一个部门都识别不出来：旧单数据缺失 / 办理人都没在团队表里登记 / 数据行没有团队列。
+ * 宁可缺标识也不要猜 —— 把「内部」误标成「外部」比不标更糟。
+ *
+ * 成员 → 部门的认法（可靠 → 兜底）见 addDeptOf。纯函数，可被 tsx 直接断言。
+ *
+ * @param rt 调用方手里已有 `runtimeOf()` 的结果就传进来复用（列表行组装时每行只重算一次链路）
+ */
+export function flowScopeOf (
+  order: ApprovalOrder,
+  rt?: { chain: ApprovalChainItem[][] },
+): FlowScope | null {
+  const depts = new Set<string>()
+  // ① 数据行的团队列（建单快照的业务上下文，与首页表格 / 条件求值同一口径）
+  const ctx = flowContextOfOrder(order)
+  const fromCtx = deptOfTeam(String(ctx['团队'] ?? ctx['组别'] ?? '').trim())
+  if (fromCtx) {
+    depts.add(deptKeyOf(fromCtx))
+  }
+  // ② 链上每一条已办记录的办理人
+  for (const step of (rt?.chain ?? runtimeOf(order).chain)) {
+    for (const m of step ?? []) {
+      if (!m?.result && !m?.handled_at) {
+        continue
+      }
+      addDeptOf(depts, m)
+    }
+  }
+  if (depts.size === 0) {
+    return null
+  }
+  return depts.size === 1 ? 'internal' : 'external'
+}
+
+/** 部门名的比较键：去空白 + 忽略大小写（口径同 organazation 里的名字比较） */
+function deptKeyOf (s: unknown): string {
+  return String(s ?? '').replace(/\s+/g, '').toLowerCase()
+}
+
+/**
+ * 一条办理记录的办理人 → 部门；**识别得出**才收进集合（识别不出忽略，见 flowScopeOf 的 null 说明）。
+ *
+ * 认团队的顺序（可靠 → 兜底）：
+ *   1. `role.dept`：轮询展开时写进成员的**组名**（见 utils/approvalRotation 的 splitMembers / stampRing）
+ *      —— 流转目标最可靠的标记，命中即用；
+ *   2. `department`：先当**组名**反查（固定接收环的 department 常是接收组的组名，实测单 1793692668319）；
+ *      不是团队表里的组，再当**部门名**直接认（值域上它就是飞书部门节点名，如 B2C）；
+ *   3. 姓名：按团队表（organazation）反查负责人 / 部门负责人所属部门 ——
+ *      新单成员瘦身后 department 不在快照里（types/approval 的 slimFlowMembers），只剩这条路。
+ */
+function addDeptOf (depts: Set<string>, m: ApprovalChainItem): void {
+  const viaRole = deptOfTeam(String(m.role?.dept ?? '').trim())
+  if (viaRole) {
+    depts.add(deptKeyOf(viaRole))
+    return
+  }
+  const org = String(m.department ?? '').trim()
+  if (org) {
+    const asTeam = deptOfTeam(org)
+    if (asTeam) {
+      depts.add(deptKeyOf(asTeam))
+      return
+    }
+    if (isDeptName(org)) {
+      depts.add(deptKeyOf(org))
+      return
+    }
+  }
+  const byName = deptOfPerson(m.name)
+  if (byName) {
+    depts.add(deptKeyOf(byName))
+  }
 }

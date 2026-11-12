@@ -2,7 +2,7 @@ import type { ApprovalOrder } from '@/types/approval'
 import { APPROVAL_STATUS } from '@/types/approval'
 import { APPROVAL_STAGE_META, approvalStageOf, toCellText, type ApprovalStage, type FilterableRow } from '@/utils/approvalFilters'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
-import { lastHandledOf, mainOf, runtimeOf } from '@/utils/approvalRuntime'
+import { flowScopeOf, lastHandledOf, mainOf, runtimeOf, type FlowScope } from '@/utils/approvalRuntime'
 // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
 import { toProductView } from '@/utils/biRowFields'
 import { formatDate, formatTimeDiff, trimTextDecimals } from '@/utils/utils'
@@ -40,6 +40,11 @@ export interface ApprovalRow extends FilterableRow {
   conclusion: string
   /** 结论的补充说明（办理人 · 结论 · 意见 · 时间），给单元格做悬浮提示 */
   conclusionDetail: string
+  /**
+   * 流转范围（订单号旁的「内部 / 外部流转」标识，口径见 utils/approvalRuntime 的 flowScopeOf）：
+   * 全程同一部门 = internal；出现过跨部门流转 = external；识别不出团队信息 = null（不显示标识）。
+   */
+  flowScope?: FlowScope | null
 }
 
 /** 表格列定义：加一列只改这里，两个页面同时生效 */
@@ -128,6 +133,8 @@ export function toApprovalRow (order: ApprovalOrder): ApprovalRow {
     created: order.created ?? '',
     conclusion,
     conclusionDetail,
+    // 流转范围（内部 / 外部流转）：复用本行已重算的链路，不重复跑 runtimeOf
+    flowScope: flowScopeOf(order, rt),
     平台: toCellText(ctx['平台']),
   }
 }

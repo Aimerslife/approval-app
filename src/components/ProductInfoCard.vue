@@ -59,7 +59,7 @@
               <span v-if="row.label" class="group-row__label">{{ row.label }}</span>
 
               <div class="d-flex flex-wrap ga-2">
-                <!-- 高亮的字段整块套橙黄底（padding 3px / radius 4px 常态就有，切换时不跳动） -->
+                <!-- 高亮的字段整块套淡黄玻璃（padding 3px / radius 4px 常态就有，切换时不跳动） -->
                 <div v-for="key in row.keys" :key="key" class="field-cell draggable-field"
                   :class="{ 'field-cell--hl': isHighlighted(key) }" draggable="true">
                   <div class="text-[12px] text-grey-darken-1">{{ row.label ? cellLabelOf(key) : labelOf(key) }}</div>
@@ -506,13 +506,35 @@ $product-card-bottom: 16px;
   border-radius: 4px;
 }
 
-/* 高亮 = 橙黄底把这一格圈出来。浅色主题用实色，深色主题压成半透明（否则浅字浮在亮底上看不清） */
+/*
+ * 高亮 = 给这一格套一块「淡黄玻璃」：
+ * 底色是**半透明**淡黄（实色橙黄改成玻璃的三层叠加 —— 磨砂 blur + 淡黄描边 + 内侧白高光），
+ * 卡片底是纯白平面，玻璃感主要靠半透明色与描边高光衬出来。
+ * 描边/阴影用 .field-cell.field-cell--hl（双类权重）：.draggable-field 的透明 border
+ * 定义在本块之后、同权重会被它盖掉；hover 反馈（.draggable-field:hover）权重相同又更靠后，
+ * 悬停时依然正常显边。深色主题保持半透明实底 —— 磨砂亮黄在深底上发灰，浅字也压不住。
+ */
 .field-cell--hl {
-  background-color: #ffe082;
+  background-color: rgba(255, 224, 130, 0.38);
+  backdrop-filter: blur(6px) saturate(1.4);
+  -webkit-backdrop-filter: blur(6px) saturate(1.4);
+}
+
+.field-cell.field-cell--hl {
+  border-color: rgba(255, 193, 7, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 1px 3px rgba(184, 134, 11, 0.14);
 }
 
 .v-theme--dark .field-cell--hl {
   background-color: rgba(255, 193, 7, 0.22);
+}
+
+/* 深色下白高光与亮描边太扎眼：描边压暗、投影高光都收掉 */
+.v-theme--dark .field-cell.field-cell--hl {
+  border-color: rgba(255, 193, 7, 0.28);
+  box-shadow: none;
 }
 
 // 可拖拽字段：光标 + 悬浮提示

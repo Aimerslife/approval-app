@@ -43,8 +43,12 @@
         <v-data-table v-model:page="historyPage" border class="text-[12px] mine-table" density="compact" fixed-footer
           fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
           :loading="tabLoading" striped="odd" @click:row="handleRowClick">
-          <template #item.order_no="{ value }">
-            <span class="font-bold">{{ value }}</span>
+          <template #item.order_no="{ item }">
+            <span class="d-inline-flex align-center ga-1">
+              <span class="font-bold">{{ item.order_no }}</span>
+              <!-- 来源标识：内部 / 外部流转（判定口径见 utils/approvalRuntime 的 flowScopeOf） -->
+              <FlowScopeChip :scope="item.flowScope" />
+            </span>
           </template>
           <template #item.status="{ item }">
             <v-chip :color="item.statusColor" label size="x-small">{{ item.statusText }}</v-chip>
@@ -104,7 +108,10 @@
           <v-card v-for="row in cardRows" :key="row.id" class="order-card" variant="flat"
             :class="{ 'order-card--active': row.id === selectedNode?.id }" rounded="lg" @click="selectRow(row)">
             <v-card-title class="order-card__head d-flex align-start justify-space-between">
-              <span class="order-card__title">{{ row.order_no }}</span>
+              <span class="order-card__title">{{ row.order_no }}
+                <!-- 来源标识：内部 / 外部流转 -->
+                <FlowScopeChip :scope="row.flowScope" />
+              </span>
               <v-chip class="order-card__status" :color="row.statusColor" label size="x-small">
                 {{ row.statusText }}
               </v-chip>
@@ -161,6 +168,8 @@ import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
 import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
 // 操作栏的「删除审批单」：按钮内置权限判断与确认框（与 home.vue 共用同一个组件）
 import DeleteOrderButton from '@/components/DeleteOrderButton.vue'
+// 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
+import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
 import { useApprovalSelect } from '@/composables/useApprovalSelect'
 // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
 import { useNodeSubmit } from '@/composables/useNodeSubmit'
@@ -204,6 +213,7 @@ import {
   approvalProgressOf,
 } from '@/utils/approvalProgress'
 import {
+  flowScopeOf,
   lastHandledOf,
   mainOf,
   runtimeOf,
@@ -282,6 +292,12 @@ interface ApprovalRow {
    * （stores/avatarDirectory 的 avatarOf）—— 与时间线里的成员头像同一口径。
    */
   owner: { open_id?: string, email?: string, avatar?: string } | null
+  /**
+   * 流转范围（订单号旁的「内部 / 外部流转」标识，口径见 utils/approvalRuntime 的 flowScopeOf）：
+   * 全程同一部门 = internal；出现过跨部门流转 = external；识别不出团队信息 = null（不显示标识）。
+   * 与 utils/approvalRows 的 ApprovalRow 同名字段 —— 两处行对象保持一致。
+   */
+  flowScope?: 'internal' | 'external' | null
 }
 
 /** 与审批页同一套口径：有 flow 就按 flow + decisions 重算，旧单（只有 chain、没有 flow）原样沿用 */
@@ -350,6 +366,8 @@ function toRow(order: ApprovalOrder): ApprovalRow {
     processText: processMeta.text,
     processColor: processMeta.color,
     processDetail: approvalProgressDetail(processStage, waitingHours, pushRules.value.overdueHours),
+    // 流转范围（内部 / 外部流转）：复用本行已重算的链路，不重复跑 runtimeOf
+    flowScope: flowScopeOf(order, rt),
     // 卡片标题：业务上有产品名就用它，其次型号，都没有才退到单号（不至于出现一张没有标题的卡）
     title: productName || (model === '—' ? (order.order_no ?? order.id) : model),
     ownerDept: owner?.department || String(p['部门'] ?? '') || '—',

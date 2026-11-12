@@ -243,3 +243,65 @@ export function parentTeams (keyword = ''): ParentTeamRow[] {
     || row.groups.some(g => g.group.toLowerCase().includes(kw)),
   )
 }
+
+/* ==================== 姓名 → 部门（人从哪个团队来） ==================== */
+
+/** 名字的比较键：去空白 + 忽略大小写（中文姓名无大小写之分，统一处理无害；口径同本文件其余比较） */
+function nameKeyOf (name?: string | null): string {
+  return String(name ?? '').replace(/\s+/g, '').toLowerCase()
+}
+
+/**
+ * 这个**姓名**在团队表里属于哪个**部门**。
+ *
+ * 表只按「负责人」维护人（见 TeamGroupRow）：命中**团队负责人**（`manager`）→
+ * 其团队所在部门；命中**部门负责人**（`parentManager`）→ 该部门。
+ * 普通组员不在表里 → undefined（调用方按"识别不出"处理，不要猜）。
+ *
+ * 用途：「内部 / 外部流转」判定（utils/approvalRuntime 的 flowScopeOf）里
+ * 把链路成员（瘦身后只剩姓名）映射回部门。纯函数，可被 tsx 直接断言。
+ */
+export function deptOfPerson (name?: string | null): string | undefined {
+  const key = nameKeyOf(name)
+  if (!key) {
+    return undefined
+  }
+  const rows = groupManage as TeamGroupRow[]
+  const byManager = rows.find(r => nameKeyOf(r.manager) === key)
+  if (byManager) {
+    return byManager.parent
+  }
+  const byParent = rows.find(r => nameKeyOf(r.parentManager) === key)
+  return byParent?.parent
+}
+
+/**
+ * 这个**姓名**是不是团队表（角色设置 → 人员配置）里登记过的人 ——
+ * 任一**团队负责人**（`manager`）或**部门负责人**（`parentManager`）都算，普通组员不算。
+ *
+ * 用途：「内部 / 外部流转」标识的可见范围（业务定稿 2026-11-12）：
+ * 管理员及以上恒可见；一般员工只有在人员配置里登记过（业务相关人员）才可见。
+ */
+export function isMaintainedMember (name?: string | null): boolean {
+  const key = nameKeyOf(name)
+  if (!key) {
+    return false
+  }
+  return (groupManage as TeamGroupRow[]).some(
+    r => nameKeyOf(r.manager) === key || nameKeyOf(r.parentManager) === key,
+  )
+}
+
+/**
+ * 这个名字是不是团队表里的**部门**（`parent`，去空白比较）。
+ *
+ * 链路成员的 `department` 值域上是飞书部门节点名 —— 可能是组名（美1组），
+ * 也可能直接是部门名（B2C）。先按组名反查（deptOfTeam），认不出再用这里判断。
+ */
+export function isDeptName (name?: string | null): boolean {
+  const key = String(name ?? '').replace(/\s+/g, '')
+  if (!key) {
+    return false
+  }
+  return (groupManage as TeamGroupRow[]).some(r => r.parent.replace(/\s+/g, '') === key)
+}

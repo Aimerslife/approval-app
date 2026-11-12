@@ -8,6 +8,8 @@
       <div class="d-flex align-center gap-2">
         <span class="text-[13px]">审批单号：<strong>{{ orderDatas?.order_no }}</strong>
           <v-icon-btn icon="mdi-content-copy" size="x-small" @click="copyOrderNo(orderDatas?.order_no)" /></span>
+        <!-- 来源标识：审批单最初的业务办理是否在同一团队（部门口径）；只给管理与业务相关人员看 -->
+        <FlowScopeChip :scope="flowScope" />
       </div>
 
       <div class="text-[13px] d-flex align-center gap-2">
@@ -217,6 +219,8 @@
   import { proxyAvatar, sendFeishuCard } from '@/api/api'
   // 底部办理面板：三处办理入口共用同一份实现（内含 ApprovalHandleForm）
   import HandleDock from '@/components/approval/HandleDock.vue'
+  // 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
+  import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
   // 轮询各团队的接收汇总（与办理面板 / 首页详情同一份展示口径）
   import RotationReceipts from '@/components/approval/RotationReceipts.vue'
   // 办结后时间线上方的「审批信息表」（含导出 PDF）：口径见 utils/approvalSummary
@@ -245,6 +249,7 @@
   import {
     discardMarkOf,
     discardMarksOf,
+    flowScopeOf,
     groupApproverSteps,
     lastHandledOf,
     mainOf,
@@ -423,6 +428,11 @@
   const runtime = computed(() => (orderDatas.value
     ? runtimeOf(orderDatas.value)
     : { chain: [], stepIds: [], currentStep: -1, done: false, outcome: 'pending' as const, end: undefined }))
+  /**
+   * 流转范围（订单号旁的「内部 / 外部流转」标识）：整条办理流水是否跨部门，
+   * 口径见 utils/approvalRuntime 的 flowScopeOf —— 复用上面已算好的 runtime，不重复重算链路。
+   */
+  const flowScope = computed(() => (orderDatas.value ? flowScopeOf(orderDatas.value, runtime.value) : null))
 
   /**
    * 「组间轮询」里各团队已接多少（只读，口径见 utils/approvalRuntime 的 rotationReceiptsOf）。

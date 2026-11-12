@@ -53,8 +53,12 @@
             striped="odd"
             @click:row="handleRowClick"
           >
-            <template #item.order_no="{ value }">
-              <span class="font-bold">{{ value }}</span>
+            <template #item.order_no="{ item }">
+              <span class="d-inline-flex align-center ga-1">
+                <span class="font-bold">{{ item.order_no }}</span>
+                <!-- 来源标识：内部 / 外部流转（判定口径见 utils/approvalRuntime 的 flowScopeOf） -->
+                <FlowScopeChip :scope="item.flowScope" />
+              </span>
             </template>
 
             <template #bottom>
@@ -128,6 +132,13 @@
               <div class="text-center pt-2">
                 <v-pagination v-model="page" :length="pageCount" />
               </div>
+            </template>
+            <template #item.order_no="{ item }">
+              <span class="d-inline-flex align-center ga-1">
+                <span class="font-bold">{{ item.order_no }}</span>
+                <!-- 来源标识：内部 / 外部流转（判定口径见 utils/approvalRuntime 的 flowScopeOf） -->
+                <FlowScopeChip :scope="item.flowScope" />
+              </span>
             </template>
             <!-- 与当前审批单 tab 用同一套状态映射（原来两个 tab 的驳回一个 warning 一个 error） -->
             <template #item.status="{ item }">
@@ -205,6 +216,8 @@
   // 与「我的审批单」右栏**共用同一个组件**：头部 / 单据信息 / 时间线 / 办理栏都在里面
   import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
   import ApprovalFilterBar from '@/components/ApprovalFilterBar.vue'
+  // 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
+  import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
   // 批量清空确认框（同一个组件按 scope 清「进行中」或「历史」，见其文件头）
   import DeleteAllOrdersDialog from '@/components/DeleteAllOrdersDialog.vue'
   // 权限判定（清空按钮只给能删的角色看；真正拦住人的是服务端）

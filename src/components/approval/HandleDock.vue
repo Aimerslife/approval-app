@@ -3,7 +3,7 @@
     <v-expansion-panels v-model="panel" flat multiple rounded="0">
       <v-expansion-panel value="handle">
         <!-- readonly + hide-actions：整条标题不响应点击、原生箭头也不画，只留右侧的「办理」按钮 -->
-        <v-expansion-panel-title class="px-5 py-0" hide-actions readonly>
+        <v-expansion-panel-title class="px-5 py-2" hide-actions readonly>
           <div class="d-flex align-center ga-2 w-100">
             <v-chip v-if="actionTotal > 1" color="primary" label size="x-small" variant="tonal">
               第 {{ actionNo }} / {{ actionTotal }} 个动作
@@ -310,6 +310,15 @@ watch(() => props.order?.id, (id, prev) => {
   :deep(.v-expansion-panels),
   :deep(.v-expansion-panel) {
     border-radius: 0;
+  }
+
+  /*
+   * 标题行压扁：模板上的 py-0 只能清掉上下 padding，
+   * Vuetify 给 .v-expansion-panel-title 还写死了 min-height: 48px ——
+   * 这一行只有一条小按钮（~28px），剩下 20px 全变成上下空白。压掉后行高由内容决定。
+   */
+  :deep(.v-expansion-panel-title) {
+    min-height: 0;
   }
 
   :deep(.v-expansion-panel-text__wrapper) {

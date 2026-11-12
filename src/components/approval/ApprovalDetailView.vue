@@ -33,6 +33,8 @@
 
             <div class="d-flex align-center ga-1 min-w-0">
               <span class="info-value">{{ order.order_no ?? order.id }}</span>
+              <!-- 来源标识：内部 / 外部流转（判定口径见 utils/approvalRuntime 的 flowScopeOf） -->
+              <FlowScopeChip :scope="flowScope" />
               <v-icon-btn :disabled="!hasPrev" size="x-small" title="上一条" variant="text" @click="emit('prev')">
                 <v-icon size="16">mdi-menu-left</v-icon>
               </v-icon-btn>
@@ -123,6 +125,8 @@ import ApprovalNode from '@/components/ApprovalNode.vue'
 import FlowEndNote from '@/components/FlowEndNote.vue'
 import GoodsInfo from '@/components/GoodsInfo.vue'
 // 抄送 / 转办：选人组件，与审批页共用同一份
+// 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
+import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
 import SelectNode from '@/components/streamNodes/SelectNode.vue'
 import {
   APPROVAL_STATUS,
@@ -139,6 +143,7 @@ import { isOrderFinished } from '@/utils/approvalSummary'
 import {
   discardMarkOf,
   discardMarksOf,
+  flowScopeOf,
   groupApproverSteps,
   lastHandledOf,
   mainOf,
@@ -286,6 +291,9 @@ function stepNameOf (stepId?: string) {
   const m = /#(\d+)$/.exec(id)
   return m ? `第 ${m[1]} 环` : ''
 }
+
+/** 流转范围（订单号旁的「内部 / 外部流转」标识）：整条办理流水是否跨部门，见 utils/approvalRuntime 的 flowScopeOf */
+const flowScope = computed(() => (props.order ? flowScopeOf(props.order) : null))
 
 /** 接收数量的账：总库存数量 / 已接收 / 剩余（与流程引擎共用，见 receivedQuantities） */
 const qtyLedger = computed(() =>

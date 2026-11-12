@@ -217,7 +217,6 @@
             <v-img v-if="memberAvatar(t)" cover :src="memberAvatar(t)" @error="onAvatarError(t)" />
             <v-icon v-else size="13">mdi-account</v-icon>
           </v-avatar>
-
           <span class="text-[10px] text-medium-emphasis">{{ t.name }}</span>
         </div>
       </div>
