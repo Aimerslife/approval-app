@@ -279,8 +279,8 @@ export function deptOfPerson (name?: string | null): string | undefined {
  * 这个**姓名**是不是团队表（角色设置 → 人员配置）里登记过的人 ——
  * 任一**团队负责人**（`manager`）或**部门负责人**（`parentManager`）都算，普通组员不算。
  *
- * 用途：「内部 / 外部流转」标识的可见范围（业务定稿 2026-11-12）：
- * 管理员及以上恒可见；一般员工只有在人员配置里登记过（业务相关人员）才可见。
+ * 用途：「内部 / 外部流转」标识的可见范围（口径收紧 2026-11-16，原「管理员恒可见」已取消）：
+ * 只有在这张表里登记过（业务相关人员）才可见，其他人员一律不显示。
  */
 export function isMaintainedMember (name?: string | null): boolean {
   const key = nameKeyOf(name)

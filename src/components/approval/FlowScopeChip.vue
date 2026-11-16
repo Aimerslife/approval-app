@@ -18,8 +18,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-// 可见范围（业务定稿 2026-11-12）：管理员及以上恒可见；
-// 一般员工只有在团队表（角色设置 → 人员配置）里登记过 —— 即业务相关人员 —— 才可见
+// 可见范围（口径收紧 2026-11-16）：只有团队表（角色设置 → 人员配置，data/people.json）
+// 里登记过的人 —— 即业务相关人员 —— 才能看到；其他人员（含不在表里的管理员）一律不显示
 import { isMaintainedMember } from '@/utils/organazation'
 import { useUserStore } from '@/stores/user'
 import type { FlowScope } from '@/utils/approvalRuntime'
@@ -27,13 +27,7 @@ import type { FlowScope } from '@/utils/approvalRuntime'
 const props = defineProps<{ scope?: FlowScope | null }>()
 
 const userStore = useUserStore()
-const visible = computed(() => {
-  const role = userStore.appRole
-  if (role === 'superAdmin' || role === 'approval') {
-    return true
-  }
-  return isMaintainedMember(userStore.user?.name)
-})
+const visible = computed(() => isMaintainedMember(userStore.user?.name))
 
 const tip = computed(() =>
   props.scope === 'internal'

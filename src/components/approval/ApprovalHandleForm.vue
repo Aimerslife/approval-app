@@ -575,25 +575,14 @@ const optionItems = computed<ApprovalNodeOption[]>(() => {
   const offered = filterOfferedOptions(raw, props.optionContext)
 
   /*
-   * 「审批类型」里停用的结论**不摆给办理人**（口径见 utils/approvalTypes 的 enabled）。
-   *
-   * 为什么必须在这里做：模板把结论摆上来（optionItems 来自 flow 分支），而"这个结论还启不启用"
-   * 是审批类型页配的 —— 两处不联动时，页面上会出现明明已经停用的选项，选中走完还是一条死线。
-   * 口径：
-   *   · 选项树（nodeLevel）不过滤：它的叶子是模板里一条条配出来的，不归审批类型管；
-   *   · 全被停用时退回原列表：宁可多摆一个，也不能让人无路可走。
-   */
-  if (offered.some(o => o.nodeLevel)) {
-    return offered
-  }
-  const enabled = offered.filter(o => typeTemplateFromSnapshot(props.typeTemplates, o.result).enabled !== false)
-  const usable = enabled.length > 0 ? enabled : offered
-  /*
    * 「驳回」不再作为办理下拉里的选项：回退交回按钮区的「回退上级」（见 handleRejectBack）。
    * 但**过滤光了要退回原样** —— 有些老模板只配了驳回一条出线，去掉就彻底无路可走了。
+   *
+   * （2026-11-16：审批类型清单**不再参与办理选项过滤** —— 那是 mockRun 沙盒的独立功能，
+   * 办理下拉只认模板环节配置；类型里停用了某个结论也不影响这里摆不摆。）
    */
-  const withoutReject = usable.filter(o => o.result !== REJECT_RESULT)
-  return withoutReject.length > 0 ? withoutReject : usable
+  const withoutReject = offered.filter(o => o.result !== REJECT_RESULT)
+  return withoutReject.length > 0 ? withoutReject : offered
 })
 
 /**
@@ -1077,11 +1066,11 @@ watch(
 )
 
 /**
- * 回收类结论（结论码 → 结论文案的基名）：三种回收**同一办理形态**
- * （都要填回收数量 + 回收金额，见 utils/approvalTypes 的 BUILTIN），
- * 但业务上要分别统计去向，所以各占一个码。
+ * 回收类结论（结论码 → 结论文案的基名）：同一类处置、按去向各占一个码。
+ * 办理字段随审批类型模板走（2026-11-16：平台回收**只填数量**，其余回收填数量 + 金额，
+ * 见 utils/approvalTypes）；标签与库存旁注对缺金额天然兼容（recycleLabel 按值拼）。
  *
- * 新增一种回收去向时**只改这张表**：needRecycle（数量/金额字段、库存旁注）
+ * 新增一种回收去向时**只改这张表**：needRecycle（库存旁注）
  * 与结论文案（resultLabelOf）都从这里取，别在两处各写一遍。
  */
 const RECYCLE_RESULTS: Readonly<Record<string, string>> = {
@@ -1282,12 +1271,6 @@ const optionMenuItems = computed(() => {
   return list
 })
 
-/** 下拉清单里的第一个**叶子**（跳过类别标题），用作默认值；没有叶子时返回 null */
-function firstLeafOf (items: Array<ApprovalOptionLeaf | { type: 'subheader', text: string }>): ApprovalOptionLeaf | null {
-  const hit = items.find(i => (i as { type?: string }).type !== 'subheader')
-  return (hit as ApprovalOptionLeaf | undefined) ?? null
-}
-
 /** 二级候选项：**只有选中了带二级的一级选项才有值** */
 const leafChildren = computed(() => pickedLeaf.value?.children ?? [])
 
@@ -1380,13 +1363,13 @@ watch(
 /**
  * 处理方式一变（或它带的树变了）就**校正**一级 / 二级 —— 但只在"当前选择已经失效"时校正。
  *
- * 口径（现行需求）：**默认选中树里的第一个叶子**，二级跟着取它的第一项 ——
- * 下拉一出现就已经是个合法结论，办理人不动它也能直接提交。
- * 所以下拉必须把选中文案显示出来（别用 placeholder 盖住已选值），
- * 否则就会出现"看着是空的、其实已经选了一个"的老问题（见 handleConfirm 的必选兜底）。
+ * 口径（2026-11-16 需求）：**办理选项默认不填，只留 placeholder** ——
+ * 下拉里躺着一个办理人没选过的结论，容易看一眼就顺手提交错（见 handleConfirm 的必选兜底）。
+ * 失效时清空而不是重置成第一个叶子；选完办理选项，预演的下一环才会铺出来
+ * （option-change 在 result 为空时发 null，HandleDock 据此停住）。
  *
  * ⚠️ 这里的判断是**必须的**：`selectedOption` 是 computed，`selectItems` 一旦重算就会返回
- * 新对象 —— 无条件 `pickedLeaf = 第一个叶子` 会把办理人**刚选的**叶子打回第一个，
+ * 新对象 —— 任何"无条件重置"都会把办理人**刚选的**叶子打回去，
  * 现象就是"办理选项选不中 / 选了又跳回去"（同人连续多环时预览环重算也会触发它）。
  */
 watch(
@@ -1401,15 +1384,18 @@ watch(
     if (stillValid) {
       return
     }
-    pickedLeaf.value = firstLeafOf(leaves)
-    pickedChild.value = pickedLeaf.value?.children?.[0] ?? ''
+    pickedLeaf.value = null
+    pickedChild.value = ''
   },
   { immediate: true, deep: true },
 )
 
-/** 选中带二级的一级选项时，二级仍预填第一个（它只是对已选叶子的细分，且一级文案已经显示出来了） */
+/** 换选一级叶子时二级**清空**（与办理选项同口径：默认空、只有 placeholder），必选拦截见 handleConfirm */
 watch(pickedLeaf, leaf => {
-  pickedChild.value = leaf?.children?.[0] ?? ''
+  const cur = pickedChild.value
+  if (!leaf?.children?.some(c => c === cur)) {
+    pickedChild.value = ''
+  }
 })
 
 /** 上一轮是不是把「二级选项」镜像成了 typeValues.second_reason（换叶子时要撤掉，别留残余） */
@@ -1478,9 +1464,9 @@ function resetFormState() {
    * （pickedGroups 取的就是选中项的 groups），下一环要等 props 变化才恢复。
    */
   selectedOptionKey.value = selectItems.value[0]?.key ?? ''
-  // 一级 / 二级与挂载时同一口径：树里的第一个叶子 + 它的第一项二级
-  pickedLeaf.value = firstLeafOf(optionMenuItems.value)
-  pickedChild.value = pickedLeaf.value?.children?.[0] ?? ''
+  // 一级 / 二级与挂载时同一口径：默认不填，只留 placeholder（2026-11-16，办理人自己选）
+  pickedLeaf.value = null
+  pickedChild.value = ''
   // 审批类型表单整份清空：下一环要填的字段可能完全不同（渲染器会按新结论重新预填）
   typeValues.value = {}
   // 换环节了，上个环节各团队填过的数量不能再当默认值（那不是"这个团队这次接多少"）
@@ -1843,12 +1829,15 @@ interface SubmitBody {
  */
 async function validateSelf (): Promise<string> {
   /*
-   * 选项树兜底：正常情况下已有默认第一项（见上面处理那条 watch），这里留一道是给
-   * "树里一个可选叶子都没有"（全被驳回过滤掉 / 模板没配）的情况 ——
-   * 那时代码还是会提交空结论（result 为空 → 流程里没有分支命中 → 停在原地），先拦下来说清楚。
+   * 选项树必选：办理选项默认不填（2026-11-16 口径，见上面处理那条 watch）——
+   * 没选就提交会发空结论（result 为空 → 流程里没有分支命中 → 停在原地），拦下来说清楚。
+   * 选了带二级的叶子还要把二级选上：它是对结论的细分（不填会丢 option_child）。
    */
   if (hasNodeLevelTree.value && !pickedLeaf.value) {
     return '请选择「办理选项」后再提交'
+  }
+  if (pickedLeaf.value?.children?.length && !pickedChild.value) {
+    return '请选择「二级选项」后再提交'
   }
 
   if (handleForm.value) {

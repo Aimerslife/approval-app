@@ -245,6 +245,7 @@
   import {
     APPROVAL_STATUS,
     collectStepNames,
+    collectStepOptionItems,
     receivedQuantities,
     receiversOf,
   } from '@/types/approval'
@@ -265,8 +266,6 @@
   } from '@/utils/approvalRuntime'
   // 「单子是不是已经审批结束」：详情抽屉与这里共用同一判据（status + 链路待办）
   import { isOrderFinished } from '@/utils/approvalSummary'
-  // 办理选项统一下发：单据快照里的审批类型全集（与办理弹窗同一口径，见 utils/approvalTypes）
-  import { enabledTypeOptionsFromSnapshot, typesFromSnapshot } from '@/utils/approvalTypes'
   // 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口，别自己读 record.data）
   import { toProductView } from '@/utils/biRowFields'
   import { getApprovalOrder, getApprovalOrderByNo, updateApprovalOrder } from '@/utils/collection'
@@ -449,20 +448,18 @@
   const rotationReceipts = computed(() =>
     rotationReceiptsOf(runtime.value.chain, m => memberDir.detailOf(m).department))
 
-  /** 办理选项清单 = 单据快照里的审批类型全集（enabled），每一环摆同一份 —— 与办理弹窗同一口径 */
-  const typeOptions = computed(() =>
-    enabledTypeOptionsFromSnapshot(typesFromSnapshot(orderDatas.value?.chain?.types)))
-
-  const stepResultOptions = computed(() => {
-    const ids = runtime.value?.stepIds ?? []
-    return Object.fromEntries(ids.map(id => [id, typeOptions.value.map(o => o.result)]))
-  })
-
-  /** 各环节的**选项数组**：审批类型全集（text=类型名、result=结论码），办理下拉框直接用它渲染 */
+  /*
+   * 办理选项 = **该环节在模板里配置的结论原样**（collectStepOptionItems，与办理弹窗
+   * ApprovalDetailView 同一口径；2026-11-16 定稿：审批类型清单是 mockRun 沙盒的独立
+   * 功能，不参与真实链路的办理选项）。环节在 flow 里查不到时，表单自带 通过/驳回 兜底。
+   */
   const stepOptionItems = computed(() => {
-    const ids = runtime.value?.stepIds ?? []
-    return Object.fromEntries(ids.map(id => [id, typeOptions.value]))
+    const flow = orderDatas.value?.chain?.flow
+    return flow?.length ? collectStepOptionItems(flow) : {}
   })
+
+  const stepResultOptions = computed(() =>
+    Object.fromEntries(Object.entries(stepOptionItems.value).map(([id, list]) => [id, list.map(o => o.result)])))
 
   /**
    * 各环节的**名字**（模板画布上给这一环起的标题）：时间线卡片显示「这是哪一环」用。

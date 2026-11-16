@@ -123,7 +123,7 @@
                   <span v-else class="text-[10px] font-bold">{{ initialOf(row.approver) }}</span>
                 </v-avatar>
                 <span class="text-[12px]">{{ row.approver }}</span>
-                <span class="text-[11px] text-medium-emphasis ellipsis">{{ row.ownerDept }}</span>
+                <span class="text-[11px] text-medium-emphasis ellipsis">{{ deptTextOf(row) }}</span>
               </div>
               <div class="mt-1.5 text-[12px] d-flex flex-column ga-0.5">
                 <span class="ellipsis">SKU：{{ row.sku }}</span>
@@ -291,7 +291,7 @@ interface ApprovalRow {
    * 新单快照里**不存头像**（见 types/approval 的 slimFlowMembers），展示时用这两个键去头像目录现查
    * （stores/avatarDirectory 的 avatarOf）—— 与时间线里的成员头像同一口径。
    */
-  owner: { open_id?: string, email?: string, avatar?: string } | null
+  owner: { open_id?: string, email?: string, avatar?: string, department?: string } | null
   /**
    * 流转范围（订单号旁的「内部 / 外部流转」标识，口径见 utils/approvalRuntime 的 flowScopeOf）：
    * 全程同一部门 = internal；出现过跨部门流转 = external；识别不出团队信息 = null（不显示标识）。
@@ -370,8 +370,20 @@ function toRow(order: ApprovalOrder): ApprovalRow {
     flowScope: flowScopeOf(order, rt),
     // 卡片标题：业务上有产品名就用它，其次型号，都没有才退到单号（不至于出现一张没有标题的卡）
     title: productName || (model === '—' ? (order.order_no ?? order.id) : model),
-    ownerDept: owner?.department || String(p['部门'] ?? '') || '—',
-    owner: owner ? { open_id: owner.open_id, email: owner.email, avatar: owner.avatar } : null,
+    /*
+     * 卡片「人名旁的部门」的**兜底**（数据行「部门」列）：实际显示见模板的 deptTextOf ——
+     * 新单快照成员瘦身后不带 department（这里读 owner.department 只对老单有效），
+     * 不能拿数据行的业务部门冒充审批人所在部门（表现就是"陈培锋 B2C"这种张冠李戴）。
+     */
+    ownerDept: String(p['部门'] ?? '') || '—',
+    owner: owner
+      ? {
+          open_id: owner.open_id,
+          email: owner.email,
+          avatar: owner.avatar,
+          department: owner.department,
+        }
+      : null,
   }
 }
 
@@ -676,6 +688,16 @@ function avatarOf(row: ApprovalRow) {
 }
 function onAvatarError(row: ApprovalRow) {
   avatarSrc.onError(avatarRawOf(row))
+}
+/*
+ * 卡片上审批人旁的**部门**：到通讯录目录按人现查（与头像同一份数据、同一次请求，
+ * stores/avatarDirectory 的 detailOf）——新单快照不存部门，数据行的「部门」列是业务
+ * 上下文（这单数据属于哪个部门），不是审批人所在部门，不能拿来冒充。
+ * 优先级：老单自带 department → 目录现查 → 数据行「部门」兜底（外部人员/缓存缺失时不至于空着）。
+ * 写成渲染期函数而不是行字段：目录异步加载完成后 map 更新，卡片自动重渲染出正确部门。
+ */
+function deptTextOf(row: ApprovalRow) {
+  return row.owner?.department || avatarDir.detailOf(row.owner).department || row.ownerDept
 }
 
 /* ==================== 所有审批单（表格 + 筛选） ==================== */

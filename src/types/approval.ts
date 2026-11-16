@@ -606,11 +606,12 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: RECEIVE_QTY_RESULT, label: '接收' },
   { value: 'recycle', label: '回收' },
   /*
-   * 「供应商回收」「平台回收」：与「回收」同一类处置结论（办理时同样填**回收数量 + 回收金额**，
-   * 见 components/approval/ApprovalHandleForm.vue 的 needRecycle / resultLabelOf），
-   * 但业务上要能与"自己回收"分开统计，所以**各占一个码**，不要复用 recycle。
+   * 「供应商回收」「平台回收」：与「回收」同一类处置结论，业务上要分开统计去向，
+   * 所以**各占一个码**，不要复用 recycle。
+   * 办理形态（2026-11-16）：回收 / 供应商回收 / 申请平台回收填**数量 + 金额**；
+   * 平台回收是执行动作、**只填数量**（金额按数量折算展示，见 utils/approvalTypes）。
    *
-   * ⚠️ 因此它们也**不算接收**（不在 RECEIVE_RESULTS）—— 写法与 recycle 一致，
+   * ⚠️ 它们都**不算接收**（不在 RECEIVE_RESULTS）—— 写法与 recycle 一致，
    *    `extra.qty` 是回收数量，混进「已接收数量」会把其余组还能接多少算错。
    */
   { value: 'supplier_recycle', label: '供应商回收' },

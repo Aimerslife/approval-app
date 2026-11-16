@@ -182,6 +182,7 @@
   import {
     APPROVAL_STATUS,
     collectStepNames,
+    collectStepOptionItems,
     receivedQuantities,
   } from '@/types/approval'
   import { APPROVAL_STAGE_META, approvalStageOf } from '@/utils/approvalFilters'
@@ -201,8 +202,6 @@
   } from '@/utils/approvalRuntime'
   // 「单子是不是已经审批结束」：与审批页共用同一判据（status + 链路待办）
   import { isOrderFinished } from '@/utils/approvalSummary'
-  // 办理选项的统一下发口径：单据快照里的审批类型全集（见 utils/approvalTypes 的边界说明）
-  import { enabledTypeOptionsFromSnapshot, typesFromSnapshot } from '@/utils/approvalTypes'
   // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
   import { toProductView } from '@/utils/biRowFields'
   import { formatDate } from '@/utils/utils'
@@ -311,13 +310,19 @@
     }),
   )
 
-  /** 各环节可选的审批结论 / 办理选项：统一由单据快照里的审批类型清单下发（enabled 全集，每一环同一份） */
-  const typeOptions = computed(() =>
-    enabledTypeOptionsFromSnapshot(typesFromSnapshot(props.order?.chain?.types)))
+  /*
+   * 各环节可选的审批结论 / 办理选项 = **该环节在模板里配置的结论原样**
+   * （collectStepOptionItems，2026-11-16 定稿：审批类型清单是 mockRun 沙盒的独立功能，
+   * 不参与真实链路的办理选项 —— 之前拿 enabled 全集铺表或取交集，要么把环节没配的
+   * 选项摆上来、要么把类型里停用结论对应的配置选项筛掉）。
+   * 环节在 flow 里查不到（无出线）时，表单自带 通过/驳回 兜底（见 ApprovalHandleForm）。
+   */
+  const optionItems = computed(() => {
+    const flow = props.order?.chain?.flow
+    return flow?.length ? collectStepOptionItems(flow) : {}
+  })
   const resultOptions = computed(() =>
-    Object.fromEntries(stepIds.value.map(id => [id, typeOptions.value.map(o => o.result)])))
-  const optionItems = computed(() =>
-    Object.fromEntries(stepIds.value.map(id => [id, typeOptions.value])))
+    Object.fromEntries(Object.entries(optionItems.value).map(([id, list]) => [id, list.map(o => o.result)])))
 
   /**
    * 各环节的**名字**（模板画布上给这一环起的标题）：时间线卡片显示「这是哪一环」用。

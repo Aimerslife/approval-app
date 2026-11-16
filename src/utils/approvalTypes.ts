@@ -27,6 +27,7 @@
  * 正交，互不冲突：选项树（`ApprovalNodeData.optionGroups`）管"**摆哪些选项、选中走哪条线**"
  * （叶子的 `link` 就是本文件的 `code`），本文件管"**选中之后要填什么**"。
  */
+// 结论码全集与审批类型（本文件是 mockRun 沙盒的「审批类型」域：真实链路办理选项不经过这里）
 import { APPROVAL_RESULTS, type ApprovalNodeOption } from '@/types/approval'
 
 /**
@@ -322,11 +323,11 @@ const BUILTIN: Record<string, Omit<ApprovalTypeTemplate, 'code' | 'name'>> = {
       { key: 'amount', label: '回收金额', control: 'number', required: true, unit: '￥', decimals: 2, limit: 'stock_amount' },
     ],
   },
-  // 平台回收：与上面两种回收同一形态（数量 + 金额，上限同样是总库存），只是去向不同
+  // 平台回收：**只填回收数量**（2026-11-16：与「申请平台回收」是两个选项，后者才要报数量 + 金额，
+  // 平台回收是执行动作，金额由汇总表按数量折算，不单独收）
   platform_recycle: {
     fields: [
       { key: 'qty', label: '回收数量', control: 'number', required: true, unit: '件', integer: true, limit: 'stock_qty' },
-      { key: 'amount', label: '回收金额', control: 'number', required: true, unit: '￥', decimals: 2, limit: 'stock_amount' },
     ],
   },
   // 申请平台回收：申请时就要把数量 / 金额报全（后面接确认环节），表单与「平台回收」同一形态
