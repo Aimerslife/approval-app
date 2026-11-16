@@ -1,0 +1,173 @@
+{
+  "win590": {
+    "tabCount": [
+      "正本11",
+      "副本0"
+    ],
+    "groupHeads": [
+      {
+        "name": "美一组",
+        "top": 170,
+        "h": 56
+      },
+      {
+        "name": "未分组",
+        "top": 506,
+        "h": 56
+      }
+    ],
+    "dataRowCount": 13,
+    "scroll": {
+      "h": 397,
+      "top": 114,
+      "bottom": 511,
+      "overflowY": "auto",
+      "display": "flex",
+      "flexDir": "column",
+      "minH": "0px",
+      "flex": "1 1 auto",
+      "ch": 397,
+      "sh": 397
+    },
+    "table": {
+      "h": 337,
+      "top": 114,
+      "bottom": 451,
+      "overflowY": "visible",
+      "display": "flex",
+      "flexDir": "column",
+      "minH": "0px",
+      "flex": "1 1 auto",
+      "ch": 337,
+      "sh": 337
+    },
+    "wrapper": {
+      "h": 337,
+      "top": 114,
+      "bottom": 451,
+      "overflowY": "auto",
+      "display": "block",
+      "flexDir": "row",
+      "minH": "auto",
+      "flex": "1 1 auto",
+      "ch": 337,
+      "sh": 784
+    },
+    "inner": null,
+    "drop": {
+      "h": 44,
+      "top": 455,
+      "bottom": 499,
+      "overflowY": "visible",
+      "display": "flex",
+      "flexDir": "row",
+      "minH": "auto",
+      "flex": "0 0 auto",
+      "ch": 42,
+      "sh": 42
+    },
+    "bar": {
+      "h": 36,
+      "top": 521,
+      "bottom": 557,
+      "overflowY": "visible",
+      "display": "block",
+      "flexDir": "row",
+      "minH": "auto",
+      "flex": "0 0 auto",
+      "ch": 36,
+      "sh": 36
+    },
+    "bodyCh": 590,
+    "bodySh": 590,
+    "winH": 590
+  },
+  "afterScroll": {
+    "wrapperScrollTop": 447,
+    "lastRowText": "美一组部门轮询2启用审批→数据查询2—→部门轮询—→审批→提",
+    "lastRowBottom": 451
+  },
+  "win937": {
+    "tabCount": [
+      "正本11",
+      "副本0"
+    ],
+    "groupHeads": [
+      {
+        "name": "美一组",
+        "top": 70,
+        "h": 56
+      },
+      {
+        "name": "未分组",
+        "top": 406,
+        "h": 56
+      }
+    ],
+    "dataRowCount": 13,
+    "scroll": {
+      "h": 744,
+      "top": 114,
+      "bottom": 858,
+      "overflowY": "auto",
+      "display": "flex",
+      "flexDir": "column",
+      "minH": "0px",
+      "flex": "1 1 auto",
+      "ch": 744,
+      "sh": 744
+    },
+    "table": {
+      "h": 684,
+      "top": 114,
+      "bottom": 798,
+      "overflowY": "visible",
+      "display": "flex",
+      "flexDir": "column",
+      "minH": "0px",
+      "flex": "1 1 auto",
+      "ch": 684,
+      "sh": 684
+    },
+    "wrapper": {
+      "h": 684,
+      "top": 114,
+      "bottom": 798,
+      "overflowY": "auto",
+      "display": "block",
+      "flexDir": "row",
+      "minH": "auto",
+      "flex": "1 1 auto",
+      "ch": 684,
+      "sh": 784
+    },
+    "inner": null,
+    "drop": {
+      "h": 44,
+      "top": 802,
+      "bottom": 846,
+      "overflowY": "visible",
+      "display": "flex",
+      "flexDir": "row",
+      "minH": "auto",
+      "flex": "0 0 auto",
+      "ch": 42,
+      "sh": 42
+    },
+    "bar": {
+      "h": 36,
+      "top": 868,
+      "bottom": 904,
+      "overflowY": "visible",
+      "display": "block",
+      "flexDir": "row",
+      "minH": "auto",
+      "flex": "0 0 auto",
+      "ch": 36,
+      "sh": 36
+    },
+    "bodyCh": 937,
+    "bodySh": 937,
+    "winH": 937
+  }
+}

@@ -4,10 +4,9 @@
   "type": "module",
   "version": "0.0.0",
   "scripts": {
-    "dev": "concurrently -k -n PB,VUE,SRV -c blue,green,yellow \"yarn pb\" \"yarn dev:vite\" \"yarn dev:server\"",
+    "dev": "node server/dev.js",
     "dev:vite": "vite",
     "dev:server": "tsx watch server/index.ts",
-    "dev:pb": "node server/pb.js",
     "pb": "pocketbase/pocketbase.exe serve --http=0.0.0.0:8091 --origins=http://localhost:3001",
     "pb:linux": "pocketbase/pocketbase serve --http=127.0.0.1:8091",
     "serve:server": "tsx server/index.ts",

@@ -50,7 +50,12 @@
         剩下的位置留给底部页签，页签就能一直贴在窗口最下方（见 model-sheet 的说明）。
       -->
       <div class="model-sheet-scroll">
-        <v-data-table v-if="topTab === 'template'" class="text-body-small model-table" density="compact"
+        <!-- 表格区自己滚（model-table 锁 flex:1 + min-height:0）：数据再多也不撑开外层，
+             滚动条属于表格内部，表头 fixed-header 吸顶，落点与底部页签常驻不动。
+             items-per-page=-1：hide-default-footer 只藏页脚、不关分页，默认每页 10 行
+             会把第 11 条起的数据静默截掉（分组模式下组头还计入限额），必须显式关掉 -->
+        <v-data-table v-if="topTab === 'template'" class="text-body-small model-table" density="compact" fixed-header
+          :items-per-page="-1"
           :custom-key-sort="customKeySort"
           :group-by="tab === 'main' ? [{ key: 'sectionName', order: 'asc' }] : undefined" :headers="headers"
           hide-default-footer hover item-value="name" :items="rows" :loading="loading" open-all>
@@ -109,7 +114,8 @@
           </template>
         </v-data-table>
 
-        <v-data-table v-else class="text-body-small model-table" density="compact" :headers="typeHeaders"
+        <v-data-table v-else class="text-body-small model-table" density="compact" fixed-header :headers="typeHeaders"
+          :items-per-page="-1"
           hide-default-footer hover item-value="code" :items="typeRows" :loading="typeLoading">
           <template #item="{ item }">
             <tr class="text-no-wrap">
@@ -690,8 +696,8 @@ async function copyNode() {
     })
     notify('复制成功，已放进「副本」页签', 'success')
     dialog.value = false
-    // 切到副本页签：新复制的那张在那里，看得到结果（否则会以为"点了没反应"）
-    tab.value = 'copy'
+    // 原页面不动：留在当前页签（正本列表刷新后视觉不变），不自动跳到「副本」；
+    // 新副本在哪由提示文案说明，需要时再点页签过去看
     await getDatas()
   } catch (error) {
     console.error('[approvalModel] 复制模板失败:', error)
@@ -1205,9 +1211,23 @@ onMounted(() => {
 }
 
 .model-sheet-scroll {
+  /* 纵向 flex：表格 flex:1 占满后落点自然贴底；overflow-y 只作兜底（见下方 .model-table 注释） */
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/*
+ * 两张表的独立滚动：表格占满滚动区剩余高度（flex:1）并允许收缩（min-height:0），
+ * 收缩后由它内部的 .v-table__wrapper（overflow:auto，Vuetify 自带）滚动，
+ * 表头 fixed-header 吸顶——滚动条属于表格，落点与底部页签不参与滚动。
+ * `.model-sheet-scroll` 的 overflow-y:auto 退为兜底（正常时表格恒填满，不会触发）。
+ */
+.model-sheet-scroll > .model-table {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* 底部固定条：表格与页签之间那道横线也由它拉开（不再靠 v-tabs 的外边距） */
@@ -1317,12 +1337,16 @@ onMounted(() => {
   outline-offset: -2px;
 }
 
-/* 新区块的拖拽落点（表格下方虚线框）：hover 中高亮成主色 */
+/* 新区块的拖拽落点：表格自己滚（见 .model-table），落点常驻在表格正下方、
+ * 恒等于滚动区底部，不参与滚动也无需 sticky。hover 中高亮成主色。
+ * DOM 位置必须保持在两张表之后（上方 v-else 配对约束）。 */
 .model-new-section {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  /* 锁死不被 flex 压缩：表格 flex:1 按内容高参与分配，shrink 默认会把 44px 压成细条 */
+  flex-shrink: 0;
   height: 44px;
   margin: 4px 0 12px;
   border: 1.5px dashed rgba(var(--v-theme-on-surface), 0.25);

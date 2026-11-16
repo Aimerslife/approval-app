@@ -1,0 +1,53 @@
+﻿[dev.js] guard pbAlive = false
+[dev.js] spawned bin = D:\project\vuetify_approval\vite-project\approval-app\node_modules\concurrently\dist\bin\index.js
+[PB] yarn run v1.22.22
+[SRV] yarn run v1.22.22
+[VUE] yarn run v1.22.22
+[PB] warning ..\package.json: No license field
+[SRV] warning ..\package.json: No license field
+[PB] $ pocketbase/pocketbase.exe serve --http=0.0.0.0:8091 --origins=http://localhost:3001
+[SRV] $ tsx watch server/index.ts
+[VUE] warning ..\package.json: No license field
+[VUE] $ vite
+[PB] 2026/11/12 17:42:29 Server started at http://0.0.0.0:8091
+[PB] ├─ REST API:  http://0.0.0.0:8091/api/
+[PB] └─ Dashboard: http://0.0.0.0:8091/_/
+[SRV] [info]: [ 'client ready' ]
+[SRV] [info]: [ 'event-dispatch is ready' ]
+[SRV] [info]: [
+[SRV]   '[ws]',
+[SRV]   'receive events or callbacks through persistent connection only available in self-build & Feishu app, Configured in:\n' +
+[SRV]     '        Developer Console(开发者后台)\n' +
+[SRV]     '          ->\n' +
+[SRV]     '        Events and Callbacks(事件与回调)\n' +
+[SRV]     '          ->\n' +
+[SRV]     '        Mode of event/callback subscription(订阅方式)\n' +
+[SRV]     '          ->\n' +
+[SRV]     '        Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)'
+[SRV] ]
+[SRV] 飞书长连接服务已启动
+[SRV] [配置] env 来源：默认位置；飞书凭据：已配置；PB 管理员：已配置；BI 密钥：已配置；PB：http://127.0.0.1:8091（库文件 pocketbase/pb_data/data.db）；端口：3002
+[SRV] [配置] 已加载 env 文件：.env.local
+[SRV] 服务端口: http://127.0.0.1:3002
+[SRV]   缓存读取: GET /api/org-tree/cache
+[SRV]   刷新更新: POST /api/org-tree/refresh
+[SRV]   部门: GET /api/feishu/departments?department_ids=xxx
+[SRV]   子部门: GET /api/feishu/departments/children?parent_department_id=0
+[SRV]   部门用户: GET /api/feishu/users?department_id=xxx
+[SRV]   用户详情: GET /api/feishu/users/:user_id
+[SRV]   企业部门: GET /api/feishu/user-org?open_id=xxx
+[SRV]   发送卡片: POST /api/feishu/send-card
+[SRV]   BI 同步: POST /api/bi/sync（?dryRun=1 只校验不写库，?prune=1 顺带删除多余行）
+[SRV]   人员配置: GET /api/people（读） / POST /api/people（新增）→ D:\project\vuetify_approval\vite-project\approval-app\data\people.json
+[SRV]   我的审批: GET /api/mine/orders?tab=pending（按档懒加载，需登录 token）
+[SRV]   超时提醒: POST /api/reminders/run（默认 dry-run；?send=1 真发）
+[SRV]   执行日志: GET /api/reminders/log（「提醒设置」页的「执行日志」板块读它；只记本次启动以来的轮次）
+[SRV] [info]: [ '[ws]', 'ws client ready' ]
+[VUE] 
+[VUE]   [32m[1mVITE[22m v8.2.0[39m  [2mready in [0m[1m1616[22m[2m[0m ms[22m
+[VUE] 
+[VUE]   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3001[22m/[39m
+[VUE] [2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[PB] yarn pb exited with code 1
+--> Sending SIGTERM to other processes..
+[dev.js] concurrently exited: { code: 1, signal: null }

@@ -170,11 +170,13 @@
         <template v-if="edgeExitMode === 'jump'">
           <select v-model="edgeExitTo" class="edge-input" style="width: 196px">
             <option value="">{{ emptyTargetText }}</option>
-            <optgroup v-if="earlyList.length" label="卡片上的「提前跳出」线">
+
+            <optgroup v-if="earlyList.length > 0" label="卡片上的「提前跳出」线">
               <option v-for="e in earlyList" :key="e.id" :value="e.targetId">
                 {{ e.label }}{{ outerLabelOf(e.targetId) }}
               </option>
             </optgroup>
+
             <optgroup label="卡片外的环节">
               <option v-for="t in outerList" :key="t.id" :value="t.id">{{ t.label }}</option>
             </optgroup>
@@ -205,18 +207,14 @@
         </select>
 
         <!--
-          选项树（类别 → 一级 + 二级，与主画布同一口径 / 同一个组件）**不在面板里铺开** ——
-          三层结构会把卡片面板一路撑长，所以整块搬进弹出框（EdgeOptionTreeDialog），
-          这里只留一个入口按钮。
-          ⚠️ 配置是**本审批环节共用的一份**（存在节点上）：本环节各条结果分支点开看到的都是它；
-          且只在本环节已形成结果分支（≥2 条出线）时才有意义 —— 见 edgeHasResultBranches。
+          办理选项已改「审批类型自动匹配」（见 utils/approvalTypes）：不再逐环节配选项树，
+          每一环的办理下拉由审批类型清单统一下发（启用的全部类型）——清单在「审批类型设置」页维护。
+          只在本环节已形成结果分支（≥2 条出线）时提示 —— 见 edgeHasResultBranches。
         -->
-        <button v-if="edgeHasResultBranches" class="edge-btn"
-          title="配置本审批环节的办理选项（类别 → 一级 → 二级；一级的「实际链路」决定实际走哪条线）；同一环节的各条结果分支共用这一份"
-          @click="optionDialog = true">
-          <v-icon size="11">mdi-format-list-bulleted-type</v-icon>
-          <span>配置选项{{ optionSummary }}</span>
-        </button>
+        <span v-if="edgeHasResultBranches" class="edge-note">
+          <v-icon class="mr-1" size="11" style="color: #1d4ed8">mdi-playlist-check</v-icon>
+          办理选项由审批类型清单统一下发（选后按类型模板填、流转按本环节分支线走）
+        </span>
 
         <span class="edge-note">绑结论不是必须的：也可以在下面直接写业务 / 办理期字段的条件</span>
       </div>
@@ -236,13 +234,25 @@
       <div v-for="(c, i) in conditions" :key="i" class="edge-row">
         <!-- 左值：普通情况是字段下拉；配了运算时显示表达式（点铅笔改，见 openMath） -->
         <div v-if="c.lhsExpr" class="edge-expr" :title="c.lhsExpr" @click="openMath(c)">{{ c.lhsExpr }}</div>
-        <input v-else v-model="c.field" class="edge-input" list="card-field-options"
-          placeholder="字段，如 当前环节对应的组别">
+
+        <input
+          v-else
+          v-model="c.field"
+          class="edge-input"
+          list="card-field-options"
+          placeholder="字段，如 当前环节对应的组别"
+        >
 
         <!-- 运算：把几个字段加减乘除后再比较（结论码不参与，见主画布 opsFor 的说明） -->
-        <v-icon-btn v-if="!isResultCondition(c)" class="ml--2" size="x-small"
-          title="编辑运算：用几个字段做加减乘除再比较" variant="text"
-          :color="c.lhsExpr ? 'primary' : undefined" @click="openMath(c)">
+        <v-icon-btn
+          v-if="!isResultCondition(c)"
+          class="ml--2"
+          :color="c.lhsExpr ? 'primary' : undefined"
+          size="x-small"
+          title="编辑运算：用几个字段做加减乘除再比较"
+          variant="text"
+          @click="openMath(c)"
+        >
           <v-icon size="12">mdi-pencil</v-icon>
         </v-icon-btn>
 
@@ -320,16 +330,14 @@
       </div>
     </div>
 
-    <!--
-      办理下拉的选项配置：整棵选项树（类别 → 一级 → 二级）在弹出框里编辑，
-      面板上只留「配置选项」按钮当入口（与主画布同一口径 / 同一个组件）。
-    -->
-    <EdgeOptionTreeDialog :link-options="edgeLinkOptions" :model-value="edgeOptionGroups" :open="optionDialog"
-      @close="optionDialog = false" @update:model-value="commitEdgeOptionGroups" />
-
     <!-- 条件左值的四则运算：与主画布共用同一个弹窗（语法检查 / 字段候选都在组件里） -->
-    <ConditionMathDialog :expr="mathExpr" :fields="FIELD_OPTIONS" :open="mathOpen" @close="mathOpen = false"
-      @save="applyMath" />
+    <ConditionMathDialog
+      :expr="mathExpr"
+      :fields="FIELD_OPTIONS"
+      :open="mathOpen"
+      @close="mathOpen = false"
+      @save="applyMath"
+    />
   </div>
 </template>
 
@@ -340,17 +348,15 @@
   import { type Connection, VueFlow } from '@vue-flow/core'
   import AdjustableEdge from '@/components/flow/AdjustableEdge.vue'
   import ApprovalNode from '@/components/flow/ApprovalNode.vue'
-  import ConditionNode from '@/components/flow/ConditionNode.vue'
-  import EdgeOptionTreeDialog from '@/components/flow/EdgeOptionTreeDialog.vue'
   // 条件左值的「四则运算」弹窗：与主画布共用同一个（校验与候选只写一处）
   import ConditionMathDialog from '@/components/flow/ConditionMathDialog.vue'
+  import ConditionNode from '@/components/flow/ConditionNode.vue'
   import StartEndNode from '@/components/flow/StartEndNode.vue'
   import {
     APPROVAL_RESULTS,
-    type ApprovalOptionGroup,
     type BranchCondition,
-    type ConditionExpr,
     collapseConditionValue,
+    type ConditionExpr,
     FIELD_REF_PREFIX,
     isConditionGroup,
     isResultCondition,
@@ -600,7 +606,7 @@
   function moveBranch (edgeId: string, delta: number) {
     const list = edges.value
     const idx = list.findIndex(e => e.id === edgeId)
-    if (idx < 0) {
+    if (idx === -1) {
       return
     }
     const { source } = list[idx]
@@ -760,40 +766,11 @@
    * 数据层仍兼容它：旧卡片里配过 `options` 的分支照常渲染（见 collectStepOptionItems）。
    */
 
-  /* ===== 选项树（类别 → 一级 + 实际链路 → 二级，见 ApprovalOptionGroup）===== */
-
-  /** 弹出框开关（选项树整块在弹出框里编辑，见 EdgeOptionTreeDialog） */
-  const optionDialog = ref(false)
-
-  /** 选中连线源头的**审批环节节点**：选项树挂在它身上（一个环节一份，见 ApprovalNodeData.optionGroups） */
-  const selectedEdgeApprovalNode = computed(() => (
-    nodes.value.find(n => n.id === selectedEdge.value?.source) ?? null
-  ))
-
-  /** 老数据兜底：选项树以前配在连线上（`edge.data.optionGroups`）；节点没配时读一次 */
-  function legacyEdgeOptionGroups (): ApprovalOptionGroup[] {
-    const edge = selectedEdge.value
-    if (!edge) return []
-    const of = (e: any): ApprovalOptionGroup[] => (Array.isArray(e?.data?.optionGroups) ? e.data.optionGroups : [])
-    const own = of(edge)
-    return own.length > 0 ? own : of(edges.value.find(e => e.source === edge.source && of(e).length > 0))
-  }
-
-  /**
-   * 本**环节**共用（挂在节点上）的选项树 —— 与主画布同一口径
-   * （见 pages/createStream.vue 的 selectedEdgeOptionGroups）。
-   *
-   * 树里每个一级选项自带「实际链路」，能指到本环节任意一条出线 → 一棵树本来就覆盖整个环节。
-   */
-  const edgeOptionGroups = computed<ApprovalOptionGroup[]>(() => {
-    const own = selectedEdgeApprovalNode.value?.data?.optionGroups
-    return Array.isArray(own) ? own : legacyEdgeOptionGroups()
-  })
+  /* ===== 审批类型自动匹配（办理选项统一下发，见 utils/approvalTypes） ===== */
 
   /**
    * 本环节是否已形成**结果分支**（审批节点且 ≥2 条出线）：
-   * 环节级选项树只在这时才有意义（编译时它挂在"审批环节 + 结果分支组"上，与主画布同一口径），
-   * 单出线时配了也不会生效，所以按钮不出现 —— 免得配了却看不到效果。
+   * 「办理选项由审批类型统一下发」的提示只在这时展示（单出线没有"选项走向"可言）。
    */
   const edgeHasResultBranches = computed(() => {
     const src = selectedEdge.value?.source
@@ -801,62 +778,6 @@
     const isApproval = nodes.value.find(n => n.id === src)?.type === 'approval'
     return isApproval && edges.value.filter(e => e.source === src).length > 1
   })
-
-  /** 「配置选项」按钮上的概览：不打开也知道配没配（卡片面板更窄，这行字要短） */
-  const optionSummary = computed(() => {
-    const groups = edgeOptionGroups.value
-    if (groups.length === 0) {
-      return '（未配置）'
-    }
-    const items = groups.reduce((n, g) => n + (g.items?.length ?? 0), 0)
-    return `（已配 ${items} 个一级）`
-  })
-
-  /** 「实际链路」候选 = **本节点各条出线**（结论码 → 分支名/结论文案），与主画布同一口径 */
-  const edgeLinkOptions = computed(() => {
-    const src = selectedEdge.value?.source
-    if (!src) {
-      return []
-    }
-    const out: Array<{ value: string, label: string }> = []
-    const seen = new Set<string>()
-    for (const e of edges.value.filter(x => x.source === src)) {
-      const list = Array.isArray(e.data?.conditions) ? e.data.conditions : []
-      const c = list.find(isResultCondition) as BranchCondition | undefined
-      const code = (c && c.op === 'eq' ? String(c.value ?? '') : '') || 'pass'
-      if (seen.has(code)) {
-        continue
-      }
-      seen.add(code)
-      const name = String(e.label ?? '').trim()
-      out.push({ value: code, label: `${name || APPROVAL_RESULTS.find(r => r.value === code)?.label || code}（${code}）` })
-    }
-    return out
-  })
-
-  /**
-   * 写回选项树：写到**审批环节节点**上（一个环节一份）；空树就删字段。
-   * 老数据配在连线上的那份顺手清掉（内容已写进节点，留着编译时会两处都出选项）。
-   */
-  function commitEdgeOptionGroups (list: ApprovalOptionGroup[]) {
-    const node = selectedEdgeApprovalNode.value
-    if (!node) {
-      return
-    }
-    if (!node.data) {
-      node.data = {}
-    }
-    if (list.length === 0) {
-      delete node.data.optionGroups
-    } else {
-      node.data.optionGroups = list
-    }
-    for (const e of edges.value) {
-      if (e.source === node.id && Array.isArray(e.data?.optionGroups)) {
-        delete e.data.optionGroups
-      }
-    }
-  }
 
   /**
    * 这条出线是不是**审批结果分支**（源节点是审批环节）。
@@ -1120,10 +1041,9 @@
   border-radius: 5px;
 }
 
-/* .edge-btn = 面板上的「配置选项」入口（内容在弹出框里，见 EdgeOptionTreeDialog） */
+/* .edge-del/.edge-add = 面板上的删除/添加条件按钮 */
 .edge-del,
-.edge-add,
-.edge-btn {
+.edge-add {
   display: inline-flex;
   align-items: center;
   gap: 3px;

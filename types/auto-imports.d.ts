@@ -346,9 +346,6 @@ declare global {
   export type { UseApprovalSelectOptions } from '../src/composables/useApprovalSelect'
   import('../src/composables/useApprovalSelect')
   // @ts-ignore
-  export type { SandboxMemo } from '../src/composables/useSandbox'
-  import('../src/composables/useSandbox')
-  // @ts-ignore
   export type { TaskView, TaskResult, TaskRun, TaskStarterOptions, TaskStarter } from '../src/composables/useTaskStarter'
   import('../src/composables/useTaskStarter')
 }

@@ -27,7 +27,7 @@
  * 正交，互不冲突：选项树（`ApprovalNodeData.optionGroups`）管"**摆哪些选项、选中走哪条线**"
  * （叶子的 `link` 就是本文件的 `code`），本文件管"**选中之后要填什么**"。
  */
-import { APPROVAL_RESULTS } from '@/types/approval'
+import { APPROVAL_RESULTS, type ApprovalNodeOption } from '@/types/approval'
 
 /**
  * 字段用哪种**内置控件**渲染。
@@ -679,6 +679,26 @@ export function typeTemplateFromSnapshot (
   code: string,
 ): ApprovalTypeTemplate {
   return snapshot?.[code] ?? defaultTypeTemplateOf(code)
+}
+
+/**
+ * 办理选项清单 = 单据快照里的**审批类型全集**（enabled 的全部）——「审批类型自动匹配」。
+ *
+ * 每一环的办理下拉都摆这份（不再读模板里逐环节配的分支/选项树）；选中后表单按
+ * 类型模板渲染（办理页读快照的既有口径），流转仍按模板分支走 —— 选了这一环没配
+ * 分支的结论会被提交侧拦下并提示。
+ *
+ * 为什么逐码兜底而不全信快照：建单期 slimTypeTemplates 只落「非空壳」的行，
+ * 空壳（= 内置默认）不在快照里 —— 逐码 typeTemplateFromSnapshot（快照缺行回落
+ * 内置默认）才能还原全集；老单（没有 types 快照）拿到的就是纯内置全集。
+ */
+export function enabledTypeOptionsFromSnapshot (
+  snapshot: Record<string, ApprovalTypeTemplate> | undefined,
+): ApprovalNodeOption[] {
+  return APPROVAL_RESULTS
+    .map(r => typeTemplateFromSnapshot(snapshot, r.value))
+    .filter(t => t.enabled !== false)
+    .map(t => ({ text: t.name, result: t.code }))
 }
 
 /** 这条字段当前是否要展示（联动口径见 TypeField.showWhen） */

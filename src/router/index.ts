@@ -66,6 +66,10 @@ const router = createRouter({
       component: () => import('@/pages/approvalModel.vue'),
     },
     {
+      path: '/mockRun',
+      component: () => import('@/pages/mockRun.vue'),
+    },
+    {
       path: '/mine',
       component: () => import('@/pages/mine.vue'),
     },

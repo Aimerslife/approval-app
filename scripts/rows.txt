@@ -1,0 +1,20 @@
+9: <span class="sheet-tab-count">{{ chians.length }}</span>
+58: hide-default-footer hover item-value="name" :items="rows" :loading="loading" open-all>
+168: <div v-if="tab === 'copy' && rows.length" class="mb-1 text-[12px] text-medium-emphasis">
+174: <v-tab v-for="t in sheetTabs" :key="t.value" :value="t.value">
+401: const chians = ref<ApprovalModal[]>([])
+429: const mainChians = computed(() => chians.value.filter(t => !isTemplateCopy(t.name)))
+431: const copyChians = computed(() => chians.value.filter(t => isTemplateCopy(t.name)))
+437: const rows = computed(() => {
+441: return mainChians.value.map(t => ({ ...t, sectionName: String(t.section ?? '').trim() }))
+444: const sheetTabs = computed(() => [
+445: { value: 'main' as const, title: '正本', icon: 'mdi-file-check-outline', count: mainChians.value.length },
+681: const currentNode = chians.value.find(item => item.id === currentId.value)
+708: chians.value = res
+739: const source = chians.value.find(item => item.id === id)
+778: if (chians.value.some(t => t.id !== currentId.value && String(t.name ?? '').trim() === name)) {
+808: ...new Set(mainChians.value.map(t => String(t.section ?? '').trim()).filter(Boolean)),
+813: mainChians.value.filter(t => String(t.section ?? '').trim() === name)
+837: const t = mainChians.value.find(x => x.id === id)
+872: const t = mainChians.value.find(x => x.id === id)
+1046: importName.value = uniqueTemplateName(payload.name, chians.value.map(t => t.name))

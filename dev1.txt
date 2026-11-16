@@ -1,0 +1,10 @@
+﻿yarn run v1.22.22
+node.exe : warning ..\package.json: No license field
+所在位置 C:\Users\10074\AppData\Roaming\npm\yarn.ps1:24 字符: 5
++     & "node$exe"  "$basedir/node_modules/yarn/bin/yarn.js" $args
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning ..\pack...o license field:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+$ node server/dev.js
+Done in 3.20s.

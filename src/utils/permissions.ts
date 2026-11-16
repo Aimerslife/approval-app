@@ -65,6 +65,8 @@ const ROUTE_ROLES: Record<string, AppRole[]> = {
   '/editRule': ADMIN_UP,
   // 「审批类型」设置页（审批模板页的按钮进去）：只有管理员以上能看能编辑
   '/approvalTypeSetting': ADMIN_UP,
+  // 「模拟运行」（/mockRun）：只读演练审批流，但会摊开模板编排/审批人/条件 —— 与审批模板页同档
+  '/mockRun': ADMIN_UP,
 
   // 三档都能进
   '/': ALL_ROLES,

@@ -110,7 +110,13 @@
               <!-- 一批货可能同时交给几个团队：一个团队一行，各带自己接的数量 -->
               <div class="d-flex flex-column ga-1">
                 <div v-for="(r, i) in receivers" :key="i" class="d-flex align-center gap-2">
-                  <v-chip v-if="i === 0" color="primary" label size="x-small" variant="flat">
+                  <v-chip
+                    v-if="i === 0"
+                    color="primary"
+                    label
+                    size="x-small"
+                    variant="flat"
+                  >
                     <span class="text-[9px]">{{ r.pick === 'team' ? '接收部门' : '接收团队' }}</span>
                   </v-chip>
 
@@ -217,14 +223,14 @@
   // 以 headers（产品字段）为 key 生成一条产品信息用于展示，接入真实数据后替换
   import useClipboard from 'vue-clipboard3'
   import { proxyAvatar, sendFeishuCard } from '@/api/api'
-  // 底部办理面板：三处办理入口共用同一份实现（内含 ApprovalHandleForm）
-  import HandleDock from '@/components/approval/HandleDock.vue'
-  // 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
-  import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
-  // 轮询各团队的接收汇总（与办理面板 / 首页详情同一份展示口径）
-  import RotationReceipts from '@/components/approval/RotationReceipts.vue'
   // 办结后时间线上方的「审批信息表」（含导出 PDF）：口径见 utils/approvalSummary
   import ApprovalSummaryTable from '@/components/approval/ApprovalSummaryTable.vue'
+  // 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
+  import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
+  // 底部办理面板：三处办理入口共用同一份实现（内含 ApprovalHandleForm）
+  import HandleDock from '@/components/approval/HandleDock.vue'
+  // 轮询各团队的接收汇总（与办理面板 / 首页详情同一份展示口径）
+  import RotationReceipts from '@/components/approval/RotationReceipts.vue'
   import ApprovalNode from '@/components/ApprovalNode.vue'
   // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
   import FlowEndNote from '@/components/FlowEndNote.vue'
@@ -232,15 +238,13 @@
   import SelectNode from '@/components/streamNodes/SelectNode.vue'
   // 环节办理的落库逻辑（首页抽屉共用同一份，见 composables/useNodeSubmit.ts）
   import { useNodeSubmit } from '@/composables/useNodeSubmit'
-  // 登录用户：右上角「上一个 / 下一个」按他锚定队列（见 queueAnchor，需求口径是"自己名下的单"）
-  import { useUserStore } from '@/stores/user'
   // 组织目录：链路成员瘦身后（见 types/approval 的 slimFlowMembers），email / 部门按 open_id 现查
   import { useAvatarDirectory } from '@/stores/avatarDirectory'
+  // 登录用户：右上角「上一个 / 下一个」按他锚定队列（见 queueAnchor，需求口径是"自己名下的单"）
+  import { useUserStore } from '@/stores/user'
   import {
     APPROVAL_STATUS,
     collectStepNames,
-    collectStepOptionItems,
-    collectStepResultOptions,
     receivedQuantities,
     receiversOf,
   } from '@/types/approval'
@@ -261,6 +265,8 @@
   } from '@/utils/approvalRuntime'
   // 「单子是不是已经审批结束」：详情抽屉与这里共用同一判据（status + 链路待办）
   import { isOrderFinished } from '@/utils/approvalSummary'
+  // 办理选项统一下发：单据快照里的审批类型全集（与办理弹窗同一口径，见 utils/approvalTypes）
+  import { enabledTypeOptionsFromSnapshot, typesFromSnapshot } from '@/utils/approvalTypes'
   // 产品的「总库存数量」等字段：PB 记录 → 界面用的中文 key 对象（唯一入口，别自己读 record.data）
   import { toProductView } from '@/utils/biRowFields'
   import { getApprovalOrder, getApprovalOrderByNo, updateApprovalOrder } from '@/utils/collection'
@@ -443,15 +449,19 @@
   const rotationReceipts = computed(() =>
     rotationReceiptsOf(runtime.value.chain, m => memberDir.detailOf(m).department))
 
+  /** 办理选项清单 = 单据快照里的审批类型全集（enabled），每一环摆同一份 —— 与办理弹窗同一口径 */
+  const typeOptions = computed(() =>
+    enabledTypeOptionsFromSnapshot(typesFromSnapshot(orderDatas.value?.chain?.types)))
+
   const stepResultOptions = computed(() => {
-    const flow = orderDatas.value?.chain?.flow
-    return flow?.length ? collectStepResultOptions(flow) : {}
+    const ids = runtime.value?.stepIds ?? []
+    return Object.fromEntries(ids.map(id => [id, typeOptions.value.map(o => o.result)]))
   })
 
-  /** 各环节的**选项数组**：模板里在审批节点上配的 options，办理下拉框直接用它渲染 */
+  /** 各环节的**选项数组**：审批类型全集（text=类型名、result=结论码），办理下拉框直接用它渲染 */
   const stepOptionItems = computed(() => {
-    const flow = orderDatas.value?.chain?.flow
-    return flow?.length ? collectStepOptionItems(flow) : {}
+    const ids = runtime.value?.stepIds ?? []
+    return Object.fromEntries(ids.map(id => [id, typeOptions.value]))
   })
 
   /**

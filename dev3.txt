@@ -1,0 +1,24 @@
+﻿yarn run v1.22.22
+node.exe : warning ..\package.json: No license field
+所在位置 C:\Users\10074\AppData\Roaming\npm\yarn.ps1:24 字符: 5
++     & "node$exe"  "$basedir/node_modules/yarn/bin/yarn.js" $args
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning ..\pack...o license field:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+$ node server/dev.js
+[dev.js] guard pbAlive = true
+
+⛔ 端口 8091 已经有一个 PocketBase 在服务 —— 多半是上一次的 dev 栈还没停干净
+   （Windows 下直接关窗口并不会结束 concurrently 的进程树），或者 PB 被单独跑着。
+
+   再跑一次 yarn dev 只会连环翻车：vite 悄悄漂到别的端口（超出 PB 的 CORS 白名单，
+   页面请求全失败）、app server EADDRINUSE，然后 concurrently -k 把一切拖死。
+
+   二选一：
+   · 复用现有实例 —— 直接打开 http://localhost:3001 （若 vite 也还活着）；
+   · 停掉旧栈再跑 —— taskkill /IM pocketbase.exe /F 之后照常 yarn dev
+     （vite / app server 通常会随进程树一起消失，若仍在请按同样方式停掉 node）。
+
+error Command failed with exit code 1.
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.

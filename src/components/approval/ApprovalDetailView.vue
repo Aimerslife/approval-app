@@ -2,17 +2,28 @@
   <div class="approval-detail-view d-flex flex-column">
     <div class="detail-head d-flex align-center ga-2 px-3 py-2">
       <span class="text-[14px] font-bold">审批详情</span>
+
       <v-chip v-if="statusMeta && order" :color="statusMeta.color" label size="x-small">
         {{ statusMeta.text }}
       </v-chip>
+
       <v-spacer />
+
       <v-btn v-if="order" size="small" variant="text" @click="goApproval">
         <span class="text-[12px]">打开审批页</span>
       </v-btn>
-      <v-icon-btn v-if="closable" size="x-small" title="关闭" variant="text" @click="emit('close')">
+
+      <v-icon-btn
+        v-if="closable"
+        size="x-small"
+        title="关闭"
+        variant="text"
+        @click="emit('close')"
+      >
         <v-icon size="18">mdi-close</v-icon>
       </v-icon-btn>
     </div>
+
     <v-divider />
     <!-- 没有选中单：我的审批单的卡片模式常驻右栏，没选中时留一块空态，避免整块消失导致布局跳动 -->
     <div v-if="!order" class="detail-empty d-flex flex-column align-center justify-center">
@@ -35,11 +46,26 @@
               <span class="info-value">{{ order.order_no ?? order.id }}</span>
               <!-- 来源标识：内部 / 外部流转（判定口径见 utils/approvalRuntime 的 flowScopeOf） -->
               <FlowScopeChip :scope="flowScope" />
-              <v-icon-btn :disabled="!hasPrev" size="x-small" title="上一条" variant="text" @click="emit('prev')">
+
+              <v-icon-btn
+                :disabled="!hasPrev"
+                size="x-small"
+                title="上一条"
+                variant="text"
+                @click="emit('prev')"
+              >
                 <v-icon size="16">mdi-menu-left</v-icon>
               </v-icon-btn>
+
               <span v-if="positionText" class="info-index">{{ positionText }}</span>
-              <v-icon-btn :disabled="!hasNext" size="x-small" title="下一条" variant="text" @click="emit('next')">
+
+              <v-icon-btn
+                :disabled="!hasNext"
+                size="x-small"
+                title="下一条"
+                variant="text"
+                @click="emit('next')"
+              >
                 <v-icon size="16">mdi-menu-right</v-icon>
               </v-icon-btn>
             </div>
@@ -78,16 +104,29 @@
               时间线按**合并后的节点**渲染：同一审批人连续办理的相邻环节合成一条（见 groupApproverSteps），
               办理时把这一串动作连着办（办完自动接下一环）。
             -->
-            <ApprovalNode v-for="(g, gi) in stepGroups" :key="`${order.id}-${g.stepIds[0] || gi}`"
-              :allowed-options="optionItems[g.stepIds[0]]" :allowed-results="resultOptions[g.stepIds[0]]"
-              :can-handle="g.indexes.includes(currentStep)" :data="g.steps[0]"
-              :discard-segment-size="discardMarkOf(g, discardMarks)?.size" hide-handle
-              :in-discard-segment="discardMarkOf(g, discardMarks)?.seq" :index="g.indexes[0]" :length="chain.length"
+            <ApprovalNode
+              v-for="(g, gi) in stepGroups"
+              :key="`${order.id}-${g.stepIds[0] || gi}`"
+              :allowed-options="optionItems[g.stepIds[0]]"
+              :allowed-results="resultOptions[g.stepIds[0]]"
+              :can-handle="g.indexes.includes(currentStep)"
+              :data="g.steps[0]"
+              :discard-segment-size="discardMarkOf(g, discardMarks)?.size"
+              hide-handle
+              :in-discard-segment="discardMarkOf(g, discardMarks)?.seq"
+              :index="g.indexes[0]"
+              :length="chain.length"
               :next-steps="nextStepsOf(g, optionItems, resultOptions)"
-              :option-context="optionContextOf(order, chain, g.indexes[0])" :prev-time="g.startTimes[0]"
-              :receiver-team="receiverTeam" :remaining-qty="remainingQty" :start-time="order.created"
+              :option-context="optionContextOf(order, chain, g.indexes[0])"
+              :prev-time="g.startTimes[0]"
+              :receiver-team="receiverTeam"
+              :remaining-qty="remainingQty"
+              :start-time="order.created"
               :step-name="stepNameOf(g.stepIds[0])"
-              :stock-amount="stockAmount" :stock-qty="stockQty" :type-templates="order.chain?.types" />
+              :stock-amount="stockAmount"
+              :stock-qty="stockQty"
+              :type-templates="order.chain?.types"
+            />
 
             <!-- 时间线最后一条：流转为什么停下（与审批页同一口径） -->
             <FlowEndNote :end="flowEnd" />
@@ -97,10 +136,20 @@
 
       <!-- 办理面板钉在底部：在滚动区之外，内容再长也始终可见 -->
       <div class="detail-dock">
-        <HandleDock :chain="chain" :current-step="currentStep" :groups="stepGroups" mode="dialog"
-          :option-items="optionItems" :order="order" :receiver-team="receiverTeam" :remaining-qty="remainingQty"
-          :result-options="resultOptions" :stock-amount="stockAmount" :stock-qty="stockQty"
-          @submit="payload => emit('submit', payload)">
+        <HandleDock
+          :chain="chain"
+          :current-step="currentStep"
+          :groups="stepGroups"
+          mode="dialog"
+          :option-items="optionItems"
+          :order="order"
+          :receiver-team="receiverTeam"
+          :remaining-qty="remainingQty"
+          :result-options="resultOptions"
+          :stock-amount="stockAmount"
+          :stock-qty="stockQty"
+          @submit="payload => emit('submit', payload)"
+        >
           <template #extra>
             <SelectNode :disabled="readonly" @select="payload => emit('select', payload)" />
           </template>
@@ -111,243 +160,241 @@
 </template>
 
 <script setup lang="ts">
-import type { UserBrief } from '@/api/api'
-import type { ApprovalChainItem, ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
-import { useRouter } from 'vue-router'
-// 办理面板：与审批页共用（内含 ApprovalHandleForm）
-import HandleDock from '@/components/approval/HandleDock.vue'
-// 轮询各团队的接收汇总（与办理面板 / 审批页同一份展示口径）
-import RotationReceipts from '@/components/approval/RotationReceipts.vue'
-// 办结后的「审批信息表」（含导出 PDF）：与审批页同一个组件、同一份数据
-import ApprovalSummaryTable from '@/components/approval/ApprovalSummaryTable.vue'
-import ApprovalNode from '@/components/ApprovalNode.vue'
-// 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
-import FlowEndNote from '@/components/FlowEndNote.vue'
-import GoodsInfo from '@/components/GoodsInfo.vue'
-// 抄送 / 转办：选人组件，与审批页共用同一份
-// 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
-import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
-import SelectNode from '@/components/streamNodes/SelectNode.vue'
-import {
-  APPROVAL_STATUS,
-  collectStepNames,
-  collectStepOptionItems,
-  collectStepResultOptions,
-  receivedQuantities,
-} from '@/types/approval'
-import { APPROVAL_STAGE_META, approvalStageOf } from '@/utils/approvalFilters'
-// 条件求值上下文（建单快照优先）：算剩余接收数量、取「平台」快照都要用它，与流程引擎同源
-import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
-// 「单子是不是已经审批结束」：与审批页共用同一判据（status + 链路待办）
-import { isOrderFinished } from '@/utils/approvalSummary'
-import {
-  discardMarkOf,
-  discardMarksOf,
-  flowScopeOf,
-  groupApproverSteps,
-  lastHandledOf,
-  mainOf,
-  nextStepsOf,
-  rotationReceiptsOf,
-  runtimeOf,
-  stepStartTimesOf,
-} from '@/utils/approvalRuntime'
-// PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
-import { toProductView } from '@/utils/biRowFields'
-// 组织目录（按 open_id 补全成员的 department）：固定接收环节的分组名靠它（见下面 rotationReceipts）
-import { useAvatarDirectory } from '@/stores/avatarDirectory'
-import { formatDate } from '@/utils/utils'
+  import type { UserBrief } from '@/api/api'
+  import type { ApprovalChainItem, ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
+  import { useRouter } from 'vue-router'
+  // 办结后的「审批信息表」（含导出 PDF）：与审批页同一个组件、同一份数据
+  import ApprovalSummaryTable from '@/components/approval/ApprovalSummaryTable.vue'
+  // 抄送 / 转办：选人组件，与审批页共用同一份
+  // 订单号旁的「内部 / 外部流转」标识（可见范围与判定口径见组件与 utils/approvalRuntime）
+  import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
+  // 办理面板：与审批页共用（内含 ApprovalHandleForm）
+  import HandleDock from '@/components/approval/HandleDock.vue'
+  // 轮询各团队的接收汇总（与办理面板 / 审批页同一份展示口径）
+  import RotationReceipts from '@/components/approval/RotationReceipts.vue'
+  import ApprovalNode from '@/components/ApprovalNode.vue'
+  // 时间线最后一条：流转为什么停下（见 types/approval 的 FlowEndInfo）
+  import FlowEndNote from '@/components/FlowEndNote.vue'
+  import GoodsInfo from '@/components/GoodsInfo.vue'
+  import SelectNode from '@/components/streamNodes/SelectNode.vue'
+  // 组织目录（按 open_id 补全成员的 department）：固定接收环节的分组名靠它（见下面 rotationReceipts）
+  import { useAvatarDirectory } from '@/stores/avatarDirectory'
+  import {
+    APPROVAL_STATUS,
+    collectStepNames,
+    receivedQuantities,
+  } from '@/types/approval'
+  import { APPROVAL_STAGE_META, approvalStageOf } from '@/utils/approvalFilters'
+  // 条件求值上下文（建单快照优先）：算剩余接收数量、取「平台」快照都要用它，与流程引擎同源
+  import { flowContextOfOrder, optionContextOf, receiverTeamOf } from '@/utils/approvalFlow'
+  import {
+    discardMarkOf,
+    discardMarksOf,
+    flowScopeOf,
+    groupApproverSteps,
+    lastHandledOf,
+    mainOf,
+    nextStepsOf,
+    rotationReceiptsOf,
+    runtimeOf,
+    stepStartTimesOf,
+  } from '@/utils/approvalRuntime'
+  // 「单子是不是已经审批结束」：与审批页共用同一判据（status + 链路待办）
+  import { isOrderFinished } from '@/utils/approvalSummary'
+  // 办理选项的统一下发口径：单据快照里的审批类型全集（见 utils/approvalTypes 的边界说明）
+  import { enabledTypeOptionsFromSnapshot, typesFromSnapshot } from '@/utils/approvalTypes'
+  // PB 的 bi_rows 记录（含 data 快照）→ 界面用的中文 key 产品对象
+  import { toProductView } from '@/utils/biRowFields'
+  import { formatDate } from '@/utils/utils'
 
-/**
- * 审批详情（首页抽屉 / 我的审批单右栏共用）。
- *
- * 以前两处各写一份：首页在 v-navigation-drawer 里、我的审批单在右栏 v-sheet 里，
- * 时间线和办理选项的计算几乎逐行重复 —— 改一处口径（比如合并节点、弃置段标注、
- * 接收数量的账）另一处就漂。现在计算**全部收在这里**，两边只给：
- *   · `order`（选中的单）；
- *   · 上下条是否可用（各自的列表行序不同，由调用方算）；
- *   · `closable` / `readonly`（是否显示关闭、是否禁用抄送与转办）。
- * 办理、抄送、转办的落库仍由调用方通过事件接（各自的 useNodeSubmit / useApprovalSelect 实例）。
- */
-interface DetailViewProps {
-  /** 选中的审批单；null = 没选中（显示空态） */
-  order?: ApprovalOrder | null
-  /** 当前列表里有没有上/下一条（由调用方按它自己的行序算） */
-  hasPrev?: boolean
-  hasNext?: boolean
   /**
-   * 这一单在列表里的位置（1 起）与列表总数 → 单号旁边显示「1/12」。
-   * 位置由调用方算：首页按筛选后的表格行、我的审批单按当前板块的行，与上/下一条同一套行序。
-   * 传 0 / 不传就不显示这个计数（比如列表还没加载出来）。
-   */
-  index?: number
-  total?: number
-  /** 显示右上角关闭按钮（首页抽屉、我的审批单历史板块点行打开时用） */
-  closable?: boolean
-  /**
-   * 只读：把「抄送 / 转办」一起置灰。
+   * 审批详情（首页抽屉 / 我的审批单右栏共用）。
    *
-   * 历史审批单（已办结 / 已不在我这一环）只做查看，不能再往流程里塞抄送人或转办。
-   * 办理按钮不用这里管：HandleDock 内部本来就按「当前环节是不是我」自己判断可用性。
+   * 以前两处各写一份：首页在 v-navigation-drawer 里、我的审批单在右栏 v-sheet 里，
+   * 时间线和办理选项的计算几乎逐行重复 —— 改一处口径（比如合并节点、弃置段标注、
+   * 接收数量的账）另一处就漂。现在计算**全部收在这里**，两边只给：
+   *   · `order`（选中的单）；
+   *   · 上下条是否可用（各自的列表行序不同，由调用方算）；
+   *   · `closable` / `readonly`（是否显示关闭、是否禁用抄送与转办）。
+   * 办理、抄送、转办的落库仍由调用方通过事件接（各自的 useNodeSubmit / useApprovalSelect 实例）。
    */
-  readonly?: boolean
-}
-
-const props = withDefaults(defineProps<DetailViewProps>(), {
-  order: null,
-  hasPrev: false,
-  hasNext: false,
-  index: 0,
-  total: 0,
-  closable: false,
-  readonly: false,
-})
-
-const emit = defineEmits<{
-  submit: [payload: NodeSubmitPayload]
-  select: [payload: { action: 'cc' | 'transfer', user: UserBrief }]
-  close: []
-  prev: []
-  next: []
-}>()
-
-const router = useRouter()
-
-/** 运行期视图（链路 / 当前环节 / 结束依据）：与页面表格、审批页同一份实现 */
-const runtime = computed(() => (props.order ? runtimeOf(props.order) : null))
-const chain = computed<ApprovalChainItem[][]>(() => runtime.value?.chain ?? [])
-const stepIds = computed(() => runtime.value?.stepIds ?? [])
-const currentStep = computed(() => runtime.value?.currentStep ?? -1)
-const flowEnd = computed(() => runtime.value?.end)
-
-/** 单据是否已审批结束（决定归档表出不出来）：与审批页共用同一判据 */
-const finished = computed(() => isOrderFinished(props.order))
-
-/**
- * 「组间轮询」里各团队已接多少（只读展示，与办理面板同一个口径）。
- *
- * 放在详情里而不只在办理弹窗：审批人打开一张单先判断"要不要接、还能接多少"，
- * 这一步往往发生在点「办理」之前 —— 只在办理面板里给出，等于要先点开才知道。
- *
- * 部门补全必须带（与审批页 / 办理面板同一口径）：**模板把第一棒接收配成固定环节**时
- * 那一环没有 `role.dept`，组名只能按 open_id 从组织目录现查 —— 不带补全时那一行整个丢失
- * （实测：美1组先接 50 件、之后轮询美2/美3 组，面板只剩后两组）。
- */
-const memberDir = useAvatarDirectory()
-void memberDir.ensure()
-const rotationReceipts = computed(() =>
-  rotationReceiptsOf(chain.value, m => memberDir.detailOf(m).department))
-
-const startTimes = computed(() =>
-  props.order ? stepStartTimesOf(props.order, chain.value) : [],
-)
-
-/** 同一审批人连续办理的相邻环节合并成一条节点（与审批页 / 首页同一口径） */
-const stepGroups = computed(() =>
-  groupApproverSteps(chain.value, stepIds.value, startTimes.value),
-)
-
-/*
- * 时间线**只画到当前待办**为止（与 rebuildChain 的选路口径一致）。
- * 曾经在这里按默认线把"还没走到"的环节也画出来，但业务口径是：还没审批的单不展示后续环节 ——
- * 后面的走向本来就取决于这一环怎么选，画出来反而会误导。
- */
-
-/** 弃置审批段的标注（与 chain 下标一一对应，口径集中在 utils/approvalRuntime） */
-const discardMarks = computed(() =>
-  discardMarksOf({
-    chain: chain.value,
-    stepIds: stepIds.value,
-    flow: props.order?.chain?.flow,
-  }),
-)
-
-/** 各环节可选的审批结论 / 办理选项（取模板里该环节配置的那份） */
-const resultOptions = computed(() => {
-  const flow = props.order?.chain?.flow
-  return flow?.length ? collectStepResultOptions(flow) : {}
-})
-const optionItems = computed(() => {
-  const flow = props.order?.chain?.flow
-  return flow?.length ? collectStepOptionItems(flow) : {}
-})
-
-/**
- * 各环节的**名字**（模板画布上给这一环起的标题）：时间线卡片显示「这是哪一环」用。
- * chain 只带成员、名字只在 flow 上（见 types/approval 的 collectStepNames）。
- */
-const stepNames = computed(() => {
-  const flow = props.order?.chain?.flow
-  return flow?.length ? collectStepNames(flow) : {}
-})
-
-/** 环节名兜底：存量单的轮询环没存名字，靠 id 的 `#N` 后缀标出「第 N 环」 */
-function stepNameOf (stepId?: string) {
-  const id = String(stepId ?? '')
-  const hit = stepNames.value[id]
-  if (hit) {
-    return hit
+  interface DetailViewProps {
+    /** 选中的审批单；null = 没选中（显示空态） */
+    order?: ApprovalOrder | null
+    /** 当前列表里有没有上/下一条（由调用方按它自己的行序算） */
+    hasPrev?: boolean
+    hasNext?: boolean
+    /**
+     * 这一单在列表里的位置（1 起）与列表总数 → 单号旁边显示「1/12」。
+     * 位置由调用方算：首页按筛选后的表格行、我的审批单按当前板块的行，与上/下一条同一套行序。
+     * 传 0 / 不传就不显示这个计数（比如列表还没加载出来）。
+     */
+    index?: number
+    total?: number
+    /** 显示右上角关闭按钮（首页抽屉、我的审批单历史板块点行打开时用） */
+    closable?: boolean
+    /**
+     * 只读：把「抄送 / 转办」一起置灰。
+     *
+     * 历史审批单（已办结 / 已不在我这一环）只做查看，不能再往流程里塞抄送人或转办。
+     * 办理按钮不用这里管：HandleDock 内部本来就按「当前环节是不是我」自己判断可用性。
+     */
+    readonly?: boolean
   }
-  const m = /#(\d+)$/.exec(id)
-  return m ? `第 ${m[1]} 环` : ''
-}
 
-/** 流转范围（订单号旁的「内部 / 外部流转」标识）：整条办理流水是否跨部门，见 utils/approvalRuntime 的 flowScopeOf */
-const flowScope = computed(() => (props.order ? flowScopeOf(props.order) : null))
+  const props = withDefaults(defineProps<DetailViewProps>(), {
+    order: null,
+    hasPrev: false,
+    hasNext: false,
+    index: 0,
+    total: 0,
+    closable: false,
+    readonly: false,
+  })
 
-/** 接收数量的账：总库存数量 / 已接收 / 剩余（与流程引擎共用，见 receivedQuantities） */
-const qtyLedger = computed(() =>
-  receivedQuantities(props.order?.chain?.decisions ?? [], flowContextOfOrder(props.order)),
-)
-const stockQty = computed(() =>
-  String(qtyLedger.value.total ?? toProductView(props.order?.expand?.relation)['总库存数量'] ?? ''),
-)
-const remainingQty = computed(() =>
-  (qtyLedger.value.remaining === undefined ? '' : qtyLedger.value.remaining),
-)
-const stockAmount = computed(() =>
-  String(toProductView(props.order?.expand?.relation)['总库存金额'] ?? ''),
-)
-/** 本单所属团队（按快照里的「组别」反查团队表）：接收组别候选限定在它之内 */
-const receiverTeam = computed(() => receiverTeamOf(props.order))
+  const emit = defineEmits<{
+    submit: [payload: NodeSubmitPayload]
+    select: [payload: { action: 'cc' | 'transfer', user: UserBrief }]
+    close: []
+    prev: []
+    next: []
+  }>()
 
-/** 头部的状态 chip：与表格 / 时间线同一套展示口径（含「卡住」那一档） */
-const statusMeta = computed(() => {
-  const order = props.order
-  if (!order) {
-    return null
-  }
-  const stage = approvalStageOf(
-    order.status ?? APPROVAL_STATUS.PENDING,
-    order.chain?.decisions,
-    runtime.value?.end?.kind,
+  const router = useRouter()
+
+  /** 运行期视图（链路 / 当前环节 / 结束依据）：与页面表格、审批页同一份实现 */
+  const runtime = computed(() => (props.order ? runtimeOf(props.order) : null))
+  const chain = computed<ApprovalChainItem[][]>(() => runtime.value?.chain ?? [])
+  const stepIds = computed(() => runtime.value?.stepIds ?? [])
+  const currentStep = computed(() => runtime.value?.currentStep ?? -1)
+  const flowEnd = computed(() => runtime.value?.end)
+
+  /** 单据是否已审批结束（决定归档表出不出来）：与审批页共用同一判据 */
+  const finished = computed(() => isOrderFinished(props.order))
+
+  /**
+   * 「组间轮询」里各团队已接多少（只读展示，与办理面板同一个口径）。
+   *
+   * 放在详情里而不只在办理弹窗：审批人打开一张单先判断"要不要接、还能接多少"，
+   * 这一步往往发生在点「办理」之前 —— 只在办理面板里给出，等于要先点开才知道。
+   *
+   * 部门补全必须带（与审批页 / 办理面板同一口径）：**模板把第一棒接收配成固定环节**时
+   * 那一环没有 `role.dept`，组名只能按 open_id 从组织目录现查 —— 不带补全时那一行整个丢失
+   * （实测：美1组先接 50 件、之后轮询美2/美3 组，面板只剩后两组）。
+   */
+  const memberDir = useAvatarDirectory()
+  void memberDir.ensure()
+  const rotationReceipts = computed(() =>
+    rotationReceiptsOf(chain.value, m => memberDir.detailOf(m).department))
+
+  const startTimes = computed(() =>
+    props.order ? stepStartTimesOf(props.order, chain.value) : [],
   )
-  return APPROVAL_STAGE_META[stage]
-})
 
-/** 当前待办环节的负责人；已办结取最后一条已办的人（与表格「当前审批人」同口径） */
-const approverName = computed(() => {
-  const rt = runtime.value
-  if (!rt) {
-    return '—'
+  /** 同一审批人连续办理的相邻环节合并成一条节点（与审批页 / 首页同一口径） */
+  const stepGroups = computed(() =>
+    groupApproverSteps(chain.value, stepIds.value, startTimes.value),
+  )
+
+  /*
+   * 时间线**只画到当前待办**为止（与 rebuildChain 的选路口径一致）。
+   * 曾经在这里按默认线把"还没走到"的环节也画出来，但业务口径是：还没审批的单不展示后续环节 ——
+   * 后面的走向本来就取决于这一环怎么选，画出来反而会误导。
+   */
+
+  /** 弃置审批段的标注（与 chain 下标一一对应，口径集中在 utils/approvalRuntime） */
+  const discardMarks = computed(() =>
+    discardMarksOf({
+      chain: chain.value,
+      stepIds: stepIds.value,
+      flow: props.order?.chain?.flow,
+    }),
+  )
+
+  /** 各环节可选的审批结论 / 办理选项：统一由单据快照里的审批类型清单下发（enabled 全集，每一环同一份） */
+  const typeOptions = computed(() =>
+    enabledTypeOptionsFromSnapshot(typesFromSnapshot(props.order?.chain?.types)))
+  const resultOptions = computed(() =>
+    Object.fromEntries(stepIds.value.map(id => [id, typeOptions.value.map(o => o.result)])))
+  const optionItems = computed(() =>
+    Object.fromEntries(stepIds.value.map(id => [id, typeOptions.value])))
+
+  /**
+   * 各环节的**名字**（模板画布上给这一环起的标题）：时间线卡片显示「这是哪一环」用。
+   * chain 只带成员、名字只在 flow 上（见 types/approval 的 collectStepNames）。
+   */
+  const stepNames = computed(() => {
+    const flow = props.order?.chain?.flow
+    return flow?.length ? collectStepNames(flow) : {}
+  })
+
+  /** 环节名兜底：存量单的轮询环没存名字，靠 id 的 `#N` 后缀标出「第 N 环」 */
+  function stepNameOf (stepId?: string) {
+    const id = String(stepId ?? '')
+    const hit = stepNames.value[id]
+    if (hit) {
+      return hit
+    }
+    const m = /#(\d+)$/.exec(id)
+    return m ? `第 ${m[1]} 环` : ''
   }
-  const name = (rt.currentStep >= 0 ? mainOf(rt.chain[rt.currentStep]) : lastHandledOf(rt.chain))?.name
-  return name || '—'
-})
 
-/** 单号旁边的「1/12」：位置和总数都有效才显示（index 从 0 起算的调用方请先 +1） */
-const positionText = computed(() => {
-  if (props.total <= 0 || props.index <= 0) {
-    return ''
+  /** 流转范围（订单号旁的「内部 / 外部流转」标识）：整条办理流水是否跨部门，见 utils/approvalRuntime 的 flowScopeOf */
+  const flowScope = computed(() => (props.order ? flowScopeOf(props.order) : null))
+
+  /** 接收数量的账：总库存数量 / 已接收 / 剩余（与流程引擎共用，见 receivedQuantities） */
+  const qtyLedger = computed(() =>
+    receivedQuantities(props.order?.chain?.decisions ?? [], flowContextOfOrder(props.order)),
+  )
+  const stockQty = computed(() =>
+    String(qtyLedger.value.total ?? toProductView(props.order?.expand?.relation)['总库存数量'] ?? ''),
+  )
+  const remainingQty = computed(() =>
+    (qtyLedger.value.remaining === undefined ? '' : qtyLedger.value.remaining),
+  )
+  const stockAmount = computed(() =>
+    String(toProductView(props.order?.expand?.relation)['总库存金额'] ?? ''),
+  )
+  /** 本单所属团队（按快照里的「组别」反查团队表）：接收组别候选限定在它之内 */
+  const receiverTeam = computed(() => receiverTeamOf(props.order))
+
+  /** 头部的状态 chip：与表格 / 时间线同一套展示口径（含「卡住」那一档） */
+  const statusMeta = computed(() => {
+    const order = props.order
+    if (!order) {
+      return null
+    }
+    const stage = approvalStageOf(
+      order.status ?? APPROVAL_STATUS.PENDING,
+      order.chain?.decisions,
+      runtime.value?.end?.kind,
+    )
+    return APPROVAL_STAGE_META[stage]
+  })
+
+  /** 当前待办环节的负责人；已办结取最后一条已办的人（与表格「当前审批人」同口径） */
+  const approverName = computed(() => {
+    const rt = runtime.value
+    if (!rt) {
+      return '—'
+    }
+    const name = (rt.currentStep >= 0 ? mainOf(rt.chain[rt.currentStep]) : lastHandledOf(rt.chain))?.name
+    return name || '—'
+  })
+
+  /** 单号旁边的「1/12」：位置和总数都有效才显示（index 从 0 起算的调用方请先 +1） */
+  const positionText = computed(() => {
+    if (props.total <= 0 || props.index <= 0) {
+      return ''
+    }
+    return `${props.index}/${props.total}`
+  })
+
+  /** 「打开审批页」：带单号跳转，审批页按 order_no 定位（见 pages/approvalPage） */
+  function goApproval () {
+    const no = props.order?.order_no ?? props.order?.id
+    router.push({ path: '/approvalPage', query: no ? { order_no: no } : {} })
   }
-  return `${props.index}/${props.total}`
-})
-
-/** 「打开审批页」：带单号跳转，审批页按 order_no 定位（见 pages/approvalPage） */
-function goApproval() {
-  const no = props.order?.order_no ?? props.order?.id
-  router.push({ path: '/approvalPage', query: no ? { order_no: no } : {} })
-}
 </script>
 
 <style lang="scss" scoped>
