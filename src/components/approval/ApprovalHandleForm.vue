@@ -174,13 +174,7 @@
 
     <div v-if="!chained" class="d-flex align-center ga-2">
       <v-spacer />
-      <!-- 回退上一级：替代原来下拉里的「驳回」（见 handleRejectBack） -->
-      <v-btn v-if="canRejectBack" :disabled="submitting || waitingNext" size="small" variant="tonal"
-        @click="handleRejectBack" color="error">
-        驳回
-      </v-btn>
-
-      <!-- 有中间态预览环时，点一次会把后续几环一起推进 —— 文案要说清楚（行为见 submitQueue） -->
+      <!-- 驳回（回退上级）的入口在办理条标题行的「办理」旁边（HandleDock），表单里不再重复摆 -->
       <v-btn color="primary" :disabled="waitingNext" :loading="submitting || waitingNext" size="small"
         :text="waitingNext ? '正在进入下一环节…' : '提交'"
         variant="tonal" @click="handleConfirm" />
@@ -336,7 +330,7 @@ const emit = defineEmits<{
  * 「驳回」的结论码：必须与保存期注入的驳回分支条件
  * （`{ field: 'result', op: 'eq', value: 'reject' }`）一致。
  *
- * 声明放在最前：下面的 computed（optionItems / canRejectBack）在 **setup 期间**
+ * 声明放在最前：下面的 computed（optionItems）在 **setup 期间**
  * 就会被 immediate watch 触发求值，声明在后会撞 TDZ（Cannot access before initialization）。
  */
 const REJECT_RESULT = 'reject'
@@ -575,7 +569,7 @@ const optionItems = computed<ApprovalNodeOption[]>(() => {
   const offered = filterOfferedOptions(raw, props.optionContext)
 
   /*
-   * 「驳回」不再作为办理下拉里的选项：回退交回按钮区的「回退上级」（见 handleRejectBack）。
+   * 「驳回」不再作为办理下拉里的选项：回退入口在办理条标题行的「驳回」按钮（HandleDock）。
    * 但**过滤光了要退回原样** —— 有些老模板只配了驳回一条出线，去掉就彻底无路可走了。
    *
    * （2026-11-16：审批类型清单**不再参与办理选项过滤** —— 那是 mockRun 沙盒的独立功能，
@@ -583,19 +577,6 @@ const optionItems = computed<ApprovalNodeOption[]>(() => {
    */
   const withoutReject = offered.filter(o => o.result !== REJECT_RESULT)
   return withoutReject.length > 0 ? withoutReject : offered
-})
-
-/**
- * 本环节有没有「回退上一级」出口 —— 按钮「回退上级」据此显示 / 隐藏。
- *
- * 判据：模板给这一环配了 reject 分支（保存期会把它绑成 loopBackTo 回退），
- * 或环节级选项树标了 canReject（那条分支不在树里，见 ApprovalNodeOption.canReject）。
- * 看的是**未过滤**的选项：reject 已从下拉里摘掉，但出口本身还在。
- */
-const canRejectBack = computed(() => {
-  const step = activeStep.value
-  const raw = step?.allowedOptions?.length ? step.allowedOptions : []
-  return raw.some(o => o.result === REJECT_RESULT || (o.nodeLevel && o.canReject))
 })
 
 /**
@@ -1252,7 +1233,7 @@ const pickedGroups = computed<ApprovalOptionGroup[]>(() => selectedOption.value?
  *
  * 「驳回」不再出现在这里：
  *   · 树里配了 link=reject 的叶子一并滤掉；
- *   · 以前给环节级树补的那条「其它 / 驳回」也不再补（见 canRejectBack —— 回退改由按钮承担）。
+ *   · 以前给环节级树补的那条「其它 / 驳回」也不再补（回退入口在办理条标题行，见 HandleDock）。
  * 全被滤光时退回原清单：宁可多摆一个，也不能让办理人无路可走。
  */
 const optionMenuItems = computed(() => {
@@ -1976,32 +1957,6 @@ async function handleConfirm() {
 
   submitting.value = true
   submitQueue(queue)
-}
-
-/**
- * 回退上级：等价于以「驳回」结论提交本环 —— 模板里那条分支要么回退到上一个别人办的环节
- * （loopBackTo），要么直接终结流程。
- *
- * 以前它是办理下拉里的一个选项，现在挪到提交旁边（业务要求，见模板按钮区）；
- * 因此这里不校验下拉与类型字段，意见写了下就带上。
- */
-function handleRejectBack () {
-  if (submitting.value || waitingNext.value) return
-  const step = activeStep.value
-  if (!step) {
-    return
-  }
-  formError.value = ''
-  opinionError.value = ''
-  submitting.value = true
-  submitQueue([{
-    index: step.index,
-    result: REJECT_RESULT,
-    result_label: '回退上级',
-    extra: {},
-    opinion: opinion.value.trim(),
-    files: attachment.value ? [attachment.value] : [],
-  }])
 }
 
 /**
