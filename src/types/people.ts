@@ -95,6 +95,36 @@ export function normalizePeople (raw: unknown): PersonRow[] {
 }
 
 /**
+ * 「修改团队所属部门」的校验。返回**给人看的问题描述**，没问题返回 null。
+ *
+ * 团队名是这一行的**唯一键**（见 personKey），所以这里只按它定位行、不判重；
+ * 新部门允许是清单里没出现过的（与「新增团队」的 combobox 同口径，直接输入即新建）。
+ *
+ * @param group 待改的团队名
+ * @param nextParent 新部门
+ * @param list 整份清单（定位行用）
+ */
+export function findDeptChangeProblem (
+  group: unknown,
+  nextParent: unknown,
+  list: readonly { group: string }[],
+): string | null {
+  const target = String(group ?? '').trim()
+  const dept = String(nextParent ?? '').trim()
+  if (!target) {
+    return '缺少团队名'
+  }
+  if (!dept) {
+    return '请选择新部门'
+  }
+  const key = personKey(target)
+  if (!list.some(o => personKey(o.group) === key)) {
+    return `团队「${target}」不在人员配置里，可能已被删除`
+  }
+  return null
+}
+
+/**
  * 新增一行时的校验。返回**给人看的问题描述**，没问题返回 null。
  *
  * @param draft  待新增的草稿（字段都可空，逐个报）

@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url'
  * 两边各写一套的结局一定是"前端放行、服务端拒"或反过来，而且报错口径还不一样。
  */
 import {
+  findDeptChangeProblem,
   findPersonProblem,
   normalizePeople,
   normalizePersonRow,
+  personKey,
   type PersonRow,
 } from '../src/types/people'
 
@@ -58,6 +60,31 @@ export async function addPerson (raw: unknown): Promise<PersonRow[]> {
   }
 
   const next = [...list, row]
+  await writePeople(next)
+  return next
+}
+
+/**
+ * 修改某个团队的所属部门并落盘，返回写完之后的整份清单。
+ *
+ * 只动这一行的 `parent`：团队名、审批人都不变。团队挪过去之后：
+ *   · 部门审批人按部门挂接（utils/groupApprovers 的 attachDeptApprovers），
+ *     前端重新合并一次就自动显示**新部门**的审批人；
+ *   · 新部门若还没有负责人，部门审批人显示「—」，和「新增团队」时的口径一致。
+ *
+ * 失败一律抛带中文原因的 Error（团队不存在 / 部门没填），调用方原样回给页面。
+ */
+export async function updatePersonDept (raw: unknown): Promise<PersonRow[]> {
+  const body = (raw ?? {}) as Record<string, unknown>
+  const list = await readPeople()
+  // 校验与前端同一口径（types/people 的 findDeptChangeProblem）
+  const problem = findDeptChangeProblem(body.group, body.parent, list)
+  if (problem) {
+    throw new Error(problem)
+  }
+  const key = personKey(body.group)
+  const dept = String(body.parent).trim()
+  const next = list.map(row => (personKey(row.group) === key ? { ...row, parent: dept } : row))
   await writePeople(next)
   return next
 }

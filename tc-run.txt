@@ -1,0 +1,5 @@
+yarn run v1.22.22
+warning ..\package.json: No license field
+$ vue-tsc --build --force
+[vue-router] No rootDir specified. Set it in the Volar plugin options or tsconfig compilerOptions.rootDir for proper typed routes.
+Done in 16.27s.

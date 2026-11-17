@@ -101,6 +101,14 @@ export default defineConfig({
       ignored: [
         '**/auth-state.json',
         '**/pocketbase/**',
+        /*
+         * 运行期数据目录：app server 会写 data/people.json（角色设置 → 人员配置），
+         * 而 utils/organazation.ts 静态 import 了它 —— 不排除的话，**页面里每次保存
+         * （改部门 / 新增团队 / 恢复默认）都会在写盘瞬间触发 vite 热更新**，正在操作
+         * 的页面被整页 reload：刚弹出的成功提示被刷掉，表象是「保存成功但看不到提示」。
+         * 页面数据本来就走 /api/people 接口，不依赖这层热更新。
+         */
+        '**/data/**',
       ],
     },
     proxy: {

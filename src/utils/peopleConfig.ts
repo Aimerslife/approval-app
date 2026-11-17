@@ -78,3 +78,26 @@ export async function addPersonRow (row: PersonRow): Promise<PersonRow[]> {
   applyPeopleConfig(rows)
   return rows
 }
+
+/**
+ * 修改某个团队的所属部门：写服务端那份 JSON，并把**写完之后**的整份清单应用到内存。
+ *
+ * 只动这一行的 `parent`。内存表换掉之后，部门审批人挂接、同部门团队（sameTeamGroups）
+ * 等按部门推导的口径全部自动跟随新部门，不需要刷新页面。
+ *
+ * 失败时抛带原因的 Error（团队不存在 / 部门没填），调用方原样展示即可。
+ */
+export async function updatePersonDept (group: string, parent: string): Promise<PersonRow[]> {
+  const res = await fetch(ENDPOINT, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group, parent }),
+  })
+  const body = await res.json().catch(() => null) as PeopleResponse | null
+  if (!res.ok || body?.code !== 0) {
+    throw new Error(body?.msg || `保存失败（HTTP ${res.status}）`)
+  }
+  const rows = normalizePeople(body?.data)
+  applyPeopleConfig(rows)
+  return rows
+}

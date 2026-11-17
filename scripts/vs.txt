@@ -1,0 +1,6 @@
+﻿1131: import { CONDITION_FIELD_OPTIONS } from '@/utils/conditionFields'
+1219: const FIELD_OPTIONS = CONDITION_FIELD_OPTIONS
+1324: * 保存时由 utils/approvalFlow.ts 转成 ApprovalBranch.exitTo，并在那里校验目标是否合法。
+2254: * 拖多了的第三条给个明显不合法的名字，交给保存期校验报错。
+2399: * 所以拖线时自动命名、保存时再校验一次，不让用户手写。
+3350: /* ===== 保存校验失败：提示条 + 环节上的错误条 + 出错的连线 ===== */

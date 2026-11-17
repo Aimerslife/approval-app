@@ -1,0 +1,25 @@
+﻿1: import type {
+2: ApprovalBranch,
+3: ApprovalChainItem,
+4: ApprovalFlow,
+5: ApprovalFlowBranchNode,
+6: ApprovalFlowStep,
+7: ApprovalNodeData,
+8: ApprovalOptionGroup,
+9: BranchCondition,
+10: ConditionExpr,
+11: FlowContext, LoopNodeData, ProbeNodeData, ProbeSpec, RefNodeData, RotationSpec,
+12: } from '../types/approval'
+13: import { APPROVAL_RESULTS, branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, normalizeOptionGroups, normalizeOptionTexts, uid } from '../types/approval'
+14: import { findBadProbe } from './approvalProbe'
+15: import { collectRotations, findBadRotation } from './approvalRotation'
+16: import { deriveFlowFields } from './biRowFields'
+17: /*
+18: * 卡片内部那张小画布 → 子流程（见 loopCardGraph 的说明）。
+19: * 这里与 loopCardGraph 是**互相 import** 的（它要调本文件的 graphToFlowFrom 转换内部图），
+20: * 但两处都只在函数体里调用，ESM 的循环依赖完全没问题（模块初始化时谁都不碰对方的值）。
+21: */
+22: import { cardGraphToSteps } from './loopCardGraph'
+23: // 「跳出循环 / 轮完走向」的候选类型（审批 / 提醒 / 引用模板 / 轮询）：与编辑器下拉**共用同一份**口径
+24: import { isExitTargetNode } from './exitTargets'
+25: // 团队表反查：「接收团队」的候选限定在本单所属部门内（纯数据模块，不参与成环）

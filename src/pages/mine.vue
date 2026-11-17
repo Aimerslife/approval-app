@@ -39,7 +39,7 @@
           @apply="applyHistoryFilters" @patch="patchHistoryFilters" @reset="resetHistoryFilters" />
         <v-divider />
         <!-- 首屏 / 切档取数：表格上方一条细进度条（表格自带的 loading 在表头下面，行少时不明显） -->
-        <v-progress-linear v-if="tabLoading" class="mt-1" color="primary" height="2" indeterminate />
+        <!-- <v-progress-linear v-if="tabLoading" class="mt-1" color="primary" height="2" indeterminate /> -->
         <v-data-table v-model:page="historyPage" border class="text-[12px] mine-table" density="compact" fixed-footer
           fixed-header :headers="historyHeaders" hover :items="historyFilteredRows" :items-per-page="historyPerPage"
           :loading="tabLoading" striped="odd" @click:row="handleRowClick">

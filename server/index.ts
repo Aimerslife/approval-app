@@ -4,7 +4,7 @@ import * as lark from '@larksuiteoapi/node-sdk'
 import Database from 'better-sqlite3'
 // 推送规则（「提醒设置」页面配的那份）：默认值 + 记录→规则的映射，与前端**共用同一份**
 // （纯函数模块，服务端引它不会拖进任何前端依赖，见 utils/pushRules 的文件头）
-import { pushRulesFromRecord, type PushRules } from '../src/utils/pushRules'
+import { type PushRules, pushRulesFromRecord } from '../src/utils/pushRules'
 import { fetchBiToken, runBiSync, uploadRows } from './biSync'
 // 全部配置统一从 server/config.ts 取（env 只在那里读一次、默认值只有一份、启动即校验）
 import { assertRequiredKeys, config, configSummary, optionalWarnings } from './config'
@@ -14,7 +14,7 @@ import { loadedEnvFiles } from './env'
 import { readMineOrders } from './mineOrders'
 import { deleteApprovalOrder, deleteOrdersByScope } from './orderDelete'
 // 人员配置（团队 → 默认审批人）的落盘读写：数据只有一份 data/people.json，见 server/people.ts
-import { addPerson, PEOPLE_FILE_PATH, readPeople } from './people'
+import { addPerson, PEOPLE_FILE_PATH, readPeople, updatePersonDept } from './people'
 import { purgeBiData as runPurgeBiData } from './purgeData'
 // 跑批执行日志（进程内环形缓冲）：「提醒设置」页的「执行日志」板块读它，见 server/reminderLog.ts
 import { readReminderRuns, recordReminderRun, type ReminderTrigger } from './reminderLog'
@@ -705,7 +705,7 @@ http.createServer(async (req, res) => {
           json(res, 200, {
             code: 0,
             // 该用户没挂任何部门：部门信息全空，但**企业名照样给**
-            //（企业名是写死的常量，与有没有部门无关；给空串会让这一栏莫名空白）
+            // （企业名是写死的常量，与有没有部门无关；给空串会让这一栏莫名空白）
             data: {
               department_id: '',
               department_name: '',
@@ -796,7 +796,7 @@ http.createServer(async (req, res) => {
           .replace(/<[^>]*>/g, '')
           .replace(/&nbsp;/gi, ' ')
           .replace(/&quot;/gi, '"')
-          .replace(/&#39;|&apos;/gi, "'")
+          .replace(/&#39;|&apos;/gi, '\'')
           .replace(/&lt;/gi, '<')
           .replace(/&gt;/gi, '>')
           .replace(/&amp;/gi, '&')
@@ -810,13 +810,13 @@ http.createServer(async (req, res) => {
           msg: 'success',
           data: { hitokoto: text, author: '', source: '毒鸡汤' },
         })
-      } catch (err: any) {
+      } catch (error: any) {
         /*
          * 上游挂了也要给一句话：这是**装饰文案**，登录页不该因为第三方接口出错就空着。
          * 兜底**用同样的字段名**（hitokoto/author/source），前端只认一套字段。
          * 不想要兜底就把下面的 json 换回 502 —— 前端允许拿不到（getWord 返回 undefined）。
          */
-        console.warn('[Word] 获取一言失败，用内置兜底:', err?.message ?? err)
+        console.warn('[Word] 获取一言失败，用内置兜底:', error?.message ?? error)
         const words = [
           { hitokoto: '流水不争先，争的是滔滔不绝。', author: '内置兜底', source: '' },
           { hitokoto: '路虽远行则将至，事虽难做则必成。', author: '内置兜底', source: '' },
@@ -1203,6 +1203,20 @@ http.createServer(async (req, res) => {
       return
     }
 
+    // PATCH /api/people —— 修改某个团队的所属部门（body: { group, parent }）。
+    //   「角色设置 → 人员配置 → 改部门」走这里；只动那一行的 parent，其余字段保持不变。
+    if (pathname === '/api/people' && req.method === 'PATCH') {
+      try {
+        const body = await readBody(req)
+        const rows = await updatePersonDept(body)
+        console.log(`[People] 团队「${String(body?.group ?? '')}」部门改为「${String(body?.parent ?? '')}」（共 ${rows.length} 条）`)
+        json(res, 200, { code: 0, data: rows })
+      } catch (error: any) {
+        json(res, 400, { code: -1, msg: error?.message || '保存失败' })
+      }
+      return
+    }
+
     // ─── 健康检查 ──────────────────────────────
     res.writeHead(200, { 'Content-Type': 'text/plain;charset=utf-8' })
     res.end('feishu ws running')
@@ -1234,7 +1248,7 @@ http.createServer(async (req, res) => {
   console.log(`  企业部门: GET /api/feishu/user-org?open_id=xxx`)
   console.log(`  发送卡片: POST /api/feishu/send-card`)
   console.log(`  BI 同步: POST /api/bi/sync（?dryRun=1 只校验不写库，?prune=1 顺带删除多余行）`)
-  console.log(`  人员配置: GET /api/people（读） / POST /api/people（新增）→ ${PEOPLE_FILE_PATH}`)
+  console.log(`  人员配置: GET /api/people（读） / POST /api/people（新增） / PATCH /api/people（改部门）→ ${PEOPLE_FILE_PATH}`)
   console.log(`  我的审批: GET /api/mine/orders?tab=pending（按档懒加载，需登录 token）`)
   console.log(`  超时提醒: POST /api/reminders/run（默认 dry-run；?send=1 真发）`)
   console.log(`  执行日志: GET /api/reminders/log（「提醒设置」页的「执行日志」板块读它；只记本次启动以来的轮次）`)

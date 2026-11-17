@@ -1,0 +1,9 @@
+STEP 首行团队原部门 = TK
+PASS 取到首行原部门
+PASS 弹窗打开且标题带团队名
+PASS 表格部门列更新为临时部门 — 探针临时部门
+FAIL snackbar 提示已移至
+PASS people.json 已落盘新部门
+PASS 已还原为原部门 — TK
+PASS 部门没变时静默关弹窗（无成功提示） — dialog=0 hint=0
+PASS people.json 数据已还原（parent|group 序列一致）

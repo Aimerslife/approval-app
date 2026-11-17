@@ -13,44 +13,79 @@
           <span class="text-[13px] text-medium-emphasis">
             <b class="text-primary">{{ data.length }}</b> 位成员</span>
         </div>
-        <v-text-field v-model="search" density="compact" hide-details clearable class="filter-input" label="搜索成员"
-          prepend-inner-icon="mdi-magnify" single-line style="max-width: 300px" variant="outlined" />
+
+        <v-text-field
+          v-model="search"
+          class="filter-input"
+          clearable
+          density="compact"
+          hide-details
+          label="搜索成员"
+          prepend-inner-icon="mdi-magnify"
+          single-line
+          style="max-width: 300px"
+          variant="outlined"
+        />
       </div>
+
       <v-divider />
-      <v-data-table v-model:page="page" density="compact" :headers="headers" hover :items="data" class="text-[12px]"
-        :items-per-page="itemsPerPage" :loading="memberLoading" :search="search">
+
+      <v-data-table
+        v-model:page="page"
+        class="text-[12px]"
+        density="compact"
+        :headers="headers"
+        hover
+        :items="data"
+        :items-per-page="itemsPerPage"
+        :loading="memberLoading"
+        :search="search"
+      >
         <template #item.avatar_url="{ value }">
           <v-avatar color="primary" size="30" variant="tonal">
             <v-img v-if="value" :src="value" />
             <v-icon v-else icon="mdi-account" size="20" />
           </v-avatar>
         </template>
+
         <template #item.name="{ value }">
           <span class="text-[13px] font-semibold">{{ value }}</span>
         </template>
+
         <template #item.role="{ value }">
           <v-chip color="primary" label size="small" variant="tonal">{{ roleName(value) }}</v-chip>
         </template>
+
         <template #item.permission="{ item }">
           <div class="d-flex flex-wrap justify-center ga-1">
             <span v-for="p in permissionsOf(item)" :key="p.key" class="text-[12px] text-medium-emphasis">
               {{ p.title }}</span>
           </div>
         </template>
+
         <template #item.department="{ value }">
           <span class="text-[13px]">{{ value }}</span>
         </template>
+
         <template #item.status="{ value }">
           <v-chip :color="value === 1 ? 'success' : value === 2 ? 'warning' : 'error'" size="small" variant="tonal">
             {{ value == 1 ? '通过' : value == 2 ? '驳回' : '待审批' }}
           </v-chip>
         </template>
+
         <template #item.action="{ item }">
-          <v-icon-btn color="primary" icon="mdi-clipboard-edit-outline" size="30" title="权限变更" variant="tonal"
-            @click="goEdit(item)">
+          <v-icon-btn
+            color="primary"
+            icon="mdi-clipboard-edit-outline"
+            size="30"
+            title="权限变更"
+            variant="tonal"
+            @click="goEdit(item)"
+          >
             <v-icon size="16" />
           </v-icon-btn>
         </template>
+
         <template #bottom>
           <div class="d-flex justify-center py-2">
             <v-pagination v-model="page" active-color="primary" density="compact" :length="pageCount" />
@@ -61,35 +96,99 @@
     <!-- 团队 → 默认审批人：数据在 data/people.json（页面上的「新增团队」直接写它，见 utils/peopleConfig） -->
     <div class="my-5 px-1">
       <div class="font-bold block-title">人员配置</div>
+
       <div class="text-[12px] text-medium-emphasis mt-1">
         管理团队默认审批人；部门审批人按部门维护（同部门的团队共用）。
         团队清单维护在 <code>{{ PEOPLE_JSON_PATH }}</code>，新增会直接写进这份文件
       </div>
     </div>
+
     <v-sheet class="overflow-hidden card-border px-4 pt-4 pb-2" rounded="15">
       <div class="d-flex align-center flex-wrap ga-4 pr-5 pl-2 pt-1 pb-3">
         <div class="flex-grow-1">
           <span class="text-[13px] text-medium-emphasis">
             <b class="text-primary">{{ approverRows.length }}</b> 个团队</span>
+
           <span v-if="customCount" class="text-[12px] text-medium-emphasis ml-2">
             · 团队已改 <b class="text-primary">{{ customCount }}</b> 个</span>
+
           <span v-if="deptCustomCount" class="text-[12px] text-medium-emphasis ml-2">
             · 部门已改 <b class="text-primary">{{ deptCustomCount }}</b> 个</span>
         </div>
-        <v-btn color="primary" prepend-icon="mdi-account-plus-outline" size="small" variant="flat"
-          @click="openAddPerson">新增团队</v-btn>
-        <v-text-field v-model="approverSearch" clearable density="compact" hide-details class="filter-input"
-          label="搜索团队 / 审批人" prepend-inner-icon="mdi-magnify" single-line style="max-width: 260px" variant="outlined" />
+
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-account-plus-outline"
+          size="small"
+          variant="flat"
+          @click="openAddPerson"
+        >新增团队</v-btn>
+
+        <v-text-field
+          v-model="approverSearch"
+          class="filter-input"
+          clearable
+          density="compact"
+          hide-details
+          label="搜索团队 / 审批人"
+          prepend-inner-icon="mdi-magnify"
+          single-line
+          style="max-width: 260px"
+          variant="outlined"
+        />
       </div>
+
       <v-divider />
-      <v-data-table class="text-[12px]" density="compact" :headers="approverHeaders" hover :items="approverRows"
-        :items-per-page="10" :items-per-page-options="[10, 20, 50]" :loading="approverLoading" :search="approverSearch">
+
+      <v-data-table
+        class="text-[12px]"
+        density="compact"
+        :headers="approverHeaders"
+        hover
+        :items="approverRows"
+        :items-per-page="10"
+        :items-per-page-options="[10, 20, 50]"
+        :loading="approverLoading"
+        :search="approverSearch"
+      >
+        <!-- 上级部门：hover 出铅笔，点击就地变文本框（回车/失焦保存，Esc 取消；写 data/people.json，见 saveDeptEdit） -->
+        <template #item.parent="{ item }">
+          <v-text-field
+            v-if="deptEditGroup === item.group"
+            v-model="deptEditDraft"
+            autofocus
+            class="dept-inline-input"
+            density="compact"
+            hide-details
+            :loading="deptSaving"
+            placeholder="新部门"
+            single-line
+            variant="outlined"
+            @blur="onDeptBlur"
+            @keydown.enter="onDeptEnter"
+            @keydown.esc.prevent="deptEditGroup = ''"
+          />
+          <div v-else class="d-flex align-center ga-1">
+            <span class="text-[12px]">{{ item.parent }}</span>
+            <v-icon-btn
+              aria-label="修改部门"
+              class="dept-pencil"
+              icon="mdi-pencil-outline"
+              size="x-small"
+              title="修改部门"
+              variant="text"
+              @click="openDeptEdit(item)"
+            />
+          </div>
+        </template>
+
         <template #item.manager="{ item }">
           <div class="d-flex align-center ga-2">
             <v-avatar color="primary" size="28" variant="tonal">
               <v-img v-if="item.avatar" :alt="item.manager" :src="item.avatar" />
               <span v-else class="text-[12px] font-weight-semibold">{{ item.manager?.slice(0, 1) }}</span>
             </v-avatar>
+
             <div class="d-flex flex-column">
               <span class="text-[13px] font-semibold">{{ item.manager || '—' }}</span>
               <span v-if="item.email" class="text-[11px] text-medium-emphasis">{{ item.email }}</span>
@@ -100,54 +199,100 @@
         <template #item.deptManager="{ item }">
           <div class="d-flex align-center ga-2">
             <span class="text-[13px] font-semibold">{{ item.deptManager || '—' }}</span>
+
             <v-chip v-if="item.deptSource === 'custom'" color="primary" size="x-small" variant="tonal">
               已改
             </v-chip>
+
             <v-btn size="x-small" variant="text" @click="openDeptPicker(item)">更换</v-btn>
-            <v-btn v-if="item.deptSource === 'custom'" size="x-small" variant="text"
-              @click="resetDeptApprover(item)">恢复默认</v-btn>
+
+            <v-btn
+              v-if="item.deptSource === 'custom'"
+              size="x-small"
+              variant="text"
+              @click="resetDeptApprover(item)"
+            >恢复默认</v-btn>
           </div>
         </template>
+
         <template #item.source="{ value }">
           <v-chip :color="value === 'custom' ? 'primary' : undefined" size="x-small" variant="tonal">
             {{ value === 'custom' ? '已改' : '默认' }}
           </v-chip>
         </template>
+
         <template #item.action="{ item }">
           <div class="d-flex justify-center ga-1">
             <v-btn color="primary" size="small" variant="tonal" @click="openPicker(item)">更换</v-btn>
-            <v-btn v-if="item.source === 'custom'" size="x-small" variant="text"
-              @click="resetApprover(item)">恢复默认</v-btn>
+
+            <v-btn
+              v-if="item.source === 'custom'"
+              size="x-small"
+              variant="text"
+              @click="resetApprover(item)"
+            >恢复默认</v-btn>
           </div>
         </template>
       </v-data-table>
     </v-sheet>
+
     <div class="my-5 px-1">
       <div class="font-bold block-title">仓库配置</div>
       <div class="text-[12px] text-medium-emphasis mt-1">管理仓库对应类型</div>
     </div>
+
     <v-sheet class="overflow-hidden card-border px-4 pt-4 pb-2" rounded="15">
       <div class="d-flex align-center flex-wrap ga-4 pr-5 pl-2 pt-1 pb-3">
         <div class="flex-grow-1 d-flex align-center ga-2">
           <span class="text-[13px] text-medium-emphasis">
             <b class="text-primary">{{ warehouseRows.length }}</b> 个仓库</span>
         </div>
+
         <v-btn v-if="warehouseCustom" size="small" variant="text" @click="askResetWarehouses">恢复默认</v-btn>
-        <v-btn color="primary" prepend-icon="mdi-plus" size="small" variant="flat"
-          @click="openWarehouseAdd">新增仓库</v-btn>
-        <v-text-field v-model="warehouseSearch" clearable density="compact" hide-details class="filter-input"
-          label="搜索分类 / 仓库名" prepend-inner-icon="mdi-magnify" single-line style="max-width: 240px" variant="outlined" />
+
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-plus"
+          size="small"
+          variant="flat"
+          @click="openWarehouseAdd"
+        >新增仓库</v-btn>
+
+        <v-text-field
+          v-model="warehouseSearch"
+          class="filter-input"
+          clearable
+          density="compact"
+          hide-details
+          label="搜索分类 / 仓库名"
+          prepend-inner-icon="mdi-magnify"
+          single-line
+          style="max-width: 240px"
+          variant="outlined"
+        />
       </div>
+
       <v-divider />
-      <v-data-table class="text-[12px]" density="compact" :headers="warehouseHeaders" hover :items="warehouseRows"
-        :items-per-page="10" :items-per-page-options="[10, 20, 50]" :loading="warehouseLoading"
-        :search="warehouseSearch">
+
+      <v-data-table
+        class="text-[12px]"
+        density="compact"
+        :headers="warehouseHeaders"
+        hover
+        :items="warehouseRows"
+        :items-per-page="10"
+        :items-per-page-options="[10, 20, 50]"
+        :loading="warehouseLoading"
+        :search="warehouseSearch"
+      >
         <template #item.parent="{ value }">
-          <v-chip size="small" label variant="tonal" color="info">{{ value }}</v-chip>
+          <v-chip color="info" label size="small" variant="tonal">{{ value }}</v-chip>
         </template>
+
         <template #item.name="{ value }">
           <span class="text-[12px]">{{ value }}</span>
         </template>
+
         <template #item.action="{ item }">
           <div class="d-flex justify-center ga-1">
             <v-btn color="primary" size="small" variant="tonal" @click="openWarehouseEdit(item)">编辑</v-btn>
@@ -156,6 +301,7 @@
         </template>
       </v-data-table>
     </v-sheet>
+
     <v-dialog v-model="warehouseDialog" max-width="520">
       <v-card class="overflow-hidden" rounded="xl">
         <v-card-title class="d-flex align-center justify-space-between px-6 py-4">
@@ -163,23 +309,44 @@
             <v-avatar color="primary" size="28" variant="tonal">
               <v-icon icon="mdi-warehouse" size="16" />
             </v-avatar>
+
             <span class="text-[15px] font-bold">{{ warehouseEditing ? '编辑仓库' : '新增仓库' }}</span>
           </div>
+
           <v-icon-btn icon="mdi-close" size="small" variant="text" @click="warehouseDialog = false" />
         </v-card-title>
+
         <v-divider />
+
         <v-card-text class="px-6 py-5 d-flex align-center gap-2">
-          <v-combobox v-model="warehouseDraft.parent" class="w-[60px] filter-input" density="compact"
-            hide-details="auto" :items="warehouseParents" label="上级分类" placeholder="如：本地仓 / 中转仓 / 海外仓 / 平台仓"
-            variant="outlined">
+          <v-combobox
+            v-model="warehouseDraft.parent"
+            class="w-[60px] filter-input"
+            density="compact"
+            hide-details="auto"
+            :items="warehouseParents"
+            label="上级分类"
+            placeholder="如：本地仓 / 中转仓 / 海外仓 / 平台仓"
+            variant="outlined"
+          >
             <template #message>
               <span class="text-[11px]">可以直接输入新的分类名，保存后它也会出现在候选里</span>
             </template>
           </v-combobox>
-          <v-text-field v-model="warehouseDraft.name" density="compact" class="filter-input" hide-details="auto"
-            label="仓库名" placeholder="如：广州仓 / FBA仓" variant="outlined" />
+
+          <v-text-field
+            v-model="warehouseDraft.name"
+            class="filter-input"
+            density="compact"
+            hide-details="auto"
+            label="仓库名"
+            placeholder="如：广州仓 / FBA仓"
+            variant="outlined"
+          />
         </v-card-text>
+
         <v-divider />
+
         <v-card-actions class="px-6 py-3">
           <v-spacer />
           <v-btn variant="text" @click="warehouseDialog = false">取消</v-btn>
@@ -187,32 +354,44 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
     <v-dialog v-model="confirmOpen" max-width="460">
       <v-card class="overflow-hidden" rounded="xl">
         <v-card-title class="d-flex align-center ga-2 px-6 py-4">
           <v-avatar :color="confirmKind === 'reset' ? 'warning' : 'error'" size="28" variant="tonal">
             <v-icon size="16">{{ confirmKind === 'reset' ? 'mdi-backup-restore' : 'mdi-delete-outline' }}</v-icon>
           </v-avatar>
+
           <span class="text-[15px] font-semibold">
             {{ confirmKind === 'reset' ? '恢复默认仓库清单' : '删除仓库' }}
           </span>
         </v-card-title>
+
         <v-divider />
+
         <v-card-text class="px-6 py-5 text-[13px]">
           <template v-if="confirmKind === 'reset'">
             将清空维护表里的 <b>{{ warehouseRows.length }}</b> 条记录
           </template>
+
           <template v-else>
             确定删除「<b>{{ confirmTarget?.parent }}</b> / <b>{{ confirmTarget?.name }}</b>」吗？
             删除后新建的审批单里不会再出现它。
           </template>
         </v-card-text>
+
         <v-divider />
+
         <v-card-actions class="px-6 py-3">
           <v-spacer />
           <v-btn variant="text" @click="closeConfirm">取消</v-btn>
-          <v-btn :color="confirmKind === 'reset' ? 'warning' : 'error'" :loading="confirmLoading" variant="flat"
-            @click="runConfirm">确定</v-btn>
+
+          <v-btn
+            :color="confirmKind === 'reset' ? 'warning' : 'error'"
+            :loading="confirmLoading"
+            variant="flat"
+            @click="runConfirm"
+          >确定</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -225,6 +404,7 @@
             <v-avatar color="primary" size="28" variant="tonal">
               <v-icon icon="mdi-account-switch-outline" size="16" />
             </v-avatar>
+
             <span class="text-[15px] font-bold">
               更换「{{ picking?.name }}」的{{ picking?.kind === 'dept' ? '部门审批人' : '默认审批人' }}
             </span>
@@ -254,6 +434,7 @@
 
             <div class="d-flex flex-column">
               <span class="text-[13px] font-semibold">{{ picked.name }}</span>
+
               <span class="text-[11px] text-medium-emphasis">
                 {{ picked.department_path || picked.department || '—' }}
                 <template v-if="picked.email"> · {{ picked.email }}</template>
@@ -267,7 +448,14 @@
         <v-card-actions class="px-6 py-3">
           <v-spacer />
           <v-btn variant="text" @click="pickerOpen = false">取消</v-btn>
-          <v-btn color="primary" :disabled="!picked" :loading="saving" variant="flat" @click="savePicked">保存</v-btn>
+
+          <v-btn
+            color="primary"
+            :disabled="!picked"
+            :loading="saving"
+            variant="flat"
+            @click="savePicked"
+          >保存</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -284,6 +472,7 @@
             <v-avatar color="primary" size="28" variant="tonal">
               <v-icon icon="mdi-account-plus-outline" size="16" />
             </v-avatar>
+
             <span class="text-[15px] font-bold">新增团队</span>
           </div>
 
@@ -295,15 +484,30 @@
         <v-card-text class="px-6 py-4">
           <div class="d-flex ga-3">
             <!-- combobox：部门可以直接输入新的（新建部门时没人能选） -->
-            <v-combobox v-model="addDraft.parent" class="filter-input h-[28px]" density="compact" :items="deptOptions"
-              label="上级部门" placeholder="选已有部门，或直接输入新部门" variant="outlined">
+            <v-combobox
+              v-model="addDraft.parent"
+              class="filter-input h-[28px]"
+              density="compact"
+              :items="deptOptions"
+              label="上级部门"
+              placeholder="选已有部门，或直接输入新部门"
+              variant="outlined"
+            >
               <template #message>
                 <span class="text-[11px]">同部门的团队共用「部门审批人」；新部门请顺手在 JSON 里补 parentManager</span>
               </template>
             </v-combobox>
 
-            <v-text-field v-model="addDraft.group" class="filter-input" density="compact" hide-details="auto" single-line 
-              label="团队名" placeholder="如：美4组" variant="outlined" />
+            <v-text-field
+              v-model="addDraft.group"
+              class="filter-input"
+              density="compact"
+              hide-details="auto"
+              label="团队名"
+              placeholder="如：美4组"
+              single-line
+              variant="outlined"
+            />
           </div>
 
           <div class="text-[12px] text-medium-emphasis mt-4 mb-2">
@@ -327,10 +531,27 @@
       </v-card>
     </v-dialog>
 
-    <!-- 改数据的结果要有反馈，不能静默 -->
-    <v-snackbar v-model="hint.show" :color="hint.color" location="top" timeout="3000" variant="tonal">
-      {{ hint.text }}
-    </v-snackbar>
+    <!--
+      改团队所属部门不再走弹窗：表格「上级部门」列 hover 出铅笔，点击就地变文本框，
+      回车 / 失焦保存、Esc 取消（见模板 #item.parent 与 saveDeptEdit）。
+      数据链路不变：PATCH /api/people 写 data/people.json，只挪 parent，
+      挪完后台重合并一次，「部门审批人」自动变成新部门的那个人（没配则显示 —）。
+    -->
+
+    <!--
+      改数据的结果要有反馈，不能静默。
+      自绘 toast 替代 v-snackbar：普通 DOM + transition + fixed 定位，渲染行为完全可控，
+      视觉保持 tonal 色板；showHint 里负责 3 秒自动关闭。
+    -->
+    <transition name="hint-fade">
+      <div v-if="hint.show" class="hint-toast" :class="`hint-toast--${hint.color}`" role="status">
+        <v-icon
+          :icon="hint.color === 'success' ? 'mdi-check-circle-outline' : hint.color === 'error' ? 'mdi-alert-circle-outline' : 'mdi-alert-outline'"
+          size="16"
+        />
+        <span>{{ hint.text }}</span>
+      </div>
+    </transition>
 
     <!-- 权限变更弹窗 -->
     <v-dialog v-model="model" max-width="560">
@@ -357,9 +578,20 @@
 
           <v-radio-group v-model="currentRole" class="role-radio" hide-details>
             <div class="d-flex flex-column ga-2">
-              <div v-for="r in roleList" :key="r.key" class="role-option"
-                :class="{ 'role-option-active': currentRole === r.key }" @click="currentRole = r.key">
-                <v-radio color="primary" class="ma-0" hide-details :ripple="false" :value="r.key">
+              <div
+                v-for="r in roleList"
+                :key="r.key"
+                class="role-option"
+                :class="{ 'role-option-active': currentRole === r.key }"
+                @click="currentRole = r.key"
+              >
+                <v-radio
+                  class="ma-0"
+                  color="primary"
+                  hide-details
+                  :ripple="false"
+                  :value="r.key"
+                >
                   <template #label>
                     <div class="d-flex flex-column ml-2">
                       <span class="text-[13px] font-semibold">{{ r.title }}</span>
@@ -370,7 +602,13 @@
 
                 <v-spacer />
 
-                <v-chip v-if="currentRole === r.key" color="primary" label size="x-small" variant="tonal">当前</v-chip>
+                <v-chip
+                  v-if="currentRole === r.key"
+                  color="primary"
+                  label
+                  size="x-small"
+                  variant="tonal"
+                >当前</v-chip>
               </div>
             </div>
           </v-radio-group>
@@ -380,613 +618,708 @@
           </div>
 
           <div class="perms-box px-3 py-2">
-            <v-checkbox v-for="p in rolePermission" :key="p.key" class="perms-checkbox" color="primary"
-              density="compact" hide-details :model-value="true" readonly>
+            <v-checkbox
+              v-for="p in rolePermission"
+              :key="p.key"
+              class="perms-checkbox"
+              color="primary"
+              density="compact"
+              hide-details
+              :model-value="true"
+              readonly
+            >
               <template #label>
                 <span class="text-[13px]">{{ p.title }}</span>
               </template>
             </v-checkbox>
           </div>
         </v-card-text>
+
         <v-divider />
+
         <v-card-actions class="px-6 py-3">
           <v-spacer />
-          <v-btn color="primary" rounded="lg" size="small" text="取消" variant="tonal" @click="model = false" />
-          <v-btn color="primary" rounded="lg" size="small" text="确认变更" :loading="updating" @click="handleUpdate" />
+
+          <v-btn
+            color="primary"
+            rounded="lg"
+            size="small"
+            text="取消"
+            variant="tonal"
+            @click="model = false"
+          />
+
+          <v-btn
+            color="primary"
+            :loading="updating"
+            rounded="lg"
+            size="small"
+            text="确认变更"
+            @click="handleUpdate"
+          />
         </v-card-actions>
       </v-card>
     </v-dialog>
   </v-container>
 </template>
 <script lang="ts" setup>
-import OrgTree from '@/components/OrgTree.vue'
-import type { OrgSelectPayload, OrgSelectedUser } from '@/components/OrgTree.vue'
-/*
- * 人员配置的落库口：数据只有一份 data/people.json（见 types/people 的文件头）。
- * addPersonRow 会经 app server 写文件、并把写完的整份清单换进内存表 ——
- * 于是「换人」那种 PB 覆盖值与本页新增的默认值能在同一张表里并列显示。
- */
-import { addPersonRow } from '@/utils/peopleConfig'
-import { findPersonProblem, PEOPLE_JSON_PATH } from '@/types/people'
-import {
-  deleteDeptApproverOverride,
-  deleteGroupApproverOverride,
-  getDeptApproverOverrides,
-  getGroupApproverOverrides,
-  getUserInfo,
-  loadWarehouses,
-  resetWarehouses,
-  saveDeptApprover,
-  saveGroupApprover,
-  saveWarehouses,
-  updateUserRole,
-  WAREHOUSE_SETUP_ERROR,
-  type UserInfo,
-} from '@/utils/collection'
-import {
-  attachDeptApprovers,
-  countCustom,
-  defaultDeptApproverRows,
-  defaultGroupApproverRows,
-  mergeDeptApprovers,
-  mergeGroupApprovers,
-  type ApproverDisplayRow,
-  type DeptApproverRow,
-} from '@/utils/groupApprovers'
-/*
- * 角色档位的**唯一事实源**：下面 roleList 的 key 与中文名都从这里取。
- * 之前这张页自己抄了一份，多出个 `admin`、还把 `approval` 标成「审批人员」——
- * 选「管理员」写进库的是 `admin`，而路由守卫 normalizeRole('admin') 会把它归成最低档，
- * 权限静默失效（见 roleList 上的说明）。
- */
-import { normalizeRole, ROLE_LABELS, type AppRole } from '@/utils/permissions'
-import {
-  cleanWarehouse,
-  findBadWarehouse,
-  warehouseKey,
-  type WarehouseRow,
-} from '@/utils/warehouse'
+  import type { OrgSelectedUser, OrgSelectPayload } from '@/components/OrgTree.vue'
+  import OrgTree from '@/components/OrgTree.vue'
+  import { findDeptChangeProblem, findPersonProblem, PEOPLE_JSON_PATH } from '@/types/people'
+  import {
+    deleteDeptApproverOverride,
+    deleteGroupApproverOverride,
+    getDeptApproverOverrides,
+    getGroupApproverOverrides,
+    getUserInfo,
+    loadWarehouses,
+    resetWarehouses,
+    saveDeptApprover,
+    saveGroupApprover,
+    saveWarehouses,
+    updateUserRole,
+    type UserInfo,
+    WAREHOUSE_SETUP_ERROR,
+  } from '@/utils/collection'
+  import {
+    type ApproverDisplayRow,
+    attachDeptApprovers,
+    countCustom,
+    defaultDeptApproverRows,
+    defaultGroupApproverRows,
+    type DeptApproverRow,
+    mergeDeptApprovers,
+    mergeGroupApprovers,
+  } from '@/utils/groupApprovers'
+  /*
+   * 人员配置的落库口：数据只有一份 data/people.json（见 types/people 的文件头）。
+   * addPersonRow 会经 app server 写文件、并把写完的整份清单换进内存表 ——
+   * 于是「换人」那种 PB 覆盖值与本页新增的默认值能在同一张表里并列显示。
+   */
+  import { addPersonRow, updatePersonDept } from '@/utils/peopleConfig'
+  /*
+   * 角色档位的**唯一事实源**：下面 roleList 的 key 与中文名都从这里取。
+   * 之前这张页自己抄了一份，多出个 `admin`、还把 `approval` 标成「审批人员」——
+   * 选「管理员」写进库的是 `admin`，而路由守卫 normalizeRole('admin') 会把它归成最低档，
+   * 权限静默失效（见 roleList 上的说明）。
+   */
+  import { type AppRole, normalizeRole, ROLE_LABELS } from '@/utils/permissions'
+  import {
+    cleanWarehouse,
+    findBadWarehouse,
+    warehouseKey,
+    type WarehouseRow,
+  } from '@/utils/warehouse'
 
-const currentRole = ref('')
-const data = ref<UserInfo[]>([])
-/**
- * 成员列表取数中（挂到「成员」那张表的 `:loading` 上）。
- *
- * 与同文件的 approverLoading / warehouseLoading 同一套写法：进去置 true、复位放 finally，
- * 请求失败时表格不会永久停在加载态（这张表原来连标志都没有，进来先是"空表一闪"）。
- */
-const memberLoading = ref(false)
-async function getDatas() {
-  memberLoading.value = true
-  try {
-    const res = await getUserInfo()
-    data.value = res
-    // ⚠️ 列表可能为空（集合规则没放行 / 库里还没人），不能直接读 `res[0].role` ——
-    //    那会抛 TypeError 打断 onMounted 里后面的 loadApprovers / loadWarehouseList
-    currentRole.value = normalizeRole(res[0]?.role)
-  } finally {
-    memberLoading.value = false
-  }
-}
-const model = ref(false)
-const search = ref('')
-const page = ref(1)
-const itemsPerPage = ref(5)
-
-/**
- * 可分配的角色档位。
- *
- * ⚠️ key 必须与 `utils/permissions.ts` 的 `AppRole` **完全一致**，中文名直接取 `ROLE_LABELS`。
- * 这里原来自己抄了一份，结果多出一个 `admin`、还把 `approval` 标成「审批人员」：
- * 弹窗里选「管理员」写进库的是 `admin`，而路由守卫 `normalizeRole('admin')`
- * 会把它归成最低档「一般员工」—— 界面上显示"已改成功"，权限却静默失效。
- *
- * permission 只是**界面说明**（这一档大致能做什么），真正的判定在 permissions.ts 的
- * ROUTE_ROLES / ACTION_ROLES 两张表里，别拿它当权限依据。
- */
-const roleList = ref([
-  {
-    key: 'superAdmin' as AppRole,
-    title: ROLE_LABELS.superAdmin,
-    permission: [
-      { key: 'manageApproval', title: '审批管理' },
-      { key: 'manageUser', title: '用户管理' },
-      { key: 'manageRole', title: '角色管理' },
-      { key: 'manageProduct', title: '产品管理' },
-      { key: 'manageApprovalFlow', title: '审批流管理' },
-    ],
-  },
-  {
-    key: 'approval' as AppRole,
-    title: ROLE_LABELS.approval,
-    permission: [
-      { key: 'manageApproval', title: '审批管理' },
-      { key: 'manageUser', title: '用户管理' },
-      { key: 'manageProduct', title: '产品管理' },
-      { key: 'manageApprovalFlow', title: '审批流管理' },
-    ],
-  },
-  {
-    key: 'normal' as AppRole,
-    title: ROLE_LABELS.normal,
-    permission: [
-      { key: 'viewApproval', title: '查看审批单' },
-      { key: 'searchApproval', title: '搜索审批单' },
-    ],
-  },
-])
-/** 弹窗里选中的那个角色的权限明细 */
-const rolePermission = computed(() => {
-  return roleList.value.find(item => item.key === currentRole.value)?.permission || []
-})
-
-/**
- * 表格「权限」列：按**该成员自己的**角色推导。
- * 旧实现直接 v-for 了上面的 rolePermission，于是全表每一行显示的都是
- * 「弹窗当前选中角色」的权限 —— 与这名成员毫无关系。
- */
-function permissionsOf(item: UserInfo) {
-  const role = normalizeRole(item.role)
-  return roleList.value.find(r => r.key === role)?.permission ?? []
-}
-const headers = ref([
-  {
-    align: 'center',
-    key: 'avatar_url',
-    sortable: false,
-    title: '头像',
-  },
-  { title: '用户名', key: 'name', align: 'center' },
-  { title: '部门', key: 'department', align: 'center' },
-  { title: '邮箱', key: 'email', align: 'center' },
-  { title: '角色', key: 'role', align: 'center' },
-  { title: '权限', key: 'permission', align: 'center' },
-  { title: '权限变更', key: 'action', align: 'center', sortable: false },
-] as const)
-
-const pageCount = computed(() => {
-  return Math.ceil(data.value.length / itemsPerPage.value)
-})
-
-/**
- * 角色 key → 中文名。
- * 与 userSetting.vue 用同一口径（normalizeRole + ROLE_LABELS）：库里若有历史脏值（如 `admin`），
- * 按最低档展示，而不是把一个英文串直接丢到界面上。
- */
-function roleName(value: unknown): string {
-  if (value == null || value === '') return '—'
-  return ROLE_LABELS[normalizeRole(String(value))]
-}
-
-/** 权限列可能是数组或字符串，统一转成可读文本 */
-function formatPermission(value: unknown): string {
-  if (Array.isArray(value)) {
-    const list = value
-      .map(v => (typeof v === 'string' ? v : v?.title ?? ''))
-      .filter(Boolean)
-    return list.length > 0 ? list.join('、') : '—'
-  }
-  return value == null || value === '' ? '—' : String(value)
-}
-/** 权限变更弹窗正在改的那个成员 —— 点哪行就改哪行 */
-const editingUser = ref<UserInfo | null>(null)
-const updating = ref(false)
-
-/**
- * ⚠️ 目标必须是**被点的那一行**。
- * 旧实现写死 `data.value[0].id`，也就是列表第一条（按当时的口径正好是登录者自己），
- * 于是点任何一行的「权限变更」都在改自己，别人的角色永远动不了。
- */
-function goEdit(item: UserInfo) {
-  editingUser.value = item
-  // 弹窗默认选中他当前的角色，方便对比着改
-  currentRole.value = normalizeRole(item.role)
-  model.value = true
-}
-
-async function handleUpdate() {
-  const target = editingUser.value
-  if (!target) {
-    return
-  }
-  const next = normalizeRole(currentRole.value)
-  updating.value = true
-  try {
-    await updateUserRole(target.id, next)
-    // 重新拉一次：表格的「角色」列要立刻反映新值（改的也可能正是登录者自己）
-    await getDatas()
-    model.value = false
-    showHint(`「${target.name || target.email || target.id}」已改为${ROLE_LABELS[next]}`, 'success')
-  } catch (error) {
-    console.error('[roleSetting] 修改角色失败:', error)
-    // 旧实现的 updateUserRole 会吞掉错误，失败时界面静默无反应；现在必须说出来
-    showHint('角色变更失败，请稍后重试', 'error')
-  } finally {
-    updating.value = false
-  }
-}
-
-const hint = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
-  show: false,
-  text: '',
-  color: 'success',
-})
-function showHint(text: string, color: 'success' | 'error' | 'warning' = 'warning') {
-  hint.value = { show: true, text, color }
-}
-
-const approverRows = ref<ApproverDisplayRow[]>([])
-/** 部门审批人（按部门一行；同一部门的团队共用，贴在团队行上展示） */
-const deptApproverRows = ref<DeptApproverRow[]>([])
-const approverLoading = ref(false)
-const approverSearch = ref('')
-const approverHeaders = ref([
-  { title: '上级部门', key: 'parent', align: 'start' },
-  { title: '团队', key: 'group', align: 'start' },
-  { title: '默认审批人', key: 'manager', align: 'start', sortable: false },
-  { title: '部门审批人', key: 'deptManager', align: 'start', sortable: false },
-  { title: '来源', key: 'source', align: 'center' },
-  { title: '操作', key: 'action', align: 'center', sortable: false },
-] as const)
-const customCount = computed(() => countCustom(approverRows.value))
-/** 有几个部门被换过部门审批人（同部门的多行只算一次） */
-const deptCustomCount = computed(() => deptApproverRows.value.filter(d => d.source === 'custom').length)
-
-/**
- * 拉覆盖值并与文件里的默认值合并（团队、部门两套覆盖值）。
- * 覆盖值读取失败时按"没有任何覆盖"处理（见 getGroupApproverOverrides / getDeptApproverOverrides），
- * 于是 PB 还没应用迁移时也能看到默认值，不至于整页白屏。
- */
-async function loadApprovers() {
-  approverLoading.value = true
-  try {
-    const [teamOverrides, deptOverrides] = await Promise.all([
-      getGroupApproverOverrides(),
-      getDeptApproverOverrides(),
-    ])
-    deptApproverRows.value = mergeDeptApprovers(defaultDeptApproverRows(), deptOverrides)
-    approverRows.value = attachDeptApprovers(
-      mergeGroupApprovers(defaultGroupApproverRows(), teamOverrides),
-      deptApproverRows.value,
-    )
-  } finally {
-    approverLoading.value = false
-  }
-}
-
-const pickerOpen = ref(false)
-/** 正在换人的对象：团队（默认审批人）或部门（部门审批人） */
-interface PickTarget {
-  kind: 'team' | 'dept'
-  /** 团队名 / 部门名 */
-  name: string
-  /** 仅团队：所属部门（覆盖记录里冗余存一份） */
-  parent?: string
-  manager: string
-}
-const picking = ref<PickTarget | null>(null)
-const picked = ref<OrgSelectedUser | null>(null)
-const saving = ref(false)
-
-/** 换团队的默认审批人 */
-function openPicker(row: ApproverDisplayRow) {
-  picking.value = { kind: 'team', name: row.group, parent: row.parent, manager: row.manager }
-  picked.value = null
-  pickerOpen.value = true
-}
-
-/** 换部门审批人（部门级：同部门下的团队共用这一个） */
-function openDeptPicker(row: ApproverDisplayRow) {
-  picking.value = { kind: 'dept', name: row.parent, manager: row.deptManager }
-  picked.value = null
-  pickerOpen.value = true
-}
-
-/** 通讯录里只能选**人**：点到部门时忽略并提示，否则会把部门名当成审批人存进去 */
-function onOrgSelect(payload: OrgSelectPayload | null) {
-  if (!payload) {
-    return
-  }
-  if (payload.type !== 'user') {
-    showHint('请在通讯录里点选成员，而不是部门')
-    return
-  }
-  picked.value = payload.user
-}
-
-async function savePicked() {
-  const target = picking.value
-  const user = picked.value
-  if (!target || !user) {
-    return
-  }
-  const contact = {
-    manager: user.name,
-    manager_email: user.email,
-    manager_avatar: user.avatar,
-    manager_department: user.department,
-    manager_department_path: user.department_path,
-  }
-  saving.value = true
-  try {
-    if (target.kind === 'dept') {
-      await saveDeptApprover({ dept: target.name, ...contact })
-    } else {
-      await saveGroupApprover({ group: target.name, parent: target.parent, ...contact })
+  const currentRole = ref('')
+  const data = ref<UserInfo[]>([])
+  /**
+   * 成员列表取数中（挂到「成员」那张表的 `:loading` 上）。
+   *
+   * 与同文件的 approverLoading / warehouseLoading 同一套写法：进去置 true、复位放 finally，
+   * 请求失败时表格不会永久停在加载态（这张表原来连标志都没有，进来先是"空表一闪"）。
+   */
+  const memberLoading = ref(false)
+  async function getDatas () {
+    memberLoading.value = true
+    try {
+      const res = await getUserInfo()
+      data.value = res
+      // ⚠️ 列表可能为空（集合规则没放行 / 库里还没人），不能直接读 `res[0].role` ——
+      //    那会抛 TypeError 打断 onMounted 里后面的 loadApprovers / loadWarehouseList
+      currentRole.value = normalizeRole(res[0]?.role)
+    } finally {
+      memberLoading.value = false
     }
-    await loadApprovers()
-    pickerOpen.value = false
-    const what = target.kind === 'dept' ? '部门审批人' : '默认审批人'
-    showHint(`「${target.name}」的${what}已改为 ${user.name}`, 'success')
-  } catch (error) {
-    console.error('[roleSetting] 保存审批人失败:', error)
-    // 失败必须显式提示：静默失败的话，下次进页面又变回旧值，用户会以为界面在骗他
-    showHint('保存失败，请稍后重试', 'error')
-  } finally {
-    saving.value = false
   }
-}
+  const model = ref(false)
+  const search = ref('')
+  const page = ref(1)
+  const itemsPerPage = ref(5)
 
-/* ==================== 新增团队（写 data/people.json） ==================== */
-/*
- * 与上面「更换审批人」的分工：
- *   · 这里 = **默认值**（JSON 里的一行）：团队清单本身长了、或给新团队指定默认审批人；
- *   · 上面 = **覆盖值**（PB group_approvers）：团队不变，只把这一行的默认人换掉。
- * 两者合并显示在同一张表里（见 utils/groupApprovers 的 mergeGroupApprovers）。
- */
+  /**
+   * 可分配的角色档位。
+   *
+   * ⚠️ key 必须与 `utils/permissions.ts` 的 `AppRole` **完全一致**，中文名直接取 `ROLE_LABELS`。
+   * 这里原来自己抄了一份，结果多出一个 `admin`、还把 `approval` 标成「审批人员」：
+   * 弹窗里选「管理员」写进库的是 `admin`，而路由守卫 `normalizeRole('admin')`
+   * 会把它归成最低档「一般员工」—— 界面上显示"已改成功"，权限却静默失效。
+   *
+   * permission 只是**界面说明**（这一档大致能做什么），真正的判定在 permissions.ts 的
+   * ROUTE_ROLES / ACTION_ROLES 两张表里，别拿它当权限依据。
+   */
+  const roleList = ref([
+    {
+      key: 'superAdmin' as AppRole,
+      title: ROLE_LABELS.superAdmin,
+      permission: [
+        { key: 'manageApproval', title: '审批管理' },
+        { key: 'manageUser', title: '用户管理' },
+        { key: 'manageRole', title: '角色管理' },
+        { key: 'manageProduct', title: '产品管理' },
+        { key: 'manageApprovalFlow', title: '审批流管理' },
+      ],
+    },
+    {
+      key: 'approval' as AppRole,
+      title: ROLE_LABELS.approval,
+      permission: [
+        { key: 'manageApproval', title: '审批管理' },
+        { key: 'manageUser', title: '用户管理' },
+        { key: 'manageProduct', title: '产品管理' },
+        { key: 'manageApprovalFlow', title: '审批流管理' },
+      ],
+    },
+    {
+      key: 'normal' as AppRole,
+      title: ROLE_LABELS.normal,
+      permission: [
+        { key: 'viewApproval', title: '查看审批单' },
+        { key: 'searchApproval', title: '搜索审批单' },
+      ],
+    },
+  ])
+  /** 弹窗里选中的那个角色的权限明细 */
+  const rolePermission = computed(() => {
+    return roleList.value.find(item => item.key === currentRole.value)?.permission || []
+  })
 
-const addOpen = ref(false)
-const addSaving = ref(false)
-/** 草稿：审批人相关的三个字段来自通讯录（邮箱/头像可缺，JSON 里存下来表格才有得显示） */
-const addDraft = ref({ parent: '', group: '', manager: '', managerEmail: '', managerAvatar: '' })
-
-/** 部门候选：现有清单里出现过的部门（combobox，可直接输入新部门） */
-const deptOptions = computed(() => [...new Set(approverRows.value.map(r => r.parent).filter(Boolean))])
-
-function openAddPerson() {
-  addDraft.value = {
-    // 预填第一个部门：多数新增都是往已有部门里加团队，省一次点选
-    parent: deptOptions.value[0] ?? '',
-    group: '',
-    manager: '',
-    managerEmail: '',
-    managerAvatar: '',
+  /**
+   * 表格「权限」列：按**该成员自己的**角色推导。
+   * 旧实现直接 v-for 了上面的 rolePermission，于是全表每一行显示的都是
+   * 「弹窗当前选中角色」的权限 —— 与这名成员毫无关系。
+   */
+  function permissionsOf (item: UserInfo) {
+    const role = normalizeRole(item.role)
+    return roleList.value.find(r => r.key === role)?.permission ?? []
   }
-  addOpen.value = true
-}
+  const headers = ref([
+    {
+      align: 'center',
+      key: 'avatar_url',
+      sortable: false,
+      title: '头像',
+    },
+    { title: '用户名', key: 'name', align: 'center' },
+    { title: '部门', key: 'department', align: 'center' },
+    { title: '邮箱', key: 'email', align: 'center' },
+    { title: '角色', key: 'role', align: 'center' },
+    { title: '权限', key: 'permission', align: 'center' },
+    { title: '权限变更', key: 'action', align: 'center', sortable: false },
+  ] as const)
 
-/** 通讯录里只能选**人**：点到部门时忽略并提示（与「更换审批人」同一口径） */
-function onAddOrgSelect(payload: OrgSelectPayload | null) {
-  if (!payload) {
-    return
-  }
-  if (payload.type !== 'user') {
-    showHint('请在通讯录里点选成员，而不是部门')
-    return
-  }
-  addDraft.value.manager = payload.user.name
-  addDraft.value.managerEmail = payload.user.email ?? ''
-  addDraft.value.managerAvatar = payload.user.avatar ?? ''
-}
+  const pageCount = computed(() => {
+    return Math.ceil(data.value.length / itemsPerPage.value)
+  })
 
-async function saveNewPerson() {
-  const draft = addDraft.value
-  // 前端先拦一道（必填 / 团队重名），口径与服务端共用 types/people 的 findPersonProblem
-  const problem = findPersonProblem(draft, approverRows.value)
-  if (problem) {
-    showHint(problem, 'warning')
-    return
-  }
-
-  addSaving.value = true
-  try {
-    await addPersonRow({
-      parent: draft.parent.trim(),
-      // 新团队的部门负责人留空：那是「部门级」的值，已有部门由该部门其他行提供，
-      // 新部门则请在 JSON 里补 parentManager（弹窗里有提示）
-      parentManager: '',
-      group: draft.group.trim(),
-      manager: draft.manager.trim(),
-      ...(draft.managerEmail ? { managerEmail: draft.managerEmail } : {}),
-      ...(draft.managerAvatar ? { managerAvatar: draft.managerAvatar } : {}),
-    })
-    // 内存表已被 addPersonRow 换掉，重新合并一次就能看到新行（不必刷新页面）
-    await loadApprovers()
-    addOpen.value = false
-    showHint(`团队「${draft.group.trim()}」已保存到 ${PEOPLE_JSON_PATH}`, 'success')
-  } catch (error) {
-    console.error('[roleSetting] 新增团队失败:', error)
-    // 服务端返回的原因（重名 / 缺字段）原样展示：这类失败必须让人看见
-    showHint(error instanceof Error ? error.message : '保存失败，请稍后重试', 'error')
-  } finally {
-    addSaving.value = false
-  }
-}
-
-/** 恢复默认：删掉团队的覆盖记录，回到 organazation.ts 里的那个人 */
-async function resetApprover(row: ApproverDisplayRow) {
-  try {
-    await deleteGroupApproverOverride(row.group)
-    await loadApprovers()
-    showHint(`「${row.group}」已恢复为默认审批人`, 'success')
-  } catch (error) {
-    console.error('[roleSetting] 恢复默认失败:', error)
-    showHint('恢复失败，请稍后重试', 'error')
-  }
-}
-
-/** 恢复默认：删掉部门的覆盖记录（同部门下的团队一起回到默认） */
-async function resetDeptApprover(row: ApproverDisplayRow) {
-  try {
-    await deleteDeptApproverOverride(row.parent)
-    await loadApprovers()
-    showHint(`「${row.parent}」已恢复为默认部门审批人`, 'success')
-  } catch (error) {
-    console.error('[roleSetting] 恢复部门审批人失败:', error)
-    showHint('恢复失败，请稍后重试', 'error')
-  }
-}
-
-/* ==================== 仓库（仓位）清单 ==================== */
-/*
- * 与上面「团队 → 默认审批人」的差别：那边是**逐行覆盖**（默认值为主、只换个人），
- * 这里是**整表替换** —— 仓库要能新增、改名、删除，逐行覆盖表达不了"删掉某一项"。
- * 口径（见 utils/warehouse 的文件头）：维护表里有记录就完全以它为准，空表才用文件默认值。
- */
-
-const warehouseRows = ref<WarehouseRow[]>([])
-const warehouseCustom = ref(false)
-const warehouseLoading = ref(false)
-const warehouseSearch = ref('')
-const warehouseHeaders = ref([
-  { title: '序号', key: 'index', align: 'start' },
-  { title: '仓库名', key: 'name', align: 'start' },
-  { title: '上级分类', key: 'parent', align: 'start' },
-  { title: '操作', key: 'action', align: 'center', sortable: false },
-] as const)
-
-/** 写失败时的提示：环境没准备好（没应用迁移）就把原因原样说出来，其余换成通用文案 */
-function warehouseErrorHint(error: unknown): string {
-  return error instanceof Error && error.name === WAREHOUSE_SETUP_ERROR
-    ? error.message
-    : '操作失败，请稍后重试'
-}
-
-/** 维护表读不出来（未应用迁移）时 `loadWarehouses` 会回落默认值，页面照常可用 */
-async function loadWarehouseList() {
-  warehouseLoading.value = true
-  try {
-    const res = await loadWarehouses()
-    warehouseRows.value = res.rows
-    warehouseCustom.value = res.custom
-  } finally {
-    warehouseLoading.value = false
-  }
-}
-
-/** 上级分类的候选：清单里已出现过的（弹窗里是 combobox，可以直接写新的） */
-const warehouseParents = computed(() => [...new Set(warehouseRows.value.map(r => r.parent))])
-
-const warehouseDialog = ref(false)
-/** 正在编辑的那一行；null = 新增 */
-const warehouseEditing = ref<WarehouseRow | null>(null)
-const warehouseDraft = ref<WarehouseRow>({ parent: '', name: '', index: 0 })
-const warehouseSaving = ref(false)
-
-function openWarehouseAdd() {
-  warehouseEditing.value = null
-  warehouseDraft.value = { parent: warehouseParents.value[0] ?? '', name: '', index: 0 }
-  warehouseDialog.value = true
-}
-
-function openWarehouseEdit(row: WarehouseRow) {
-  warehouseEditing.value = { ...row }
-  warehouseDraft.value = { ...row }
-  warehouseDialog.value = true
-}
-
-async function saveWarehouseDraft() {
-  const editing = warehouseEditing.value
-  // 改自己时不该跟"自己"判重：只有**其余行**参与重复检查（改成同分类同名会被拦下）
-  const others = warehouseRows.value.filter(r => !editing || warehouseKey(r) !== warehouseKey(editing))
-  const bad = findBadWarehouse(warehouseDraft.value, others)
-  if (bad) {
-    showHint(bad, 'warning')
-    return
+  /**
+   * 角色 key → 中文名。
+   * 与 userSetting.vue 用同一口径（normalizeRole + ROLE_LABELS）：库里若有历史脏值（如 `admin`），
+   * 按最低档展示，而不是把一个英文串直接丢到界面上。
+   */
+  function roleName (value: unknown): string {
+    if (value == null || value === '') return '—'
+    return ROLE_LABELS[normalizeRole(String(value))]
   }
 
-  const next = cleanWarehouse(warehouseDraft.value)
-  const list = editing
-    ? warehouseRows.value.map(r => (warehouseKey(r) === warehouseKey(editing) ? next : r))
-    : [...warehouseRows.value, next]
-
-  warehouseSaving.value = true
-  try {
-    await saveWarehouses(list)
-    await loadWarehouseList()
-    warehouseDialog.value = false
-    showHint(`「${next.parent} / ${next.name}」已保存`, 'success')
-  } catch (error) {
-    console.error('[roleSetting] 保存仓库失败:', error)
-    // 与「换审批人」同理：写失败必须说出来，否则下次进页面又变回旧值
-    showHint(warehouseErrorHint(error), 'error')
-  } finally {
-    warehouseSaving.value = false
-  }
-}
-
-/*
- * 删除与「恢复默认」都动维护表，所以都要先确认。
- * 一个弹窗按 `confirmKind` 切换文案与动作，避免为两件"取消/确定"几乎一样的事写两套。
- */
-const confirmKind = ref<'remove' | 'reset' | null>(null)
-const confirmTarget = ref<WarehouseRow | null>(null)
-const confirmLoading = ref(false)
-const confirmOpen = computed({
-  get: () => confirmKind.value !== null,
-  set: (open: boolean) => {
-    if (!open) {
-      confirmKind.value = null
+  /** 权限列可能是数组或字符串，统一转成可读文本 */
+  function formatPermission (value: unknown): string {
+    if (Array.isArray(value)) {
+      const list = value
+        .map(v => (typeof v === 'string' ? v : v?.title ?? ''))
+        .filter(Boolean)
+      return list.length > 0 ? list.join('、') : '—'
     }
-  },
-})
-
-function askRemoveWarehouse(row: WarehouseRow) {
-  // 只留一条时不给删：删掉最后一条 = 清空维护表 = 整份默认清单又回来，用户会以为界面在骗他
-  if (warehouseRows.value.length <= 1) {
-    showHint('至少要留一个仓库；想回到默认清单请点「恢复默认」', 'warning')
-    return
+    return value == null || value === '' ? '—' : String(value)
   }
-  confirmTarget.value = row
-  confirmKind.value = 'remove'
-}
+  /** 权限变更弹窗正在改的那个成员 —— 点哪行就改哪行 */
+  const editingUser = ref<UserInfo | null>(null)
+  const updating = ref(false)
 
-function askResetWarehouses() {
-  confirmTarget.value = null
-  confirmKind.value = 'reset'
-}
-
-function closeConfirm() {
-  confirmKind.value = null
-  confirmTarget.value = null
-}
-
-async function runConfirm() {
-  const kind = confirmKind.value
-  const target = confirmTarget.value
-  if (!kind) {
-    return
+  /**
+   * ⚠️ 目标必须是**被点的那一行**。
+   * 旧实现写死 `data.value[0].id`，也就是列表第一条（按当时的口径正好是登录者自己），
+   * 于是点任何一行的「权限变更」都在改自己，别人的角色永远动不了。
+   */
+  function goEdit (item: UserInfo) {
+    editingUser.value = item
+    // 弹窗默认选中他当前的角色，方便对比着改
+    currentRole.value = normalizeRole(item.role)
+    model.value = true
   }
-  confirmLoading.value = true
-  try {
-    if (kind === 'reset') {
-      await resetWarehouses()
-      showHint('已恢复为默认仓库清单', 'success')
-    } else if (target) {
-      const list = warehouseRows.value.filter(r => warehouseKey(r) !== warehouseKey(target))
+
+  async function handleUpdate () {
+    const target = editingUser.value
+    if (!target) {
+      return
+    }
+    const next = normalizeRole(currentRole.value)
+    updating.value = true
+    try {
+      await updateUserRole(target.id, next)
+      // 重新拉一次：表格的「角色」列要立刻反映新值（改的也可能正是登录者自己）
+      await getDatas()
+      model.value = false
+      showHint(`「${target.name || target.email || target.id}」已改为${ROLE_LABELS[next]}`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 修改角色失败:', error)
+      // 旧实现的 updateUserRole 会吞掉错误，失败时界面静默无反应；现在必须说出来
+      showHint('角色变更失败，请稍后重试', 'error')
+    } finally {
+      updating.value = false
+    }
+  }
+
+  const hint = ref<{ show: boolean, text: string, color: 'success' | 'error' | 'warning' }>({
+    show: false,
+    text: '',
+    color: 'success',
+  })
+  let hintTimer: ReturnType<typeof setTimeout> | null = null
+  function showHint (text: string, color: 'success' | 'error' | 'warning' = 'warning') {
+    hint.value.text = text
+    hint.value.color = color
+    hint.value.show = true
+    // 3 秒自动关（原 v-snackbar 的 timeout 职责挪到这里）；连续提示时重置计时
+    if (hintTimer) {
+      clearTimeout(hintTimer)
+    }
+    hintTimer = setTimeout(() => {
+      hint.value.show = false
+    }, 3000)
+  }
+
+  const approverRows = ref<ApproverDisplayRow[]>([])
+  /** 部门审批人（按部门一行；同一部门的团队共用，贴在团队行上展示） */
+  const deptApproverRows = ref<DeptApproverRow[]>([])
+  const approverLoading = ref(false)
+  const approverSearch = ref('')
+  const approverHeaders = ref([
+    { title: '上级部门', key: 'parent', align: 'start' },
+    { title: '团队', key: 'group', align: 'start' },
+    { title: '默认审批人', key: 'manager', align: 'start', sortable: false },
+    { title: '部门审批人', key: 'deptManager', align: 'start', sortable: false },
+    { title: '来源', key: 'source', align: 'center' },
+    { title: '操作', key: 'action', align: 'center', sortable: false },
+  ] as const)
+  const customCount = computed(() => countCustom(approverRows.value))
+  /** 有几个部门被换过部门审批人（同部门的多行只算一次） */
+  const deptCustomCount = computed(() => deptApproverRows.value.filter(d => d.source === 'custom').length)
+
+  /**
+   * 拉覆盖值并与文件里的默认值合并（团队、部门两套覆盖值）。
+   * 覆盖值读取失败时按"没有任何覆盖"处理（见 getGroupApproverOverrides / getDeptApproverOverrides），
+   * 于是 PB 还没应用迁移时也能看到默认值，不至于整页白屏。
+   */
+  async function loadApprovers () {
+    approverLoading.value = true
+    try {
+      const [teamOverrides, deptOverrides] = await Promise.all([
+        getGroupApproverOverrides(),
+        getDeptApproverOverrides(),
+      ])
+      deptApproverRows.value = mergeDeptApprovers(defaultDeptApproverRows(), deptOverrides)
+      approverRows.value = attachDeptApprovers(
+        mergeGroupApprovers(defaultGroupApproverRows(), teamOverrides),
+        deptApproverRows.value,
+      )
+    } finally {
+      approverLoading.value = false
+    }
+  }
+
+  const pickerOpen = ref(false)
+  /** 正在换人的对象：团队（默认审批人）或部门（部门审批人） */
+  interface PickTarget {
+    kind: 'team' | 'dept'
+    /** 团队名 / 部门名 */
+    name: string
+    /** 仅团队：所属部门（覆盖记录里冗余存一份） */
+    parent?: string
+    manager: string
+  }
+  const picking = ref<PickTarget | null>(null)
+  const picked = ref<OrgSelectedUser | null>(null)
+  const saving = ref(false)
+
+  /** 换团队的默认审批人 */
+  function openPicker (row: ApproverDisplayRow) {
+    picking.value = { kind: 'team', name: row.group, parent: row.parent, manager: row.manager }
+    picked.value = null
+    pickerOpen.value = true
+  }
+
+  /** 换部门审批人（部门级：同部门下的团队共用这一个） */
+  function openDeptPicker (row: ApproverDisplayRow) {
+    picking.value = { kind: 'dept', name: row.parent, manager: row.deptManager }
+    picked.value = null
+    pickerOpen.value = true
+  }
+
+  /** 通讯录里只能选**人**：点到部门时忽略并提示，否则会把部门名当成审批人存进去 */
+  function onOrgSelect (payload: OrgSelectPayload | null) {
+    if (!payload) {
+      return
+    }
+    if (payload.type !== 'user') {
+      showHint('请在通讯录里点选成员，而不是部门')
+      return
+    }
+    picked.value = payload.user
+  }
+
+  async function savePicked () {
+    const target = picking.value
+    const user = picked.value
+    if (!target || !user) {
+      return
+    }
+    const contact = {
+      manager: user.name,
+      manager_email: user.email,
+      manager_avatar: user.avatar,
+      manager_department: user.department,
+      manager_department_path: user.department_path,
+    }
+    saving.value = true
+    try {
+      await (target.kind === 'dept' ? saveDeptApprover({ dept: target.name, ...contact }) : saveGroupApprover({ group: target.name, parent: target.parent, ...contact }))
+      await loadApprovers()
+      pickerOpen.value = false
+      const what = target.kind === 'dept' ? '部门审批人' : '默认审批人'
+      showHint(`「${target.name}」的${what}已改为 ${user.name}`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 保存审批人失败:', error)
+      // 失败必须显式提示：静默失败的话，下次进页面又变回旧值，用户会以为界面在骗他
+      showHint('保存失败，请稍后重试', 'error')
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /* ==================== 新增团队（写 data/people.json） ==================== */
+  /*
+   * 与上面「更换审批人」的分工：
+   *   · 这里 = **默认值**（JSON 里的一行）：团队清单本身长了、或给新团队指定默认审批人；
+   *   · 上面 = **覆盖值**（PB group_approvers）：团队不变，只把这一行的默认人换掉。
+   * 两者合并显示在同一张表里（见 utils/groupApprovers 的 mergeGroupApprovers）。
+   */
+
+  const addOpen = ref(false)
+  const addSaving = ref(false)
+  /** 草稿：审批人相关的三个字段来自通讯录（邮箱/头像可缺，JSON 里存下来表格才有得显示） */
+  const addDraft = ref({ parent: '', group: '', manager: '', managerEmail: '', managerAvatar: '' })
+
+  /** 部门候选：现有清单里出现过的部门（combobox，可直接输入新部门） */
+  const deptOptions = computed(() => [...new Set(approverRows.value.map(r => r.parent).filter(Boolean))])
+
+  function openAddPerson () {
+    addDraft.value = {
+      // 预填第一个部门：多数新增都是往已有部门里加团队，省一次点选
+      parent: deptOptions.value[0] ?? '',
+      group: '',
+      manager: '',
+      managerEmail: '',
+      managerAvatar: '',
+    }
+    addOpen.value = true
+  }
+
+  /** 通讯录里只能选**人**：点到部门时忽略并提示（与「更换审批人」同一口径） */
+  function onAddOrgSelect (payload: OrgSelectPayload | null) {
+    if (!payload) {
+      return
+    }
+    if (payload.type !== 'user') {
+      showHint('请在通讯录里点选成员，而不是部门')
+      return
+    }
+    addDraft.value.manager = payload.user.name
+    addDraft.value.managerEmail = payload.user.email ?? ''
+    addDraft.value.managerAvatar = payload.user.avatar ?? ''
+  }
+
+  async function saveNewPerson () {
+    const draft = addDraft.value
+    // 前端先拦一道（必填 / 团队重名），口径与服务端共用 types/people 的 findPersonProblem
+    const problem = findPersonProblem(draft, approverRows.value)
+    if (problem) {
+      showHint(problem, 'warning')
+      return
+    }
+
+    addSaving.value = true
+    try {
+      await addPersonRow({
+        parent: draft.parent.trim(),
+        // 新团队的部门负责人留空：那是「部门级」的值，已有部门由该部门其他行提供，
+        // 新部门则请在 JSON 里补 parentManager（弹窗里有提示）
+        parentManager: '',
+        group: draft.group.trim(),
+        manager: draft.manager.trim(),
+        ...(draft.managerEmail ? { managerEmail: draft.managerEmail } : {}),
+        ...(draft.managerAvatar ? { managerAvatar: draft.managerAvatar } : {}),
+      })
+      // 内存表已被 addPersonRow 换掉，重新合并一次就能看到新行（不必刷新页面）
+      await loadApprovers()
+      addOpen.value = false
+      showHint(`团队「${draft.group.trim()}」已保存到 ${PEOPLE_JSON_PATH}`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 新增团队失败:', error)
+      // 服务端返回的原因（重名 / 缺字段）原样展示：这类失败必须让人看见
+      showHint(error instanceof Error ? error.message : '保存失败，请稍后重试', 'error')
+    } finally {
+      addSaving.value = false
+    }
+  }
+
+  /* ==================== 修改团队所属部门（写 data/people.json） ==================== */
+  /*
+   * 与「新增团队」同一个落盘口（app server），只是方法换成 PATCH /api/people。
+   * 团队名是这份清单的唯一键（types/people 的 personKey），所以只改部门、不碰团队名。
+   * 交互是行内就地编辑：「上级部门」列 hover 出铅笔，点击就地变文本框（见模板 #item.parent）。
+   */
+
+  const deptSaving = ref(false)
+  /** 正在改部门的团队名（= 该行文本框的显示开关，保存时只发 group + parent） */
+  const deptEditGroup = ref('')
+  const deptEditDraft = ref('')
+
+  function openDeptEdit (row: ApproverDisplayRow) {
+    deptEditGroup.value = row.group
+    deptEditDraft.value = row.parent
+  }
+
+  /** 回车提交；中文输入法选词的回车（isComposing / keyCode 229）不算提交 */
+  function onDeptEnter (e: KeyboardEvent) {
+    if (e.isComposing || e.keyCode === 229) return
+    saveDeptEdit()
+  }
+
+  /** 失焦=提交（保存中不动：成功后文本框会随编辑态清空自行卸载）；Esc 在模板里直接退出 */
+  function onDeptBlur () {
+    if (!deptEditGroup.value || deptSaving.value) return
+    saveDeptEdit()
+  }
+
+  async function saveDeptEdit () {
+    const group = deptEditGroup.value
+    const dept = String(deptEditDraft.value ?? '').trim()
+    // 前端先拦一道，口径与服务端共用 types/people 的 findDeptChangeProblem
+    const problem = findDeptChangeProblem(group, dept, approverRows.value)
+    if (problem) {
+      showHint(problem, 'warning')
+      return
+    }
+    // 部门没变就不发请求：写盘 + 重拉一遍没有意义，直接退出编辑
+    const current = approverRows.value.find(r => r.group === group)?.parent ?? ''
+    if (current === dept) {
+      deptEditGroup.value = ''
+      return
+    }
+
+    deptSaving.value = true
+    try {
+      await updatePersonDept(group, dept)
+      // PATCH 完成 = 保存成功：提示与退出编辑立即做，不等 loadApprovers——
+      // 覆盖值拉取偶尔拖十几秒，提示会被饿死；表格刷新放后台跑
+      //（updatePersonDept 已把内存表换成新数据，「部门审批人」列由后台合并刷新）
+      showHint(`团队「${group}」已移至「${dept}」`, 'success')
+      deptEditGroup.value = ''
+      void loadApprovers().catch(() => {})
+    } catch (error) {
+      console.error('[roleSetting] 修改团队部门失败:', error)
+      // 服务端返回的原因（团队不存在 / 部门没填）原样展示
+      showHint(error instanceof Error ? error.message : '保存失败，请稍后重试', 'error')
+    } finally {
+      deptSaving.value = false
+    }
+  }
+
+  /** 恢复默认：删掉团队的覆盖记录，回到 organazation.ts 里的那个人 */
+  async function resetApprover (row: ApproverDisplayRow) {
+    try {
+      await deleteGroupApproverOverride(row.group)
+      await loadApprovers()
+      showHint(`「${row.group}」已恢复为默认审批人`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 恢复默认失败:', error)
+      showHint('恢复失败，请稍后重试', 'error')
+    }
+  }
+
+  /** 恢复默认：删掉部门的覆盖记录（同部门下的团队一起回到默认） */
+  async function resetDeptApprover (row: ApproverDisplayRow) {
+    try {
+      await deleteDeptApproverOverride(row.parent)
+      await loadApprovers()
+      showHint(`「${row.parent}」已恢复为默认部门审批人`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 恢复部门审批人失败:', error)
+      showHint('恢复失败，请稍后重试', 'error')
+    }
+  }
+
+  /* ==================== 仓库（仓位）清单 ==================== */
+  /*
+   * 与上面「团队 → 默认审批人」的差别：那边是**逐行覆盖**（默认值为主、只换个人），
+   * 这里是**整表替换** —— 仓库要能新增、改名、删除，逐行覆盖表达不了"删掉某一项"。
+   * 口径（见 utils/warehouse 的文件头）：维护表里有记录就完全以它为准，空表才用文件默认值。
+   */
+
+  const warehouseRows = ref<WarehouseRow[]>([])
+  const warehouseCustom = ref(false)
+  const warehouseLoading = ref(false)
+  const warehouseSearch = ref('')
+  const warehouseHeaders = ref([
+    { title: '序号', key: 'index', align: 'start' },
+    { title: '仓库名', key: 'name', align: 'start' },
+    { title: '上级分类', key: 'parent', align: 'start' },
+    { title: '操作', key: 'action', align: 'center', sortable: false },
+  ] as const)
+
+  /** 写失败时的提示：环境没准备好（没应用迁移）就把原因原样说出来，其余换成通用文案 */
+  function warehouseErrorHint (error: unknown): string {
+    return error instanceof Error && error.name === WAREHOUSE_SETUP_ERROR
+      ? error.message
+      : '操作失败，请稍后重试'
+  }
+
+  /** 维护表读不出来（未应用迁移）时 `loadWarehouses` 会回落默认值，页面照常可用 */
+  async function loadWarehouseList () {
+    warehouseLoading.value = true
+    try {
+      const res = await loadWarehouses()
+      warehouseRows.value = res.rows
+      warehouseCustom.value = res.custom
+    } finally {
+      warehouseLoading.value = false
+    }
+  }
+
+  /** 上级分类的候选：清单里已出现过的（弹窗里是 combobox，可以直接写新的） */
+  const warehouseParents = computed(() => [...new Set(warehouseRows.value.map(r => r.parent))])
+
+  const warehouseDialog = ref(false)
+  /** 正在编辑的那一行；null = 新增 */
+  const warehouseEditing = ref<WarehouseRow | null>(null)
+  const warehouseDraft = ref<WarehouseRow>({ parent: '', name: '', index: 0 })
+  const warehouseSaving = ref(false)
+
+  function openWarehouseAdd () {
+    warehouseEditing.value = null
+    warehouseDraft.value = { parent: warehouseParents.value[0] ?? '', name: '', index: 0 }
+    warehouseDialog.value = true
+  }
+
+  function openWarehouseEdit (row: WarehouseRow) {
+    warehouseEditing.value = { ...row }
+    warehouseDraft.value = { ...row }
+    warehouseDialog.value = true
+  }
+
+  async function saveWarehouseDraft () {
+    const editing = warehouseEditing.value
+    // 改自己时不该跟"自己"判重：只有**其余行**参与重复检查（改成同分类同名会被拦下）
+    const others = warehouseRows.value.filter(r => !editing || warehouseKey(r) !== warehouseKey(editing))
+    const bad = findBadWarehouse(warehouseDraft.value, others)
+    if (bad) {
+      showHint(bad, 'warning')
+      return
+    }
+
+    const next = cleanWarehouse(warehouseDraft.value)
+    const list = editing
+      ? warehouseRows.value.map(r => (warehouseKey(r) === warehouseKey(editing) ? next : r))
+      : [...warehouseRows.value, next]
+
+    warehouseSaving.value = true
+    try {
       await saveWarehouses(list)
-      showHint(`已删除「${target.parent} / ${target.name}」`, 'success')
+      await loadWarehouseList()
+      warehouseDialog.value = false
+      showHint(`「${next.parent} / ${next.name}」已保存`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 保存仓库失败:', error)
+      // 与「换审批人」同理：写失败必须说出来，否则下次进页面又变回旧值
+      showHint(warehouseErrorHint(error), 'error')
+    } finally {
+      warehouseSaving.value = false
     }
-    await loadWarehouseList()
-    closeConfirm()
-  } catch (error) {
-    console.error('[roleSetting] 仓库清单写入失败:', error)
-    showHint(warehouseErrorHint(error), 'error')
-  } finally {
-    confirmLoading.value = false
   }
-}
 
-onMounted(() => {
-  getDatas()
-  loadApprovers()
-  loadWarehouseList()
-  document.body.classList.add('role-setting-page')
-})
+  /*
+   * 删除与「恢复默认」都动维护表，所以都要先确认。
+   * 一个弹窗按 `confirmKind` 切换文案与动作，避免为两件"取消/确定"几乎一样的事写两套。
+   */
+  const confirmKind = ref<'remove' | 'reset' | null>(null)
+  const confirmTarget = ref<WarehouseRow | null>(null)
+  const confirmLoading = ref(false)
+  const confirmOpen = computed({
+    get: () => confirmKind.value !== null,
+    set: (open: boolean) => {
+      if (!open) {
+        confirmKind.value = null
+      }
+    },
+  })
 
-onBeforeUnmount(() => {
-  document.body.classList.remove('role-setting-page')
-})
+  function askRemoveWarehouse (row: WarehouseRow) {
+    // 只留一条时不给删：删掉最后一条 = 清空维护表 = 整份默认清单又回来，用户会以为界面在骗他
+    if (warehouseRows.value.length <= 1) {
+      showHint('至少要留一个仓库；想回到默认清单请点「恢复默认」', 'warning')
+      return
+    }
+    confirmTarget.value = row
+    confirmKind.value = 'remove'
+  }
+
+  function askResetWarehouses () {
+    confirmTarget.value = null
+    confirmKind.value = 'reset'
+  }
+
+  function closeConfirm () {
+    confirmKind.value = null
+    confirmTarget.value = null
+  }
+
+  async function runConfirm () {
+    const kind = confirmKind.value
+    const target = confirmTarget.value
+    if (!kind) {
+      return
+    }
+    confirmLoading.value = true
+    try {
+      if (kind === 'reset') {
+        await resetWarehouses()
+        showHint('已恢复为默认仓库清单', 'success')
+      } else if (target) {
+        const list = warehouseRows.value.filter(r => warehouseKey(r) !== warehouseKey(target))
+        await saveWarehouses(list)
+        showHint(`已删除「${target.parent} / ${target.name}」`, 'success')
+      }
+      await loadWarehouseList()
+      closeConfirm()
+    } catch (error) {
+      console.error('[roleSetting] 仓库清单写入失败:', error)
+      showHint(warehouseErrorHint(error), 'error')
+    } finally {
+      confirmLoading.value = false
+    }
+  }
+
+  onMounted(() => {
+    getDatas()
+    loadApprovers()
+    loadWarehouseList()
+    document.body.classList.add('role-setting-page')
+  })
+
+  onBeforeUnmount(() => {
+    document.body.classList.remove('role-setting-page')
+  })
 </script>
 
 <style scoped>
@@ -1076,5 +1409,57 @@ onBeforeUnmount(() => {
 :global(body.role-setting-page .v-combobox__content .v-list-item-title),
 :global(body.role-setting-page .v-combobox__content .v-list-item-subtitle) {
   font-size: 12px;
+}
+
+/* 顶部提示 toast（替代 v-snackbar，见模板里的说明） */
+.hint-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translate(-50%, 0);
+  z-index: 3000;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.18);
+  white-space: nowrap;
+}
+.hint-toast--success {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+.hint-toast--error {
+  background: #fdecea;
+  color: #b71c1c;
+}
+.hint-toast--warning {
+  background: #fff8e1;
+  color: #7a5b00;
+}
+.hint-fade-enter-active,
+.hint-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.hint-fade-enter-from,
+.hint-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -8px);
+}
+
+/* 「上级部门」就地编辑：铅笔默认隐形，行 hover（或键盘聚焦）才出现 */
+.dept-pencil {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+:deep(tr:hover .dept-pencil),
+.dept-pencil:focus-visible {
+  opacity: 1;
+}
+.dept-inline-input {
+  max-width: 220px;
 }
 </style>
