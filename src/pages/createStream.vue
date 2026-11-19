@@ -55,29 +55,51 @@
                 @click="addProbeNode"
               ><span class="mb-1">数据查询</span></v-btn>
 
-              <v-btn
-                color="info"
-                prepend-icon="mdi-bell-ring-outline"
-                size="small"
-                variant="tonal"
-                @click="addNotifyNode"
-              ><span class="mb-1">飞书提醒</span></v-btn>
+              <!--
+                低频板块收进「其他」菜单（飞书提醒 / 轮询 / 引用模板 / 独立审批）：
+                工具栏只保留三个高频按钮（审批节点 / 条件分支 / 数据查询），
+                菜单项各自带图标与板块色，点击即往画布加对应卡片 —— 与原按钮同一批 add 函数。
+              -->
+              <v-menu>
+                <template #activator="{ props: menuProps }">
+                  <v-btn
+                    color="default"
+                    prepend-icon="mdi-dots-horizontal"
+                    size="small"
+                    variant="tonal"
+                    v-bind="menuProps"
+                  ><span class="mb-1">其他</span></v-btn>
+                </template>
 
-              <v-btn
-                color="#7C3AED"
-                prepend-icon="mdi-autorenew"
-                size="small"
-                variant="tonal"
-                @click="addLoopNode"
-              ><span class="mb-1">轮询</span></v-btn>
+                <v-list class="more-menu" density="compact" slim>
+                  <v-list-item
+                    title="飞书提醒"
+                    @click="addNotifyNode"
+                  >
+                    <template #prepend>
+                      <v-icon class="mr-2" color="info" size="15">mdi-bell-ring-outline</v-icon>
+                    </template>
+                  </v-list-item>
 
-              <v-btn
-                color="#0D9488"
-                prepend-icon="mdi-puzzle-outline"
-                size="small"
-                variant="tonal"
-                @click="addRefNode"
-              ><span class="mb-1">引用模板</span></v-btn>
+                  <v-list-item title="轮询" @click="addLoopNode">
+                    <template #prepend>
+                      <v-icon class="mr-2" color="#7C3AED" size="15">mdi-autorenew</v-icon>
+                    </template>
+                  </v-list-item>
+
+                  <v-list-item title="引用模板" @click="addRefNode">
+                    <template #prepend>
+                      <v-icon class="mr-2" color="#0D9488" size="15">mdi-puzzle-outline</v-icon>
+                    </template>
+                  </v-list-item>
+
+                  <v-list-item title="独立审批" @click="addIndependentNode">
+                    <template #prepend>
+                      <v-icon class="mr-2" color="#EA580C" size="15">mdi-account-multiple-check-outline</v-icon>
+                    </template>
+                  </v-list-item>
+                </v-list>
+              </v-menu>
             </div>
 
             <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-0">
@@ -892,6 +914,31 @@
               </template>
 
               <!--
+                独立审批：主流程旁路发起、不阻塞主线（运行期到达即"发起"并继续走）。
+                复用 ApprovalNode 卡片（kind=independent）：换配色/文案、没有结果分支；
+                多一个「结论选项」行（默认 通过/驳回，可加自定义结论码）。
+              -->
+              <template #node-independent="{ id, data, selected }">
+                <div class="node-shell">
+                  <ApprovalNode
+                    :active-edge-id="selectedEdge?.id"
+                    :data="data"
+                    kind="independent"
+                    :selected="selected"
+                    @add-member="addMemberTo(id)"
+                    @add-role="addRoleMemberTo(id)"
+                    @edit="openIndCardDialog(id)"
+                    @remove="removeNodeById(id)"
+                  />
+
+                  <div v-if="nodeErrorOf(id)" class="node-error" :title="nodeErrorOf(id)">
+                    <v-icon size="12">mdi-alert-circle-outline</v-icon>
+                    <span>{{ nodeErrorOf(id) }}</span>
+                  </div>
+                </div>
+              </template>
+
+              <!--
                 组间轮询卡片：画布上只显示"名字 + 轮询字段 + 内部有几个环节"，
                 点「编辑内部流程」在对话框里画那张小画布（见 LoopCardDialog）。
               -->
@@ -959,6 +1006,19 @@
             :open="cardDialog"
             :outer-approvals="loopCardOuterApprovalsFor(editingCardId ?? '')"
             @close="closeCardDialog"
+          />
+
+          <!-- 独立审批的内部子流程编辑：与轮询卡片同一套对话框，只换文案与可放的节点（variant）。
+               子流程支持引用模板 → 传候选清单并透传预览/打开事件（与主画布同一份 refTemplateChoices） -->
+          <LoopCardDialog
+            v-if="editingIndData"
+            :data="editingIndData"
+            :open="indCardDialog"
+            :templates="refTemplateChoices"
+            variant="independent"
+            @close="closeIndCardDialog"
+            @open="openRefTemplate"
+            @preview="openRefPreview"
           />
 
           <RefPreviewDialog
@@ -2439,9 +2499,40 @@
     })
   }
 
+  /**
+   * 加一个「独立审批」节点：**主流程旁路发起、不阻塞主线**。
+   *
+   * 主链推进到它时"发起"（时间线上出现这一环、成员可见办理入口），然后**立即继续**往下走 ——
+   * 主单可以比独立审批先办结；独立审批的结论按办理人回填到时间线那一环上展示
+   * （见 types/approval 的 pushIndependent / subApprovalStateOf）。
+   * 结论选项默认「通过 / 驳回」，卡片上可加自定义结论码（data.options）。
+   */
+  function addIndependentNode () {
+    const seq = nodes.value.filter(n => n.type === 'independent').length + 1
+    addNodeToCanvas({
+      id: uid(),
+      type: 'independent',
+      position: { x: 0, y: 0 },
+      data: {
+        title: `独立审批${seq}`,
+        members: [],
+        // 预置内部画布的开始/结束锚点（与轮询卡片同一做法）：点「编辑内部流程」
+        // 打开就能直接放环节、连线；只有放了审批环节才算进入子流程模式
+        graph: {
+          nodes: [
+            { id: uid(), type: 'start', position: { x: 220, y: 0 } },
+            { id: uid(), type: 'end', position: { x: 220, y: 220 } },
+          ],
+          edges: [],
+          viewport: { x: 0, y: 0, zoom: 1 },
+        },
+      },
+    })
+  }
+
   /** 画布上的"卡片型"节点：摆放避让时按卡片高度估算（start/end 是小胶囊） */
   function isCardNode (type?: string): boolean {
-    return type === 'approval' || type === 'condition' || type === 'notify' || type === 'probe' || type === 'loop' || type === 'ref'
+    return type === 'approval' || type === 'condition' || type === 'notify' || type === 'probe' || type === 'loop' || type === 'ref' || type === 'independent'
   }
 
   /**
@@ -2586,6 +2677,40 @@
     editingCardId.value = null
   }
 
+  /**
+   * 独立审批的**内部子流程**编辑（与轮询卡片同一套 LoopCardDialog，variant 区分）：
+   * 对话框就地改 node.data.graph（草稿写回逻辑在对话框里），随画布快照一起保存。
+   */
+  const indCardDialog = ref(false)
+  const editingIndId = ref<string | null>(null)
+  const editingIndData = computed<{ title: string, graph?: { nodes: any[], edges: any[] } } | null>(() => {
+    const node = nodes.value.find(n => n.id === editingIndId.value)
+    return node ? (node.data as { title: string, graph?: { nodes: any[], edges: any[] } }) : null
+  })
+
+  function openIndCardDialog (id: string) {
+    // 旧卡片的 data 没有 graph（早于子流程模式创建）：打开前补一对开始/结束锚点，
+    // 与新卡片同一份起点 —— 否则内部画布没有锚点可连线，编译必然报「缺少开始节点」
+    const node = nodes.value.find(n => n.id === id)
+    if (node && !Array.isArray((node.data as any).graph?.nodes)) {
+      ;(node.data as any).graph = {
+        nodes: [
+          { id: uid(), type: 'start', position: { x: 220, y: 0 } },
+          { id: uid(), type: 'end', position: { x: 220, y: 220 } },
+        ],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }
+    }
+    editingIndId.value = id
+    indCardDialog.value = true
+  }
+
+  function closeIndCardDialog () {
+    indCardDialog.value = false
+    editingIndId.value = null
+  }
+
   function removeNodeById (id: string) {
     const node = nodes.value.find(n => n.id === id)
     if (!node || node.type === 'start' || node.type === 'end') return
@@ -2605,7 +2730,7 @@
   function addRoleMemberTo (nodeId: string) {
     const node = nodes.value.find(n => n.id === nodeId)
     // 审批节点与飞书提醒节点共用这套交互（提醒节点里 role = "提醒给该团队负责人"）
-    if (!node || (node.type !== 'approval' && node.type !== 'notify')) return
+    if (!node || (node.type !== 'approval' && node.type !== 'notify' && node.type !== 'independent')) return
     const members = (node.data?.members ?? []) as ApprovalChainItem[]
     members.push({ type: 'manager', name: '', role: { kind: 'dept_leader', deptFrom: '团队' } })
     node.data = { ...node.data, members }
@@ -2614,7 +2739,7 @@
   /** 把当前选中员工加入指定审批节点 */
   function addMemberTo (nodeId: string) {
     const node = nodes.value.find(n => n.id === nodeId)
-    if (!node || (node.type !== 'approval' && node.type !== 'notify')) return
+    if (!node || (node.type !== 'approval' && node.type !== 'notify' && node.type !== 'independent')) return
     if (!selectedUser.value) {
       showMsg('请先在左侧选择员工', 'warning')
       return
@@ -2624,7 +2749,9 @@
       showMsg('该员工已在此环节中，请勿重复添加', 'warning')
       return
     }
-    data.members.push({ ...selectedUser.value, type: radios.value })
+    // 独立审批没有「抄送」语义：每位成员都是办理人（各自提交结论），恒按 manager 加入
+    const memberType = node.type === 'independent' ? 'manager' : radios.value
+    data.members.push({ ...selectedUser.value, type: memberType })
     showMsg(`已将 ${selectedUser.value.name} 加入「${data.title || '未命名环节'}」`, 'success')
   // selectedUser.value = null
   }
@@ -2819,6 +2946,23 @@
 @import '@vue-flow/core/dist/theme-default.css';
 @import '@vue-flow/controls/dist/style.css';
 @import '@vue-flow/minimap/dist/style.css';
+
+/* ===== 「其他」板块菜单：小字号 + 紧行距（菜单 teleport 到 body，这里必须全局块） ===== */
+.more-menu {
+  padding: 3px;
+
+  .v-list-item {
+    min-height: 30px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    font-size: 12px;
+  }
+
+  .v-list-item-title {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
 
 /* ===== 分支配置面板：与画布节点同一套设计语言（白底 / 细边框 / 琥珀类型条） ===== */
 .branch-panel {

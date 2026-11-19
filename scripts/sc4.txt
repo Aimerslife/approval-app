@@ -1,0 +1,21 @@
+﻿
+Name                      Length
+----                      ------
+ApprovalDetailView.vue     19895
+ApprovalHandleForm.vue     92689
+ApprovalSummaryTable.vue   19437
+FlowScopeChip.vue           1590
+HandleDock.vue             19765
+OptionFormRenderer.vue     38785
+RotationReceipts.vue        2704
+TemplateModelRow.vue        3897
+useApprovalDockSetting.ts   1471
+useApprovalSelect.ts        4827
+useApprovalTable.ts         6511
+useAutoGrowInputWidth.ts    2766
+useAvatarSrc.ts             2373
+useEditorFullscreen.ts       158
+useNodeSubmit.ts           12977
+useTaskStarter.ts          33234
+
+

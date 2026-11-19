@@ -1,0 +1,10 @@
+﻿D:\project\vuetify_approval\vite-project\approval-app\src\components\approval\ApprovalSummaryTable.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\approval\FlowScopeChip.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\streamNodes\SelectNode.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\DeleteAllOrdersDialog.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\DeleteOrderButton.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\GoodsInfo.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\ProductInfoCard.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\UserAvatar.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\composables\useTaskStarter.ts
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\approvalPage.vue

@@ -126,6 +126,7 @@
               :stock-amount="stockAmount"
               :stock-qty="stockQty"
               :type-templates="order.chain?.types"
+              @submit-independent="payload => emit('submitIndependent', payload)"
             />
 
             <!-- 时间线最后一条：流转为什么停下（与审批页同一口径） -->
@@ -162,6 +163,8 @@
 <script setup lang="ts">
   import type { UserBrief } from '@/api/api'
   import type { ApprovalChainItem, ApprovalOrder, NodeSubmitPayload } from '@/types/approval'
+  // 独立审批办理的收集载荷类型（emit submitIndependent 用，落库在调用方的 useIndependentSubmit）
+  import type { IndependentSubmitPayload } from '@/composables/useNodeSubmit'
   import { useRouter } from 'vue-router'
   // 办结后的「审批信息表」（含导出 PDF）：与审批页同一个组件、同一份数据
   import ApprovalSummaryTable from '@/components/approval/ApprovalSummaryTable.vue'
@@ -254,6 +257,12 @@
   const emit = defineEmits<{
     submit: [payload: NodeSubmitPayload]
     select: [payload: { action: 'cc' | 'transfer', user: UserBrief }]
+    /**
+     * 独立审批提交自己的结论：落库仍由调用方接（useIndependentSubmit）——
+     * 与 submit 同一架构（组件收集、页面落库），但**不走 submit 通道**：
+     * 独立审批不推进流程、不改主单 status（见 useNodeSubmit 的 useIndependentSubmit）。
+     */
+    submitIndependent: [payload: IndependentSubmitPayload]
     close: []
     prev: []
     next: []

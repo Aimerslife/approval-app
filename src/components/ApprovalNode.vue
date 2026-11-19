@@ -5,6 +5,8 @@
     <template #icon>
       <!-- 飞书提醒环节没有人可显示首字，圆点里放一个铃铛 -->
       <v-icon v-if="isNotifyStep" :color="iconColor" size="14">mdi-bell-ring-outline</v-icon>
+      <!-- 独立审批环：圆点放"多人核验"图标（它不是某一个人的环节，是多人各办各的旁路审批） -->
+      <v-icon v-else-if="isIndependentStep" :color="iconColor" size="14">mdi-account-multiple-check-outline</v-icon>
       <span v-else :style="{ fontSize: '13px', color: iconColor }">{{ initials }}</span>
     </template>
 
@@ -31,6 +33,18 @@
           <v-icon color="primary" size="16">mdi-bell-ring-outline</v-icon>
           <span class="text-body-small font-weight-medium">{{ notifyItem?.name || '飞书提醒' }}</span>
           <v-chip color="info" label size="x-small" variant="tonal">飞书提醒</v-chip>
+        </template>
+
+        <!--
+          独立审批环节：主流程旁路发起、**不阻塞主线**（见 types/approval 的 ApprovalFlowIndependentNode）。
+          头部显示独立审批名称 + 橙色徽标；办理人逐个列在下面（各自带结论），
+          不走"单人头像"那套 —— 它不是某一个人的环节。
+        -->
+        <template v-else-if="isIndependentStep">
+          <v-icon color="#EA580C" size="16">mdi-account-multiple-check-outline</v-icon>
+          <span class="text-body-small font-weight-medium">{{ independentItem?.independent?.title || '独立审批' }}</span>
+          <v-chip color="orange" label size="x-small" variant="tonal">独立审批</v-chip>
+          <span v-if="independentDoneText" class="text-[11px] text-medium-emphasis">{{ independentDoneText }}</span>
         </template>
 
         <template v-else>
@@ -108,6 +122,68 @@
             </v-card>
           </v-dialog>
         </template>
+
+        <!--
+          独立审批的「填写结论」入口：只给"该环成员里是我、且我还没办"的人显示
+          （canHandleIndependent，见 script；主线 currentStep 语义不适用于它 —— 它不阻塞主线）。
+          提交走 emit('submit-independent')，页面用 useIndependentSubmit 落库 ——
+          与主链 submitNode 分开：独立审批不推进流程、不改主单状态。
+        -->
+        <v-dialog v-if="isIndependentStep" v-model="indDialog" max-width="430">
+          <template #activator="{ props: activatorProps }">
+            <v-btn v-if="canHandleIndependent" color="orange" size="x-small" variant="tonal" v-bind="activatorProps">
+              填写结论
+            </v-btn>
+            <span v-else-if="myIndependentMember?.handled_at" class="text-[11px] text-medium-emphasis">
+              我已提交
+            </span>
+          </template>
+
+          <v-card>
+            <v-card-title class="d-flex align-center ga-2 text-[15px] py-3">
+              <v-icon color="#EA580C" size="18">mdi-account-multiple-check-outline</v-icon>
+              <span>独立审批 · {{ independentItem?.independent?.title || '' }}</span>
+            </v-card-title>
+
+            <v-divider />
+
+            <div class="px-4 py-3 d-flex flex-column ga-3">
+              <!-- 子流程模式：整条子链的进度（每一环 办完/总人数），来自 pushIndependent 冗余进环上的快照 -->
+              <div v-if="(independentItem?.independent?.progress?.length ?? 0) > 1">
+                <div class="text-[12px] text-medium-emphasis mb-1">办理进度</div>
+                <div class="d-flex flex-column ga-1">
+                  <div v-for="(p, pi) in independentItem?.independent?.progress" :key="pi"
+                    class="d-flex align-center ga-2">
+                    <v-icon :color="p.done >= p.total ? 'success' : 'grey'" size="13">
+                      {{ p.done >= p.total ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                    </v-icon>
+                    <span class="text-[12px]">{{ p.name }}</span>
+                    <span class="text-[11px] text-medium-emphasis">{{ p.done }}/{{ p.total }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div class="text-[12px] text-medium-emphasis mb-1">结论</div>
+                <v-radio-group v-model="indResult" density="compact" hide-details inline>
+                  <v-radio v-for="o in independentOptions" :key="o" :label="independentOptionLabel(o)" :value="o" />
+                </v-radio-group>
+              </div>
+
+              <v-textarea v-model="indOpinion" density="compact" hide-details label="办理意见（选填）" rows="2"
+                variant="outlined" />
+            </div>
+
+            <v-divider />
+
+            <v-card-actions>
+              <v-spacer />
+              <v-btn variant="text" @click="indDialog = false">取消</v-btn>
+              <v-btn color="orange" :disabled="!indResult" :loading="indSubmitting" variant="flat"
+                @click="submitMyIndependent">提交结论</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
       </div>
 
       <div class="ml-[10px]">
@@ -125,6 +201,33 @@
     <div v-if="isNotifyStep && notifyTo.length > 0" class="mt-2 d-flex align-center flex-wrap gap-2">
       <v-chip color="info" label size="x-small" variant="tonal">提醒对象</v-chip>
       <span class="text-[12px] text-medium-emphasis">{{ notifyTo.join('、') }}</span>
+    </div>
+
+    <!--
+      独立审批环节的详情：**逐人结论**（各办各的，每人一行）。
+      结论是 pushIndependent 按办理人姓名回填到各成员上的（带 by 的流水对号），
+      谁办完显示谁 —— 没办的成员行给"待提交"占位，全员办完才算这个独立审批完成。
+      不复用主链 resultChips（那是 manager[0] 单人口径，会把多人环显示成一个人的结论）。
+    -->
+    <div v-if="isIndependentStep" class="mt-2 d-flex flex-column ga-1">
+      <div v-for="(row, ri) in independentRows" :key="ri" class="d-flex align-center flex-wrap gap-2">
+        <v-avatar size="22">
+          <v-img v-if="memberAvatar(row.member)" cover :src="memberAvatar(row.member)"
+            @error="onAvatarError(row.member)" />
+          <span v-else class="text-[10px] font-weight-semibold">{{ row.member.name?.slice(0, 1) }}</span>
+        </v-avatar>
+
+        <span class="text-[12px]">{{ row.member.name }}</span>
+
+        <v-chip v-if="row.resultLabel" :color="row.result === 'reject' ? 'error' : 'success'" label size="x-small"
+          variant="tonal">
+          {{ row.resultLabel }}
+        </v-chip>
+        <span v-else class="text-[11px] text-medium-emphasis">待提交</span>
+
+        <span v-if="row.opinion" class="text-[11px] text-medium-emphasis">意见：{{ row.opinion }}</span>
+        <span v-if="row.at" class="text-[11px] text-medium-emphasis">{{ formatDate(row.at) }}</span>
+      </div>
     </div>
 
     <!-- 已办理：渲染该审批人的选项 / 信息 / 文件 -->
@@ -233,6 +336,8 @@ import type { UserBrief } from '@/api/api'
 import type { ApprovalChainItem, ApprovalNodeOption, NodeSubmitPayload, ReceiverTeam } from '@/types/approval'
 // 审批类型（结论码 → 选中后要填什么）：页面从单据快照里取，本组件只负责透传给办理表单
 import type { ApprovalTypeTemplate } from '@/utils/approvalTypes'
+// 独立审批办理弹窗的收集载荷类型（emit submit-independent 用）
+import type { IndependentSubmitPayload } from '@/composables/useNodeSubmit'
 import dayjs from 'dayjs'
 // proxyAvatar：飞书头像要经服务端代理才能在浏览器里正常显示（历史单里选过的"接收人"带着头像）
 // 头像目录：单据快照里不带成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
@@ -240,9 +345,15 @@ import { useAvatarDirectory } from '@/stores/avatarDirectory'
 // 头像地址的逐级降级（代理 → 原地址 → 首字）：见 composables/useAvatarSrc 的文件头
 import { useAvatarSrc } from '@/composables/useAvatarSrc'
 // 「选择接收团队」的结论码：历史单的 members 没记 pick，按结论码补粒度（见 pickedReceivers）
-import { PICK_TEAM_RESULT } from '@/types/approval'
+import { APPROVAL_RESULTS, PICK_TEAM_RESULT } from '@/types/approval'
 // 环节负责人口径（mainOf）与「连续同人环节」的类型都来自这里，别在组件里另写一套
 import { type ApprovalNextStep, mainOf, type RotationReceipt } from '@/utils/approvalRuntime'
+// 独立审批"是不是该环成员"的判定：与主链成员比较同一套口径（sameApprover）
+import { sameApprover } from '@/types/approval'
+// 登录人：判定"独立审批这一环是不是我办"（userStore.member 与链成员同形状）
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
 import { buildColorScale, discardColorStep, hexToRgb, pickColorStep } from '@/utils/color'
 import { ensurePinyin, pinyinInitials } from '@/utils/pinyin'
 // shareValueText：按「总金额 ÷ 总数量 × 数量」折算货值（口径与办理表单里的「价值」同一份）
@@ -501,6 +612,83 @@ function isNotifyStepData(data?: ApprovalChainItem[]) {
 const isNotifyStep = computed(() => isNotifyStepData(props.data))
 /** 提醒环节那一条成员：name = 提醒名称，notify = { content, to } */
 const notifyItem = computed(() => props.data.find(i => i.type === 'notify'))
+
+/*
+ * ===== 「独立审批」环节（type/标记见 types/approval 的 ApprovalFlowIndependentNode）=====
+ * 主流程旁路发起、**不阻塞主线**：主线 currentStep 语义不适用于它 ——
+ * activeStep 要跳过它（同跳过提醒环），它的"该不该办"由「该环成员里是不是我、我办了没有」决定。
+ */
+function isIndependentStepData(data?: ApprovalChainItem[]) {
+  return !!data?.some(i => i.independent)
+}
+/** 本节点就是「独立审批」环节 */
+const isIndependentStep = computed(() => isIndependentStepData(props.data))
+/** 独立审批环上带标记的那条成员（independent: { title, options, nodeId }） */
+const independentItem = computed(() => props.data.find(i => i.independent))
+/** 结论选项：快照里冗余了一份（pushIndependent 写入）；没带 = 内置默认 通过/驳回 */
+const independentOptions = computed<string[]>(() => {
+  const list = independentItem.value?.independent?.options ?? []
+  return list.length > 0 ? list : ['pass', 'reject']
+})
+/** 结论码 → 人话（内置码翻译，自定义码原样显示 —— 与画布卡片同一套口径） */
+function independentOptionLabel (code: string) {
+  return APPROVAL_RESULTS.find(r => r.value === code)?.label ?? code
+}
+/**
+ * 逐人结论行：独立环的每位成员一条（结果由 pushIndependent 按 by 对号回填，
+ * 没办的 result 为空 → 「待提交」）。
+ */
+const independentRows = computed(() => props.data
+  .filter(m => m.type === 'manager')
+  .map(m => ({
+    member: m,
+    result: m.result ?? '',
+    resultLabel: m.result_label || (m.result ? APPROVAL_RESULTS.find(r => r.value === m.result)?.label ?? m.result : ''),
+    opinion: m.opinion ?? '',
+    at: m.handled_at ?? '',
+  })))
+/** 进度文案（头部小字）：「2/3 已提交」；没人参与时不显示 */
+const independentDoneText = computed(() => {
+  const rows = independentRows.value
+  if (rows.length === 0) return ''
+  const done = rows.filter(r => r.result).length
+  return done >= rows.length ? '已完成' : `${done}/${rows.length} 已提交`
+})
+/**
+ * 独立环里"我"的那个成员位（sameApprover 与主链成员比较同一口径，见 stores/user 的 member）。
+ * 找不到 = 我不是这一环的办理人（或不该看到办理入口）。
+ */
+const myIndependentMember = computed<ApprovalChainItem | undefined>(() => {
+  if (!isIndependentStep.value) return undefined
+  const me = userStore.member
+  if (!me) return undefined
+  return props.data.find(m => m?.type === 'manager' && sameApprover(m, me))
+})
+/** 我可以提交结论：我是成员、还没办过（重办覆盖走页面层，一期入口上办过就不显示） */
+const canHandleIndependent = computed(() =>
+  !!myIndependentMember.value && !myIndependentMember.value?.handled_at)
+
+/* 独立审批办理弹窗状态 */
+const indDialog = ref(false)
+const indResult = ref('')
+const indOpinion = ref('')
+const indSubmitting = ref(false)
+function submitMyIndependent () {
+  if (!indResult.value) return
+  const nodeId = independentItem.value?.independent?.nodeId
+  if (!nodeId) return
+  indSubmitting.value = true
+  emit('submit-independent', {
+    nodeId,
+    result: indResult.value,
+    resultLabel: independentOptionLabel(indResult.value),
+    opinion: indOpinion.value,
+    done: (ok: boolean) => {
+      indSubmitting.value = false
+      if (ok) indDialog.value = false
+    },
+  })
+}
 /**
  * 提醒对象（这一环会通知谁）。
  * 建单期只把**姓名**快照进 chain（见 pushNotify），所以这里只有名字、没有头像/部门。
@@ -604,8 +792,12 @@ const actionSteps = computed(() => [
  * ⚠️ 跳过「飞书提醒」环节：它没有办理人、也不会有 handled_at，
  *    不跳过的话 `mainOf(提醒环)` 兜底取到那条 notify 成员、永远"未办理"，
  *    于是弹窗会对着一个不需要办的环节显示「办理」（或"未到该环节"）。
+ * ⚠️ 同样跳过「独立审批」环节：它**不阻塞主线**，不该占主链的 activeStep ——
+ *    它的办理入口是环上自己的「填写结论」按钮（canHandleIndependent 判定），
+ *    走 useIndependentSubmit 提交，与主链「办理」完全是两条通道。
  */
-const activeStep = computed(() => actionSteps.value.find(s => !isNotifyStepData(s.data) && !mainOf(s.data)?.handled_at))
+const activeStep = computed(() => actionSteps.value.find(s =>
+  !isNotifyStepData(s.data) && !isIndependentStepData(s.data) && !mainOf(s.data)?.handled_at))
 
 /** 当前动作在组内的序号（从 1 起）与动作总数：>1 时弹窗里提示"办完自动接下一环" */
 const actionNo = computed(() => actionSteps.value.findIndex(s => s.index === activeStep.value?.index) + 1)
@@ -883,6 +1075,11 @@ const emit = defineEmits<{
   (e: 'submit', payload: NodeSubmitPayload): void
   /** 抄送 / 转办选人：落库由页面接管（三处入口共用 composables/useApprovalSelect） */
   (e: 'select', payload: { action: 'cc' | 'transfer', user: UserBrief }): void
+  /**
+   * 独立审批提交自己的结论：页面接住后走 useIndependentSubmit 落库
+   * （与主链 submit 分开 —— 独立审批不推进流程、不改主单状态）。
+   */
+  (e: 'submit-independent', payload: IndependentSubmitPayload): void
 }>()
 
 </script>

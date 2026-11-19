@@ -186,6 +186,7 @@
       @prev="backStep"
       @select="handleSelect"
       @submit="onDrawerSubmit"
+      @submit-independent="onDrawerIndependentSubmit"
     />
   </v-navigation-drawer>
 
@@ -231,7 +232,8 @@
   import { useApprovalTable } from '@/composables/useApprovalTable'
   import { drawerSet } from '@/composables/useEditorFullscreen'
   // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
-  import { useNodeSubmit } from '@/composables/useNodeSubmit'
+  import { useIndependentSubmit, useNodeSubmit } from '@/composables/useNodeSubmit'
+  import type { IndependentSubmitPayload } from '@/composables/useNodeSubmit'
   import { APPROVAL_TABLE_HEADERS, type ApprovalRow, toApprovalRow } from '@/utils/approvalRows'
   // 重算链路：只为了把 chain / stepIds / currentStep 交给 useApprovalSelect（详情视图内部自己算展示）
   import { runtimeOf } from '@/utils/approvalRuntime'
@@ -465,6 +467,21 @@
 
   function onDrawerSubmit (payload: NodeSubmitPayload) {
     void submitNode(payload)
+  }
+
+  /*
+   * 独立审批的提交：与主链 onDrawerSubmit 分开走 useIndependentSubmit ——
+   * 它不推进流程、不改主单 status，只把结论按办理人回填到时间线那一环。
+   * onUpdated 回写口径与主链一致：必须更新**列表里那条**，抽屉的时间线才会跟着变。
+   */
+  const { submitIndependent } = useIndependentSubmit({
+    order: selectedOrder,
+    onMessage: showMsg,
+    onUpdated: updated => applyUpdated(updated),
+  })
+
+  function onDrawerIndependentSubmit (payload: IndependentSubmitPayload) {
+    void submitIndependent(payload)
   }
 
   onMounted(() => {

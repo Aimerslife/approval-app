@@ -172,7 +172,8 @@
         <div class="mock-run-grid">
           <!-- 主办面：与主页审批抽屉同一份组件（头部/信息/时间线/办理栏一体）；办理选项统一由快照里的审批类型全集下发 -->
           <v-sheet class="mock-card mock-detail" rounded="12">
-            <ApprovalDetailView :order="mockOrder!" @select="onMockSelect" @submit="onMockSubmit" />
+            <ApprovalDetailView :order="mockOrder!" @select="onMockSelect" @submit="onMockSubmit"
+          @submit-independent="onMockIndependentSubmit" />
           </v-sheet>
 
           <!-- 模拟侧栏：上下文值 + 通知预演 -->
@@ -256,7 +257,14 @@
     branchTerminalMapOf, compactBranchTerminal, compactFlowSnapshot, type FlowContext,
     flowToChain, mainOf, type NodeDecision, type NodeSubmitPayload,
     PICK_MEMBERS_RESULT, PICK_TEAM_RESULT, rebuildChain, renameBranchTerminalKeys, slimFlowMembers,
+    subApprovalStateOf,
   } from '@/types/approval'
+  // 独立审批模拟提交的载荷类型（emit submit-independent 用）
+  import type { IndependentSubmitPayload } from '@/composables/useNodeSubmit'
+  // 登录人：独立审批流水按姓名（by）对号回填，模拟与真实提交同一来源
+  import { useUserStore } from '@/stores/user'
+
+  const userStore = useUserStore()
   // 动态审批人（角色）解析：只读
   import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
   import { nextStepSameApprover } from '@/utils/approvalRuntime'
@@ -573,6 +581,43 @@
   function onMockSelect () {
     // 与真实办理唯一的差异之一：抄送/转办会写库，模拟里没有意义
     window.alert('模拟运行不执行抄送/转办（会写真实数据）')
+  }
+
+  /*
+   * 独立审批的模拟提交：纯内存（真实实现走 useIndependentSubmit 写库）。
+   * 追加一条带 by 的流水 → 重算 → 独立环自动回填结论（pushIndependent 按 by 对号）。
+   * ⚠️ status 原样保留：独立审批不参与主链终态（与真实提交同一口径）。
+   */
+  function onMockIndependentSubmit (payload: IndependentSubmitPayload) {
+    const order = mockOrder.value
+    const snapshot = order?.chain
+    const flow = snapshot?.flow
+    if (!order || !snapshot || !flow?.length) {
+      payload.done(false)
+      return
+    }
+    // 与 useIndependentSubmit 同一口径：子流程模式下没解锁的环节不收结论（防越环）
+    const states = subApprovalStateOf(flow, snapshot.decisions ?? [], new Set(), snapshot.context)
+    const stepState = states.find(s => s.steps?.some(st => st.id === payload.nodeId))?.steps
+      ?.find(st => st.id === payload.nodeId)
+    if (stepState && !stepState.unlocked) {
+      payload.done(false)
+      return
+    }
+    const decisions: NodeDecision[] = [
+      ...(snapshot.decisions ?? []),
+      {
+        stepId: payload.nodeId,
+        result: payload.result,
+        result_label: payload.resultLabel,
+        opinion: payload.opinion,
+        by: userStore.member?.name ?? '',
+        handled_at: new Date().toISOString(),
+      },
+    ]
+    const rebuilt = rebuildChain(flow, decisions, branchTerminalMapOf(snapshot), snapshot.context ?? {})
+    order.chain = { ...snapshot, chain: rebuilt.chain, decisions }
+    payload.done(true)
   }
 
   /**

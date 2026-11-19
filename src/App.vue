@@ -192,6 +192,8 @@ userStore.loadPreferences()
 const allLinks = [
   { icon: 'mdi-view-list', text: '所有审批单', to: '/home' },
   { icon: 'mdi-arrange-send-backward', text: '我的审批单', to: '/mine' },
+  // 独立审批：表格视图逐条办理，只摆分配给我的环（提交后回写主审批单）
+  { icon: 'mdi-check-decagram', text: '独立审批', to: '/singleJudge' },
   { icon: 'mdi-chart-areaspline', text: '分析', to: '/analyze' },
   { icon: 'mdi-creation', text: '任务', to: '/workStream' },
   { icon: 'mdi-file-table-box', text: '数据', to: '/setDatas' },

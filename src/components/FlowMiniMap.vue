@@ -157,6 +157,10 @@
         if (n.type === 'ref') {
           continue
         }
+        // 「独立审批」没有分支可画（旁路环节，同引用模板的态度：小地图上略过它的分支维度）
+        if (!('branches' in n)) {
+          continue
+        }
         const def = n.branches.find(b => !b.conditions?.length && !b.condition) ?? n.branches[0]
         const list = allBranches ? n.branches : (def ? [def] : [])
         for (const b of list) walkBranch(b)

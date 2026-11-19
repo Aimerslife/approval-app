@@ -1,0 +1,11 @@
+﻿D:\project\vuetify_approval\vite-project\approval-app\src\components\approval\ApprovalDetailView.vue:107
+D:\project\vuetify_approval\vite-project\approval-app\src\components\approval\ApprovalHandleForm.vue:555
+D:\project\vuetify_approval\vite-project\approval-app\src\components\flow\LoopCardCanvas.vue:65
+D:\project\vuetify_approval\vite-project\approval-app\src\components\flow\LoopCardCanvas.vue:90
+D:\project\vuetify_approval\vite-project\approval-app\src\components\ApprovalNode.vue:448
+D:\project\vuetify_approval\vite-project\approval-app\src\components\FlowPreview.vue:35
+D:\project\vuetify_approval\vite-project\approval-app\src\components\FlowPreview.vue:44
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\approvalPage.vue:81
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\createStream.vue:823
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\createStream.vue:883
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\createStream.vue:909

@@ -1,0 +1,30 @@
+﻿8: export interface UserInfo {
+10: email?: string
+11: username?: string
+12: name?: string
+13: /** 飞书 open_id（OAuth2 登录后由 PocketBase 自动写入） */
+14: open_id?: string
+27: /** 企业名（服务端写死的常量，见 server/config.ts 的 companyName；登录时落库） */
+28: company_name?: string
+37: * 只放**用户级偏好**；账号事实字段（name / email / avatar_url / role）不要往这里塞。
+39: export interface UserPreferences {
+105: export const useUserStore = defineStore('user', () => {
+106: const user = ref<UserInfo | null>(null)
+107: const token = ref('')
+109: const isLoggedIn = computed(() => !!token.value && !!user.value)
+112: * 当前登录者 → **审批链成员的形状**（只带认人要用的 name / email / open_id）。
+116: * （name → email → open_id），所以别在页面里另拼一个对象。
+120: const member = computed<ApprovalChainItem | undefined>(() => {
+121: const u = user.value
+126: ...(u.open_id ? { open_id: u.open_id } : {}),
+127: ...(u.name ? { name: u.name } : {}),
+128: ...(u.email ? { email: u.email } : {}),
+135: const appRole = computed(() => normalizeRole(user.value?.role))
+136: const displayName = computed(
+137: () => user.value?.name || user.value?.email || user.value?.username || '未登录',
+139: const avatar = computed(() => resolveAvatar(user.value?.avatar_url || user.value?.avatar))
+143: const model = pb.authStore.record
+147: email: model.email,
+148: username: model.username,
+149: name: model.name,
+150: open_id: model.open_id,

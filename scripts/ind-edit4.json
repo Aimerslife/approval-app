@@ -1,0 +1,34 @@
+{
+  "errors": [],
+  "treeRows": [
+    "事业部(1人)",
+    "高晓丹",
+    "总经理(100人)",
+    "市场部(9人)",
+    "拓业部(9人)",
+    "蔡姚铃",
+    "张蔓莉",
+    "王晓曼"
+  ],
+  "selectedShown": {
+    "showsUser": true,
+    "hasRadios": true
+  },
+  "addMember": {
+    "members": [
+      "陈培锋办理财务BP组"
+    ],
+    "toast": "已将 陈培锋 加入「独立审批1」 关闭"
+  },
+  "addRole": {
+    "rows": [
+      "陈培锋办理财务BP组",
+      "团队负责人动态"
+    ],
+    "hasDeptInput": true
+  },
+  "optionEdit": {
+    "hasInput": true,
+    "editable": true
+  }
+}

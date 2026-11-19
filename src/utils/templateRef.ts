@@ -310,6 +310,16 @@ export async function expandTemplateRefs (
       const steps = await expandList(node.steps ?? [], stack, prevId, inRef, true)
       return { ...node, steps: inRef ? (ensureRejectLoopBackInSteps(steps, prevId) as any[]) : steps }
     }
+    /*
+     * 「独立审批」子流程：同轮询口径 —— steps 是步骤位，里面的引用照样要展开。
+     * 放开节点类型后（见 approvalFlow 独立编译分支），子链里允许「引用模板」：
+     * 不下钻的话 ref 残留在快照里，建单自检直接报「没展开」（单子建不出来）。
+     * 展开（拍平）之后的子链就是普通步骤序列，运行时游标按 approval/notify/branch 推进。
+     */
+    if (node?.type === 'independent' && Array.isArray(node.steps)) {
+      const steps = await expandList(node.steps ?? [], stack, prevId, inRef, true)
+      return { ...node, steps: inRef ? (ensureRejectLoopBackInSteps(steps, prevId) as any[]) : steps }
+    }
     // 其余（审批 / 提醒 / 引用自己）原样返回：引用卡片由调用它的 expandList 处理形态
     return node
   }

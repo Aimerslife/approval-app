@@ -1,0 +1,104 @@
+src/utils/approvalProbe.ts:67  guard=if (s.type === 'branch') {
+    for (const b of s.branches ?? []) {
+src/utils/approvalProbe.ts:86  guard=if (s.type === 'probe' && s.probe) {
+    for (const b of s.branches ?? []) {
+src/utils/approvalProbe.ts:98  guard=if (node.type === 'probe') {
+    for (const b of node.branches ?? []) {
+src/utils/approvalProbe.ts:112  guard=if (node.type === 'branch') {
+    for (const b of node.branches ?? []) {
+src/utils/approvalProbe.ts:168  guard=if (s.type === 'branch') {
+    return { ...s, branches: (s.branches ?? []).map(b => ({ ...b, steps: mapSteps(b.steps) })) }
+src/utils/approvalProbe.ts:199  guard=if (node.type === 'branch') {
+    nodes.push({ ...node, branches: (node.branches ?? []).map(b => ({ ...b, steps: mapSteps(b.steps) }))
+src/utils/approvalRotation.ts:102  guard=if (s.type === 'branch') {
+    for (const b of s.branches ?? []) {
+src/utils/approvalRotation.ts:151  guard=if (node.type === 'ref') {
+    for (const b of node.branches) {
+src/utils/approvalRotation.ts:363  guard=if (s.type === 'branch') {
+    for (const b of s.branches ?? []) {
+src/utils/approvalRotation.ts:432  guard=NONE
+    for (const b of s.branches ?? []) {
+src/utils/approvalRotation.ts:563  guard=if (s.type === 'branch' || s.type === 'probe') {
+    for (const b of s.branches ?? []) {
+src/utils/templateRef.ts:267  guard=NONE
+    const branches = withKids.branches.map((b: any) => ({
+src/utils/templateRef.ts:297  guard=NONE
+    for (const b of node.branches ?? []) {
+src/utils/templateRef.ts:343  guard=NONE
+    for (const b of node.branches ?? []) {
+src/utils/templateRef.ts:389  guard=if (s?.type === 'branch' || s?.type === 'probe') {
+    for (const b of s.branches ?? []) {
+src/utils/templateRef.ts:401  guard=if (n?.type === 'branch' || n?.type === 'probe') {
+    for (const b of n.branches ?? []) {
+src/utils/templateRef.ts:436  guard=if (out.type === 'branch' || out.type === 'probe') {
+    out.branches = (n.branches ?? []).map((b: any) => prefixBranch(b))
+src/utils/templateRef.ts:483  guard=if (n.type === 'branch' || n.type === 'probe') {
+    const b = (n.branches ?? []).find((x: any) => !x?.conditions?.length && !x?.condition) ?? (n.branche
+src/utils/templateRef.ts:529  guard=if (n?.type === 'branch' || n?.type === 'probe') {
+    for (const b of n.branches ?? []) {
+src/utils/templateRef.ts:567  guard=if (s?.type === 'branch' || s?.type === 'probe') {
+    for (const b of s.branches ?? []) {
+src/utils/templateRef.ts:579  guard=if (node?.type === 'branch' || node?.type === 'probe') {
+    for (const b of node.branches ?? []) {
+src/utils/expandFlowForOrder.ts:138  guard=if (s.type === 'branch') {
+    for (const b of s.branches ?? []) {
+src/utils/expandFlowForOrder.ts:156  guard=if (n.type === 'branch') {
+    for (const b of n.branches ?? []) {
+src/utils/loopCardGraph.ts:192  guard=if (node.type === 'probe') {
+    branches: node.branches.map(b => clearExit(b)),
+src/utils/loopCardGraph.ts:197  guard=if (node.type === 'branch') {
+    out.push({ id: node.id, type: 'branch', branches: node.branches.map(b => clearExit(b)) })
+src/utils/loopCardGraph.ts:219  guard=NOT-if (s.type !== 'branch') {
+    return { ...s, branches: (s.branches ?? []).map(b => clearExit(b)) }
+src/utils/approvalFlow.ts:1006  guard=if (pn.type === 'probe') {
+    const bad = findBadProbe(spec, (nested.branches ?? []).map(b => b.name))
+src/utils/approvalFlow.ts:1616  guard=NONE
+    const bad = findBadProbe(spec, (res.branches ?? []).map(b => b.name))
+src/utils/approvalFlow.ts:1894  guard=if (node.type === 'branch') {
+    for (const b of node.branches) {
+src/utils/approvalFlow.ts:1925  guard=if (node.type === 'probe') {
+    branches: (node.branches ?? []).map(b => ({ ...b, steps: ensureRejectLoopBackInSteps(b.steps, prevId
+src/utils/approvalFlow.ts:1997  guard=if ((s.type === 'branch' || s.type === 'probe') && s.branches?.length) {
+    for (const b of s.branches) {
+src/types/approval.ts:1322  guard=NONE
+    return node.branches.find(b => b.name === name) ?? null
+src/types/approval.ts:1704  guard=if (cur.type === 'branch') {
+    for (const b of cur.branches ?? []) {
+src/types/approval.ts:2095  guard=NONE
+    for (const b of s.branches) {
+src/types/approval.ts:2132  guard=NONE
+    for (const b of node.branches) {
+src/types/approval.ts:2173  guard=NONE
+    for (const b of s.branches ?? []) {
+src/types/approval.ts:2181  guard=NONE
+    for (const b of (node as { branches?: ApprovalBranch[] }).branches ?? []) {
+src/types/approval.ts:2214  guard=if (s.type === 'branch') {
+    for (const b of s.branches ?? []) {
+src/types/approval.ts:2239  guard=if (node.type === 'branch') {
+    for (const b of node.branches) {
+src/types/approval.ts:2270  guard=if (s.type === 'branch') {
+    for (const b of s.branches ?? []) {
+src/types/approval.ts:2289  guard=if (node.type === 'branch' || node.type === 'probe' || node.type === 'ref') {
+    for (const b of node.branches ?? []) {
+src/types/approval.ts:2629  guard=if (s.type === 'branch') {
+    for (const b of s.branches ?? []) {
+src/types/approval.ts:2650  guard=if (node.type === 'branch') {
+    for (const b of node.branches) {
+src/types/approval.ts:3291  guard=NONE
+    out.branches = n.branches.map(node)
+src/types/approval.ts:3400  guard=NONE
+    for (const b of s.branches ?? []) {
+src/types/approval.ts:3409  guard=NONE
+    for (const b of node.branches ?? []) {
+src/types/approval.ts:3458  guard=NOT-...(s.type && s.type !== 'approval' ? { type: s.type } : {}),
+    ...(s.branches?.length ? { branches: s.branches.map(compactBranch) } : {}),
+src/types/approval.ts:3472  guard=NONE
+    next.branches = node.branches.map(compactBranch)
+src/types/approval.ts:3516  guard=if (step.type === 'branch' && step.branches?.length) {
+    const first = step.branches.find(isDefaultBranch) ?? step.branches[0]
+src/types/approval.ts:3583  guard=if (node.type === 'ref') {
+    const first = node.branches.find(isDefaultBranch) ?? node.branches[0]
+src/utils/approvalRuntime.ts:716  guard=NONE
+    for (const b of (s.branches ?? []) as ApprovalBranch[]) {
+src/utils/approvalRuntime.ts:729  guard=NONE
+    for (const b of (node?.branches ?? []) as ApprovalBranch[]) {

@@ -48,7 +48,7 @@
           </template>
 
           <!-- 悬浮菜单本体：点人 = 树上点人（同一个 select 事件，右侧面板照常收人） -->
-          <v-card class="fav-menu" elevation="8">
+          <v-card class="fav-menu p-2" elevation="8">
             <div v-if="favorites.length === 0" class="text-[12px] text-medium-emphasis pa-2">
               暂无收藏 · 悬浮下方人员点击星标收藏
             </div>

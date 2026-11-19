@@ -31,7 +31,28 @@
         飞书提醒
       </v-btn>
 
-      <span class="card-canvas__hint">{{ hint || '这里的环节，每个组各走一遍' }}</span>
+      <v-btn
+        color="teal"
+        prepend-icon="mdi-database-search"
+        size="small"
+        variant="tonal"
+        @click="addNode('probe')"
+      >
+        数据查询
+      </v-btn>
+
+      <v-btn
+        v-if="!isLoop"
+        color="deep-purple"
+        prepend-icon="mdi-file-tree-outline"
+        size="small"
+        variant="tonal"
+        @click="addNode('ref')"
+      >
+        引用模板
+      </v-btn>
+
+      <span class="card-canvas__hint">{{ hint || (isLoop ? '这里的环节，每个组各走一遍' : '这里的环节会按顺序依次办理') }}</span>
     </div>
 
     <div class="card-canvas__stage flow-canvas">
@@ -100,6 +121,31 @@
           />
         </template>
 
+        <!-- 数据查询卡片：与主画布同一组件（集合/条件就地改，建单期按"有没有记录"挑分支） -->
+        <template #node-probe="{ id, data, selected }">
+          <ProbeNode
+            :branches="outBranches(id)"
+            :probe="probeDataOf(data)"
+            :selected="selected"
+            :title="data?.title"
+            @remove="removeNodeById(id)"
+          />
+        </template>
+
+        <!-- 引用模板卡片（独立审批专属）：与主画布同一组件；预览/打开事件透传给父级 -->
+        <template #node-ref="{ id, data, selected }">
+          <RefCardNode
+            :branches="outBranches(id)"
+            :data="data"
+            :selected="selected"
+            :templates="props.templates"
+            @branch-click="selectBranch"
+            @open="emit('open', $event)"
+            @preview="emit('preview', $event)"
+            @remove="removeNodeById(id)"
+          />
+        </template>
+
         <!--
           手动拖拽曲线（自定义类型 adjustable）：与主画布 / 预览页同一接法。
           不注册它的话，选了「手动拖拽曲线」这条线就画不出来（vue-flow 找不到该类型就退回默认）。
@@ -159,7 +205,7 @@
         <span v-else-if="edgeShape === 'adjustable'" class="edge-note">拖动线上的圆点可绕开交叉，双击复位</span>
       </div>
 
-      <div class="edge-row">
+      <div v-if="isLoop" class="edge-row">
         <span class="edge-label">走向</span>
 
         <select v-model="edgeExitMode" class="edge-input" style="width: 160px">
@@ -351,6 +397,8 @@
   // 条件左值的「四则运算」弹窗：与主画布共用同一个（校验与候选只写一处）
   import ConditionMathDialog from '@/components/flow/ConditionMathDialog.vue'
   import ConditionNode from '@/components/flow/ConditionNode.vue'
+  import ProbeNode from '@/components/flow/ProbeNode.vue'
+  import RefCardNode from '@/components/flow/RefCardNode.vue'
   import StartEndNode from '@/components/flow/StartEndNode.vue'
   import {
     APPROVAL_RESULTS,
@@ -387,7 +435,31 @@
      * 卡片上叫「提前跳出2」的那条，在这里一眼能看出它到底通向哪。
      */
     earlyExits?: { id: string, label: string, targetId: string }[]
+    /**
+     * 卡片形态：'loop' 组间轮询（默认）/ 'independent' 独立审批。
+     *
+     * 差别只在：①可放的节点（两种形态现在都放全套：审批 / 条件分支 / 提醒 / 查询；
+     * 「引用模板」是独立审批专属——轮询内部是"按组各走一遍"，引用的语义没验证过）；
+     * ②内部审批节点的**默认审批人**（轮询 = 本环组负责人；独立审批 = 组织管理员）；
+     * ③连线面板的「走向」（提前结束轮询是轮询专属概念）。
+     */
+    variant?: 'loop' | 'independent'
+    /**
+     * 「引用模板」卡片的下拉候选（`{ id, name, status }`）：由 createStream 传入
+     * （库里全量、已排除当前正在编辑的模板）。没传 = 没有候选可挑。
+     */
+    templates?: { id: string, name: string, status: number }[]
   }>()
+
+  const emit = defineEmits<{
+    /** 引用模板卡片点「预览」：父级弹 RefPreviewDialog（画布只透传） */
+    'preview': [templateId: string]
+    /** 引用模板卡片点「打开」：父级新开一个源模板编辑页（画布只透传） */
+    'open': [templateId: string]
+  }>()
+
+  /** 是不是轮询卡片（独立审批形态下隐藏轮询专属的按钮 / 面板） */
+  const isLoop = computed(() => props.variant !== 'independent')
 
   /** 可选的外部目标（缺省空数组，模板里不用到处判 undefined） */
   const outerList = computed(() => props.outerApprovals ?? [])
@@ -474,7 +546,7 @@
    * 新节点放在**最下面那个节点的下方**：卡片画布很小，按视口中心算容易叠在一起，
    * "往下长"既不会重叠，也符合"流程往下走"的读图习惯。
    */
-  function addNode (kind: 'approval' | 'condition' | 'notify') {
+  function addNode (kind: 'approval' | 'condition' | 'notify' | 'probe' | 'ref') {
     const bottom = Math.max(...nodes.value.map(n => Number(n.position?.y) || 0), 0)
     const id = uid()
     if (kind === 'approval') {
@@ -483,7 +555,7 @@
         id,
         type: 'approval',
         position: { x: 120, y: bottom + 140 },
-        data: { title: `环节${n}`, members: [leaderMember()] },
+        data: { title: `环节${n}`, members: [defaultMember()] },
       })
       return
     }
@@ -497,17 +569,56 @@
       })
       return
     }
+    if (kind === 'probe') {
+      const n = nodes.value.filter(x => x.type === 'probe').length + 1
+      nodes.value.push({
+        id,
+        type: 'probe',
+        position: { x: 120, y: bottom + 140 },
+        data: { title: `数据查询${n}`, probe: { collection: '', filter: '' } },
+      })
+      return
+    }
+    if (kind === 'ref') {
+      const n = nodes.value.filter(x => x.type === 'ref').length + 1
+      nodes.value.push({
+        id,
+        type: 'ref',
+        position: { x: 120, y: bottom + 140 },
+        data: { title: `引用模板${n}`, refTemplateId: '' },
+      })
+      return
+    }
     nodes.value.push({ id, type: 'condition', position: { x: 120, y: bottom + 140 } })
   }
 
+  /** 查询卡片的配置对象（与主画布 probeDataOf 同款：就地补空壳，父与卡共享同一引用） */
+  function probeDataOf (data: any): { collection: string, filter: string } {
+    if (!data?.probe) {
+      if (data) {
+        data.probe = { collection: '', filter: '' }
+      }
+      return { collection: '', filter: '' }
+    }
+    return data.probe as { collection: string, filter: string }
+  }
+
   /**
-   * 卡片内部审批节点的**默认审批人 = 本环的组负责人**。
-   * 展开时按"这一环轮到哪个组"填成 `dept_leader + dept = 组名`，再解析成真人
-   * （见 utils/approvalRotation 的 stampRing）。想换成固定部门 / 组织管理员，
-   * 在成员那一行改即可。
+   * 卡片内部审批节点的**默认审批人**，按形态取：
+   *  · 轮询卡片：**本环的组负责人** —— 展开时按"这一环轮到哪个组"填成
+   *    `dept_leader + dept = 组名`，再解析成真人（见 utils/approvalRotation 的 stampRing）。
+   *  · 独立审批：**组织管理员** —— 独立审批没有"组"的概念，给一个必然能解析出真人的
+   *    兜底，想换成固定人 / 其它动态负责人在成员那一行改即可。
    */
+  function defaultMember () {
+    return isLoop.value
+      ? { type: 'manager', name: '', email: '', role: { kind: 'loop_leader' } }
+      : { type: 'manager', name: '', email: '', role: { kind: 'tenant_manager' } }
+  }
+
+  /** 旧名兼容（轮询形态下的默认成员） */
   function leaderMember () {
-    return { type: 'manager', name: '', email: '', role: { kind: 'loop_leader' } }
+    return defaultMember()
   }
 
   function nodeDataOf (id: string) {
@@ -524,10 +635,12 @@
     return node.data
   }
 
-  /** 「+ 成员」= 加一个本环的组负责人（见组件头部的差别说明） */
+  /** 「+ 成员」= 加一个默认审批人（轮询 = 本环组负责人；独立审批 = 组织管理员，见 defaultMember） */
   function addLeaderTo (id: string) {
-    nodeDataOf(id)?.members.push(leaderMember())
-    say('已加「本环的组负责人」：展开时按这一环轮到的组解析')
+    nodeDataOf(id)?.members.push(defaultMember())
+    say(isLoop.value
+      ? '已加「本环的组负责人」：展开时按这一环轮到的组解析'
+      : '已加「组织管理员」：可在成员那一行换成固定人或其它动态负责人')
   }
 
   function addRoleMemberTo (id: string) {

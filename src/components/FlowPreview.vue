@@ -66,6 +66,16 @@
         <RefCardNode :branches="getBranches(id)" :data="data" readonly />
       </template>
 
+      <!--
+        独立审批卡片：只读预览，复用审批节点卡片（kind=independent 换配色/文案/结论选项展示）；
+        内部子流程与轮询卡片同款——只显示"内部子流程 · N 环"的进度提示，不展开内容。
+        ⚠️ 必须注册：漏了的话 vue-flow 退回默认渲染器（只认 data.label），画成空白灰块
+        （与上面 probe/loop/ref 踩的是同一个坑）。
+      -->
+      <template #node-independent="{ id, data }">
+        <ApprovalNode :branches="getBranches(id)" :data="data" kind="independent" />
+      </template>
+
       <!-- 手动拖拽曲线：按保存的弯点还原形状；预览态不渲染拖拽圆点 -->
       <template #edge-adjustable="edgeProps">
         <AdjustableEdge v-bind="(edgeProps as any)" :interactive="false" />
@@ -90,7 +100,7 @@
    *    vue-flow 对没注册的 type 会退回**默认渲染器**，而默认渲染器只认 `data.label` ——
    *    我们的节点都没有 label，于是就画成一块空白（"有些模板显示不全"就是这么来的，
    *    踩过：加了「数据查询」「组间轮询」之后漏在这里补）。
-   *    当前已注册：start / end / approval / condition / notify / probe / loop / ref。
+   *    当前已注册：start / end / approval / condition / notify / probe / loop / ref / independent。
    *
    * 只读：节点不可拖动、不可连线、不可选中，且不渲染删除 / 添加成员等编辑入口。
    */
@@ -338,6 +348,12 @@
 .flow-preview :deep(.rotation-filter) {
     border-style: solid;
     cursor: default;
+}
+
+/* 独立审批卡片里结论选项的"移除"小按钮：预览态只读，不给点（数据是深拷贝，点了也白点） */
+.flow-preview :deep(.ind-options .icon-btn) {
+    pointer-events: none;
+    opacity: 0.35;
 }
 
 .flow-preview :deep(.vue-flow__handle) {

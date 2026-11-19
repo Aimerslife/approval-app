@@ -212,6 +212,7 @@ declare global {
   const useId: typeof import('vue').useId
   const useIdle: typeof import('@vueuse/core').useIdle
   const useImage: typeof import('@vueuse/core').useImage
+  const useIndependentSubmit: typeof import('../src/composables/useNodeSubmit').useIndependentSubmit
   const useInfiniteScroll: typeof import('@vueuse/core').useInfiniteScroll
   const useIntersectionObserver: typeof import('@vueuse/core').useIntersectionObserver
   const useInterval: typeof import('@vueuse/core').useInterval
@@ -345,6 +346,9 @@ declare global {
   // @ts-ignore
   export type { UseApprovalSelectOptions } from '../src/composables/useApprovalSelect'
   import('../src/composables/useApprovalSelect')
+  // @ts-ignore
+  export type { IndependentSubmitPayload } from '../src/composables/useNodeSubmit'
+  import('../src/composables/useNodeSubmit')
   // @ts-ignore
   export type { TaskView, TaskResult, TaskRun, TaskStarterOptions, TaskStarter } from '../src/composables/useTaskStarter'
   import('../src/composables/useTaskStarter')

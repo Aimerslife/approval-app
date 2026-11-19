@@ -1,0 +1,27 @@
+﻿25: export function proxyAvatar(rawUrl?: string): string | undefined {
+83: export async function resetPassword(email: string) {
+96: export async function getOrgInfo() {
+102: export async function fetchChildDepartments(parentDeptId = '0') {
+108: export async function fetchAllDepartments(parentDeptId = '0'): Promise<any[]> {
+118: export async function getUsersByDepartment(departmentId: string, pageToken?: string) {
+133: export async function getDepartmentUsers(openId: string): Promise<{ code: number, msg: string, data: DepartmentUsersData }> {
+155: export async function getUserOrg(openId: string): Promise<{ code: number, msg?: string, data: UserOrgData }> {
+163: export async function getUserDetail(userId: string) {
+173: export async function fetchOrgTreeCache(): Promise<OrgTreeResponse> {
+181: export async function refreshOrgTree(): Promise<OrgTreeResponse> {
+207: export async function sendFeishuCard(params: SendCardParams) {
+357: export async function uploadBiRows(
+412: export async function purgeBiData (dryRun = false): Promise<PurgeSummary> {
+488: export async function syncBiSnapshots (
+543: export async function deleteApprovalOrder (id: string): Promise<DeleteOrderSummary> {
+588: export async function deleteOrdersByScope (scope: OrderDeleteScope, dryRun = false): Promise<DeleteHistorySummary> {
+605: export function deleteHistoryOrders (dryRun = false): Promise<DeleteHistorySummary> {
+610: export function deletePendingOrders (dryRun = false): Promise<DeleteHistorySummary> {
+636: export async function fetchMineOrders (tab: MineOrderTab): Promise<MineOrdersResult> {
+653: export async function fetchBiRows(
+674: export async function fetchAllBiRows(q: BiRowQuery): Promise<Record<string, unknown>[]> {
+694: export async function fetchBiFacets(
+707: export async function getDashbordDatas(
+784: export async function getWord(): Promise<YiyanData | undefined> {
+857: export async function fetchReminderLog (): Promise<ReminderLogPayload> {
+872: export async function runReminderOnce (): Promise<Partial<ReminderRunEntry>> {

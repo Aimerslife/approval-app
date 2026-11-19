@@ -1,0 +1,5 @@
+﻿2535: graph: {
+2765: async function loadGraph (id: string) {
+2767: const graph = record?.chain?.graph
+2817: async function saveStream () {
+2844: const payload = { chain, flow, graph: serializeGraph() }

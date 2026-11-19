@@ -1,0 +1,5 @@
+﻿260: } from '@/types/approval'
+464: /* ==================== 模拟办理（复刻 useNodeSubmit，副作用全部换成内存操作） ==================== */
+470: * 页内轻提示（对应真实提交侧 useNodeSubmit 的 options.onMessage：
+485: * 流程终态 → 审批单状态（与 useNodeSubmit 的 STATUS_BY_OUTCOME 同表）。
+495: * 「选择接收团队/部门」是否真的选了人 —— 与 useNodeSubmit.hasPickedMember 同一份口径

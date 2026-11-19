@@ -1,0 +1,2 @@
+﻿SelectNode.vue:164: deptError.value = '未获取到当前用户 open_id，请先通过飞书登录'
+SelectNode.vue:196: // 当前用户是否已选中（转办单选 / 抄送多选）

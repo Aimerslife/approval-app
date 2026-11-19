@@ -1,0 +1,37 @@
+{
+  "errors": [],
+  "tplId": "q5fp4xp8469bp82",
+  "dialogShown": {
+    "open": true,
+    "title": null
+  },
+  "sceneA": {
+    "toast": "审批流保存成功 关闭",
+    "flowTypes": [
+      "approval",
+      "independent"
+    ],
+    "indFlow": [
+      {
+        "name": "供应商确认",
+        "members": 1,
+        "options": [
+          "pass",
+          "reject"
+        ]
+      }
+    ]
+  },
+  "sceneB": {
+    "toast": "请输入审批流名称 关闭"
+  },
+  "treePick": {
+    "treeNodes": 0,
+    "sample": []
+  },
+  "selectedShown": false,
+  "sceneC": {
+    "members": [],
+    "toast": "请先在左侧选择员工 关闭"
+  }
+}

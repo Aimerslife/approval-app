@@ -1,0 +1,42 @@
+﻿== D:\project\vuetify_approval\vite-project\approval-app\src\pages\home.vue:177
+      外层只负责给宽高与关闭行为，内部自己排「头部固定 + 内容滚 + 办理栏贴底」。
+    -->
+    <ApprovalDetailView
+      :closable="true"
+      :has-next="hasNextStep"
+      :has-prev="hasPrevStep"
+      :index="selectedIndex + 1"
+      :order="selectedOrder"
+      :total="visibleRows.length"
+      @close="setClose"
+      @next="nextStep"
+      @prev="backStep"
+      @select="handleSelect"
+== D:\project\vuetify_approval\vite-project\approval-app\src\pages\mine.vue:149
+      <!-- ==================== 右：审批流程面板 ==================== -->
+      <v-sheet v-if="showDetail" class="mine-detail min-w-0" :class="{ 'mine-detail--fixed': tab === 'history' }">
+        <ApprovalDetailView :closable="tab === 'history'" :has-next="hasNextStep" :has-prev="hasPrevStep"
+          :index="selectedIndex + 1" :order="selectedOrder" :readonly="tab === 'history'" :total="activeRows.length"
+          @close="closeDetail" @next="nextStep" @prev="backStep" @select="handleSelect" @submit="onDrawerSubmit" />
+      </v-sheet>
+    </div>
+
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000" variant="tonal">
+      {{ snackbar.text }}
+    </v-snackbar>
+  </v-container>
+</template>
+== D:\project\vuetify_approval\vite-project\approval-app\src\pages\mockRun.vue:175
+          <!-- 主办面：与主页审批抽屉同一份组件（头部/信息/时间线/办理栏一体）；办理选项统一由快照里的审批类型全集下发 -->
+          <v-sheet class="mock-card mock-detail" rounded="12">
+            <ApprovalDetailView :order="mockOrder!" @select="onMockSelect" @submit="onMockSubmit" />
+          </v-sheet>
+
+          <!-- 模拟侧栏：上下文值 + 通知预演 -->
+          <aside class="mock-card mock-side d-flex flex-column">
+            <div class="d-flex align-center ga-2 px-3 pt-3">
+              <v-icon class="mock-icon-cyan" icon="mdi-bell-ring-outline" size="16" />
+              <span class="mock-card-tag mock-mono">Notify · 通知预演</span>
+              <v-spacer />
+              <span class="mock-mono mock-count">{{ notifyLogs.length }} 次推进</span>
+            </div>

@@ -1,0 +1,29 @@
+﻿96: <v-list-item title="独立审批" @click="addIndependentNode">
+806: @node-click="onNodeClick"
+843: @add-member="addMemberTo(id)"
+844: @add-role="addRoleMemberTo(id)"
+847: @remove="removeNodeById(id)"
+864: @remove="removeNodeById(id)"
+883: @remove="removeNodeById(id)"
+903: @add-member="addMemberTo(id)"
+904: @add-role="addRoleMemberTo(id)"
+906: @remove="removeNodeById(id)"
+918: 复用 ApprovalNode 卡片（kind=independent）：换配色/文案、没有结果分支；
+921: <template #node-independent="{ id, data, selected }">
+926: kind="independent"
+928: @add-member="addMemberTo(id)"
+929: @add-role="addRoleMemberTo(id)"
+930: @remove="removeNodeById(id)"
+951: @remove="removeNodeById(id)"
+976: @remove="removeNodeById(id)"
+1845: function onNodeClick ({ node }: { node: any }) {
+2493: * （见 types/approval 的 pushIndependent / subApprovalStateOf）。
+2496: function addIndependentNode () {
+2497: const seq = nodes.value.filter(n => n.type === 'independent').length + 1
+2500: type: 'independent',
+2508: return type === 'approval' || type === 'condition' || type === 'notify' || type === 'probe' || type === 'loop' || type === 'ref' || type === 'independent'
+2669: function addRoleMemberTo (nodeId: string) {
+2672: if (!node || (node.type !== 'approval' && node.type !== 'notify' && node.type !== 'independent')) return
+2679: function addMemberTo (nodeId: string) {
+2681: if (!node || (node.type !== 'approval' && node.type !== 'notify' && node.type !== 'independent')) return
+2692: const memberType = node.type === 'independent' ? 'manager' : radios.value

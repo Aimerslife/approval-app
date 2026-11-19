@@ -1,0 +1,9 @@
+﻿src/components/flow/ApprovalNode.vue(199,30): error TS2339: Property 'options' does not exist on type 'ApprovalNodeData'.
+src/components/flow/ApprovalNode.vue(199,52): error TS2339: Property 'options' does not exist on type 'ApprovalNodeData'.
+src/components/flow/ApprovalNode.vue(199,67): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/components/flow/ApprovalNode.vue(208,21): error TS2339: Property 'options' does not exist on type 'ApprovalNodeData'.
+src/components/flow/ApprovalNode.vue(208,41): error TS2339: Property 'options' does not exist on type 'ApprovalNodeData'.
+src/components/flow/ApprovalNode.vue(209,20): error TS2339: Property 'options' does not exist on type 'ApprovalNodeData'.
+src/components/flow/ApprovalNode.vue(209,33): error TS7006: Parameter 'o' implicitly has an 'any' type.
+src/components/flow/ApprovalNode.vue(213,16): error TS2339: Property 'options' does not exist on type 'ApprovalNodeData'.
+src/components/flow/ApprovalNode.vue(217,16): error TS2339: Property 'options' does not exist on type 'ApprovalNodeData'.

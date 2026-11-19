@@ -277,6 +277,13 @@ export function flowHasRoles (flow: ApprovalFlow): boolean {
       }
       continue
     }
+    // 独立审批的成员同样支持动态负责人（同提醒节点的口径）
+    if (node.type === 'independent') {
+      if (node.members?.some(m => m.role)) {
+        found = true
+      }
+      continue
+    }
     /*
      * 「组间轮询」卡片：内部的动态负责人同样要算进来。
      * 卡片内部的默认审批人就是 `loop_leader`（"本环的组负责人"），展开时才变成 `dept_leader`；
@@ -378,6 +385,15 @@ export function resolveFlowRoles (
     // 提醒节点的提醒对象同样要解析（可能含动态负责人）；content 等字段由 ...node 原样带过
     if (node.type === 'notify') {
       return { ...node, members: membersOf(node.members) ?? [] }
+    }
+    // 独立审批的成员同上：动态负责人解析成真人（建单期快照进单）；
+    // 子流程模式（steps）里每个子环节的成员同样要解析
+    if (node.type === 'independent') {
+      return {
+        ...node,
+        members: membersOf(node.members) ?? [],
+        ...(node.steps?.length ? { steps: stepsOf(node.steps) } : {}),
+      }
     }
     /*
      * 「组间轮询」卡片：内部子流程同样解析（步骤与嵌套分支里的成员都要填真人）。

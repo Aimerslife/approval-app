@@ -1,0 +1,18 @@
+﻿39: function findBad (items: ConditionExpr[], where: string): string | null {
+94: export function graphToFlowFrom (
+1687: function normalizeValue (v: unknown): unknown {
+1699: export function toFlowContext (row?: Record<string, unknown> | null): FlowContext {
+1729: export function flowContextOfOrder (order?: {
+1754: export function optionContextOf (
+1775: export function receiverTeamOf (
+1788: function prevHandledResultOf (
+1804: export const REJECT_BACK_NAME = '回退上一级'
+1809: function rejectCondition (): BranchCondition {
+1814: function makeRejectBackBranch (targetId: string): ApprovalBranch {
+1837: function rejectBackBranches (targetId: string): ApprovalBranch[] {
+1857: function asSingleCondition (expr: ConditionExpr | undefined): BranchCondition | null {
+1865: function firstConditionField (b: ApprovalBranch): string | undefined {
+1871: function hasRejectBack (branches: ApprovalBranch[], targetId: string): boolean {
+1878: function appendRejectBack (branches: ApprovalBranch[], targetId: string) {
+1885: export function ensureRejectLoopBack (flow: ApprovalFlow): ApprovalFlow {
+1978: export function ensureRejectLoopBackInSteps (

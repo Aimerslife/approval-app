@@ -100,6 +100,7 @@
               :stock-qty="stockQty"
               :type-templates="orderDatas?.chain?.types"
               @submit="onNodeSubmit"
+              @submit-independent="onIndependentSubmit"
             />
 
             <v-timeline-item v-if="receivers.length > 0" class="mb-6" dot-color="#1055C9" size="small">
@@ -237,7 +238,8 @@
   import ProductInfoCard from '@/components/ProductInfoCard.vue'
   import SelectNode from '@/components/streamNodes/SelectNode.vue'
   // 环节办理的落库逻辑（首页抽屉共用同一份，见 composables/useNodeSubmit.ts）
-  import { useNodeSubmit } from '@/composables/useNodeSubmit'
+  import { useIndependentSubmit, useNodeSubmit } from '@/composables/useNodeSubmit'
+  import type { IndependentSubmitPayload } from '@/composables/useNodeSubmit'
   // 组织目录：链路成员瘦身后（见 types/approval 的 slimFlowMembers），email / 部门按 open_id 现查
   import { useAvatarDirectory } from '@/stores/avatarDirectory'
   // 登录用户：右上角「上一个 / 下一个」按他锚定队列（见 queueAnchor，需求口径是"自己名下的单"）
@@ -858,6 +860,26 @@
      * 这里直接以**服务端记录**为准，把这类"看起来没生效"的问题一次性消掉
      * （审批单量很小，多一次读的成本可以忽略）。
      */
+    if (updated) {
+      await getDatas()
+    }
+  }
+
+  /*
+   * 独立审批的提交：与主链 onNodeSubmit 分开走 useIndependentSubmit ——
+   * 不推进流程、不改主单 status，结论按办理人回填到时间线那一环。
+   * 回写同样"以服务端记录为准"（重算后这一环的成员会带上各自的结论）。
+   */
+  const { submitIndependent } = useIndependentSubmit({
+    order: orderDatas,
+    onUpdated: updated => {
+      orderDatas.value = { ...orderDatas.value, ...updated }
+    },
+    onMessage: showMsg,
+  })
+
+  async function onIndependentSubmit (payload: IndependentSubmitPayload) {
+    const updated = await submitIndependent(payload)
     if (updated) {
       await getDatas()
     }

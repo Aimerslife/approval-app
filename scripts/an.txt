@@ -1,0 +1,19 @@
+﻿2: <div class="node-card" :class="{ selected: props.selected, 'is-notify': isNotify, 'is-independent': isIndependent }">
+7: <v-icon :color="isIndependent ? '#EA580C' : (isNotify ? '#0891b2' : '#2563eb')" size="13">
+8: {{ isIndependent ? 'mdi-account-multiple-check-outline' : (isNotify ? 'mdi-bell-ring-outline' : 'mdi-account-check-outline') }}
+15: :placeholder="isIndependent ? '如：供应商确认' : (isNotify ? '如：通知财务' : '环节名称')"
+24: <div v-if="!isNotify && !isIndependent && branches && branches.length > 1" class="branch-list">
+81: {{ isIndependent ? '办理' : (isNotify ? '提醒' : (m.type === 'manager' ? '审批' : '抄送')) }}
+95: <div v-if="props.data.members.length === 0" class="empty-hint" :title="isIndependent
+100: {{ isIndependent ? '还没有独立审批人（保存时会拦住）' : (isNotify ? '还没有提醒对象（保存时会拦住）' : '待指定（由上一环节「选择接收团队」指定接收方）') }}
+105: <v-icon class="mr-1" size="11">mdi-plus</v-icon>{{ isIndependent ? '添加办理人' : (isNotify ? '添加提醒对象' : '添加成员') }}
+116: <template v-if="isIndependent">
+118: <span v-for="(o, i) in independentOptions" :key="o" class="ind-option">
+124: <span v-if="independentOptions.length === 0" class="ind-options__default">默认：通过 / 驳回</span>
+167: * 卡片形态：'approval' 审批环节（默认）/ 'notify' 飞书提醒 / 'independent' 独立审批。
+175: kind?: 'approval' | 'notify' | 'independent'
+189: /** 是不是「独立审批」节点（主流程旁路发起、不阻塞主线，见 types/approval 的 ApprovalFlowIndependentNode） */
+190: const isIndependent = computed(() => props.kind === 'independent')
+195: * （见 types/approval 的 INDEPENDENT_DEFAULT_OPTIONS）。卡片里显示默认提示，
+198: const independentOptions = computed<string[]>(() =>
+308: .node-card.is-independent::before {

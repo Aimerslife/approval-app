@@ -1,18 +1,18 @@
 <template>
-    <div class="node-card" :class="{ selected: props.selected, 'is-notify': isNotify }">
+    <div class="node-card" :class="{ selected: props.selected, 'is-notify': isNotify, 'is-independent': isIndependent }">
         <Handle :position="Position.Top" type="target" />
 
         <div class="node-head">
             <span class="head-icon">
-                <v-icon :color="isNotify ? '#0891b2' : '#2563eb'" size="13">
-                    {{ isNotify ? 'mdi-bell-ring-outline' : 'mdi-account-check-outline' }}
+                <v-icon :color="isIndependent ? '#EA580C' : (isNotify ? '#0891b2' : '#2563eb')" size="13">
+                    {{ isIndependent ? 'mdi-account-multiple-check-outline' : (isNotify ? 'mdi-bell-ring-outline' : 'mdi-account-check-outline') }}
                 </v-icon>
             </span>
 
             <input
                 v-model="props.data.title"
                 class="node-title"
-                :placeholder="isNotify ? '如：通知财务' : '环节名称'"
+                :placeholder="isIndependent ? '如：供应商确认' : (isNotify ? '如：通知财务' : '环节名称')"
             >
 
             <button class="icon-btn del-btn" title="删除节点" @click.stop="emit('remove')">
@@ -21,7 +21,7 @@
         </div>
 
         <!-- 审批结果分支列表：该审批有第二条出线后出现，点击某条分支联动配置面板 -->
-        <div v-if="!isNotify && branches && branches.length > 1" class="branch-list">
+        <div v-if="!isNotify && !isIndependent && branches && branches.length > 1" class="branch-list">
             <div v-for="(b, i) in branches" :key="b.id" class="branch-row">
                 <button class="branch-item nodrag" :class="{ active: b.id === activeEdgeId }" title="点击配置此结果分支"
                     type="button" @click.stop="emit('branch-click', b.id)">
@@ -56,7 +56,20 @@
               用 template 包一层：轮询成员要多一行配置，但 .member-row 仍是 node-body 的
               直接子元素（间距、布局与改动前一致）。
             -->
-            <template v-for="(m, i) in props.data.members" :key="i">
+            <!--
+              独立审批的「子流程模式」：卡片里画过内部流程后，成员改在内部环节上配 ——
+              卡片上只留一句进度提示 + 编辑入口，避免"两处配成员不知道哪处生效"。
+            -->
+            <template v-if="isIndependent && isSubFlow">
+                <div class="member-row">
+                    <v-icon color="#EA580C" size="12">mdi-file-tree-outline</v-icon>
+                    <span class="member-name">内部子流程 · {{ subFlowCount }} 环</span>
+                    <span class="role-tag role-approve">依次办理</span>
+                </div>
+                <div class="empty-hint">成员在内部流程里配置（点下方「编辑内部流程」）；卡片上的成员列表已停用</div>
+            </template>
+
+            <template v-for="(m, i) in (isIndependent && isSubFlow ? [] : props.data.members)" :key="i">
             <div class="member-row">
                 <v-avatar class="member-avatar" size="20">
                     <v-img v-if="m.avatar" cover :src="m.avatar" />
@@ -78,7 +91,7 @@
                     <span class="member-name">{{ m.name }}</span>
 
                     <span class="role-tag" :class="m.type === 'manager' ? 'role-approve' : 'role-cc'">
-                        {{ isNotify ? '提醒' : (m.type === 'manager' ? '审批' : '抄送') }}
+                        {{ isIndependent ? '办理' : (isNotify ? '提醒' : (m.type === 'manager' ? '审批' : '抄送')) }}
                     </span>
 
                     <span v-if="m.department" class="member-dept" :title="m.department_path">
@@ -92,23 +105,53 @@
             </div>
             </template>
 
-            <div v-if="props.data.members.length === 0" class="empty-hint" :title="isNotify
-                ? '飞书提醒至少要有一个提醒对象，否则这一环不会发出任何通知（保存时会拦住）'
-                : '这一环可以留空：由上一环节的办理人用「选择接收团队」当场指定接收方（候选来自团队表、限定在本单所属部门内）；建单时会校验走到这里时有没有人可办'">
-                {{ isNotify ? '还没有提醒对象（保存时会拦住）' : '待指定（由上一环节「选择接收团队」指定接收方）' }}
+            <div v-if="props.data.members.length === 0 && !(isIndependent && isSubFlow)" class="empty-hint" :title="isIndependent
+                ? '独立审批至少要有一名办理人，否则保存时会拦住'
+                : (isNotify
+                    ? '飞书提醒至少要有一个提醒对象，否则这一环不会发出任何通知（保存时会拦住）'
+                    : '这一环可以留空：由上一环节的办理人用「选择接收团队」当场指定接收方（候选来自团队表、限定在本单所属部门内）；建单时会校验走到这里时有没有人可办')">
+                {{ isIndependent ? '还没有独立审批人（保存时会拦住）' : (isNotify ? '还没有提醒对象（保存时会拦住）' : '待指定（由上一环节「选择接收团队」指定接收方）') }}
             </div>
 
-            <div class="d-flex ga-1">
-                <button class="add-btn" @click.stop="emit('addMember')">
-                    <v-icon class="mr-1" size="11">mdi-plus</v-icon>{{ isNotify ? '添加提醒对象' : '添加成员' }}
+            <div class="d-flex ga-1 mb-2">
+                <button v-if="!(isIndependent && isSubFlow)" class="add-btn" @click.stop="emit('addMember')">
+                    <v-icon class="mr-1" size="11">mdi-plus</v-icon>{{ isIndependent ? '添加办理人' : (isNotify ? '添加提醒对象' : '添加成员') }}
                 </button>
 
-                <button class="add-btn" :title="isNotify
+                <button v-if="!(isIndependent && isSubFlow)" class="add-btn" :title="isNotify
                     ? '不指定具体的人：建单时按数据行字段（如「组别」）取对应部门的负责人来提醒'
                     : '不指定具体的人：建单时按数据行字段（如「组别」）取对应部门的负责人'" @click.stop="emit('addRole')">
                     <v-icon class="mr-1" size="11">mdi-account-star-outline</v-icon>动态负责人
                 </button>
+
+                <!-- 独立审批专属：编辑内部子流程（与轮询卡片同一套编辑器，见 LoopCardDialog） -->
+                <button v-if="isIndependent" class="add-btn" title="放几个审批环节进来，按顺序依次办理（上一环全员提交后解锁下一环）"
+                    @click.stop="emit('edit')">
+                    <v-icon class="mr-1" size="11">mdi-file-tree-outline</v-icon>编辑内部流程
+                </button>
             </div>
+
+            <!-- 独立审批专属：结论选项（默认 通过/驳回）。每人各选一个结论提交，全员办完才算这个独立审批完成 -->
+            <template v-if="isIndependent">
+                <div v-if="independentOptions.length > 0" class="ind-options">
+                    <span v-for="(o, i) in independentOptions" :key="o" class="ind-option">
+                        {{ optionLabelOf(o) }}
+                        <button class="icon-btn" title="移除该结论选项" @click.stop="removeOption(i)">
+                            <v-icon size="9">mdi-close</v-icon>
+                        </button>
+                    </span>
+                </div>
+
+                <!-- 默认提示 + 自定义输入 + 加结论按钮同一行（等高对齐，输入框占满剩余宽度） -->
+                <div class="ind-option-row">
+                    <span class="ind-options__default" title="不添加自定义结论时，办理人可提交：通过 / 驳回">默认：通过 / 驳回</span>
+                    <input v-model="newOption" class="ind-option-input nodrag" placeholder="自定义结论，如：需复核"
+                        @keydown.enter.prevent="addOption">
+                    <button class="add-btn" title="加一个办理时的结论选项（内置默认：通过 / 驳回）" @click.stop="addOption">
+                        <v-icon class="mr-1" size="11">mdi-plus</v-icon>加结论
+                    </button>
+                </div>
+            </template>
 
             <!-- 飞书提醒专属：可选补充文案（自动生成的内容里已带环节名与单号）。
                  title 里写 {{部门}} 是安全的：属性值不做插值，会原样显示成提示文字。 -->
@@ -130,6 +173,7 @@
 
 <script lang="ts" setup>
 import type { ApprovalChainItem, ApprovalNodeData, ApprovalRole } from '@/types/approval'
+import { APPROVAL_RESULTS } from '@/types/approval'
 import { Handle, Position } from '@vue-flow/core'
 
 const props = defineProps<{
@@ -140,14 +184,15 @@ const props = defineProps<{
     /** 当前被选中（配置面板正在编辑）的连线 id */
     activeEdgeId?: string | null
     /**
-     * 卡片形态：'approval' 审批环节（默认）/ 'notify' 飞书提醒。
+     * 卡片形态：'approval' 审批环节（默认）/ 'notify' 飞书提醒 / 'independent' 独立审批。
      *
-     * 两种节点**交互几乎完全相同**（环节名 + 成员 + 动态负责人 + 增删），
-     * 差别只在配色、图标、文案，以及提醒节点没有"审批结果分支"。
+     * 三种节点**交互几乎完全相同**（环节名 + 成员 + 动态负责人 + 增删），
+     * 差别只在配色、图标、文案，以及提醒/独立审批没有"审批结果分支"，
+     * 独立审批多一个「结论选项」编辑区。
      * 所以复用同一个组件、用一个 kind 区分，而不是复制一份卡片出来 ——
      * 复制出来的那份以后每改一处交互都得同步，迟早漂。
      */
-    kind?: 'approval' | 'notify'
+    kind?: 'approval' | 'notify' | 'independent'
     /**
      * 分支列表是否给「上移 / 下移」。
      *
@@ -160,6 +205,49 @@ const props = defineProps<{
 
 /** 是不是「飞书提醒」节点 */
 const isNotify = computed(() => props.kind === 'notify')
+
+/** 是不是「独立审批」节点（主流程旁路发起、不阻塞主线，见 types/approval 的 ApprovalFlowIndependentNode） */
+const isIndependent = computed(() => props.kind === 'independent')
+
+/*
+ * ===== 独立审批的「子流程模式」判定 =====
+ * 卡片 data.graph 里放了实际节点（除开始/结束）= 进入子流程模式：
+ * 成员改在内部环节上配，卡片上的成员列表停用（见模板里的同款说明）。
+ */
+const isSubFlow = computed(() =>
+    Array.isArray(props.data.graph?.nodes)
+    && props.data.graph!.nodes.some(n => n?.type !== 'start' && n?.type !== 'end'))
+/** 内部审批环节数（提示用） */
+const subFlowCount = computed(() =>
+    (props.data.graph?.nodes ?? []).filter(n => n?.type === 'approval').length)
+
+/*
+ * ===== 独立审批的「结论选项」编辑 =====
+ * 存在 data.options（结论码数组）；没配 = 运行期按内置默认「通过 / 驳回」渲染
+ * （见 types/approval 的 INDEPENDENT_DEFAULT_OPTIONS）。卡片里显示默认提示，
+ * 一旦加过自定义选项就以它为准（想回到默认就把选项删光）。
+ */
+const independentOptions = computed<string[]>(() =>
+    Array.isArray(props.data.options) ? props.data.options.filter(v => String(v ?? '').trim()) : [])
+const newOption = ref('')
+/** 结论码 → 人话标签（内置码如 pass → 通过；自定义码原样显示） */
+function optionLabelOf (code: string) {
+    return APPROVAL_RESULTS.find(r => r.value === code)?.label ?? code
+}
+function addOption () {
+    const v = newOption.value.trim()
+    if (!v) return
+    if (!props.data.options) props.data.options = []
+    if (props.data.options.some(o => o === v)) {
+        newOption.value = ''
+        return
+    }
+    props.data.options.push(v)
+    newOption.value = ''
+}
+function removeOption (i: number) {
+    props.data.options?.splice(i, 1)
+}
 
 /**
  * 文案插值语法的展示串。
@@ -174,6 +262,8 @@ const emit = defineEmits<{
     'addMember': []
     /** 请求加一个**动态审批人**（部门负责人，建单时解析，见 utils/approvalRoles） */
     'addRole': []
+    /** 独立审批：请求打开「编辑内部流程」对话框（父级按节点 id 找到卡片数据，见 createStream） */
+    'edit': []
     /** 删除此节点 */
     'remove': []
     /** 点击某条结果分支名，请求父级选中该连线 */
@@ -246,6 +336,75 @@ function removeMember(i: number) {
 /* 飞书提醒节点：类型条换成青蓝，和审批节点在画布上一眼可分 */
 .node-card.is-notify::before {
     background: #0891b2;
+}
+
+/* 独立审批节点：类型条换成橙色，一眼区分"旁路环节" */
+.node-card.is-independent::before {
+    background: #EA580C;
+}
+
+/* 独立审批的结论选项 chips（默认 通过/驳回；加了自定义码就按配置显示） */
+.ind-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    align-items: center;
+}
+
+.ind-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 4px 1px 6px;
+    border: 1px solid #E5E1D8;
+    border-radius: 4px;
+    background: #FAF7EF;
+    font-size: 9px;
+    color: #92400E;
+}
+
+.ind-option .icon-btn {
+    width: 12px;
+    height: 12px;
+}
+
+.ind-options__default {
+    font-size: 9px;
+    color: #B8B2A3;
+    white-space: nowrap;
+}
+
+/* 默认提示 + 自定义输入 + 加结论：同一行、垂直居中、等高 */
+.ind-option-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* 行内的加结论按钮：.add-btn 默认是"整行 + 上边距"的成员区样式，这里收成同行小按钮 */
+.ind-option-row .add-btn {
+    width: auto;
+    flex: none;
+    margin-top: 0;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
+.ind-option-input {
+    flex: 1;
+    min-width: 0;
+    height: 20px;
+    padding: 0 6px;
+    border: 1px solid #E5E1D8;
+    border-radius: 4px;
+    font-size: 10px;
+    color: #55534B;
+    background: #fff;
+}
+
+.ind-option-input:focus {
+    outline: none;
+    border-color: #EA580C;
 }
 
 /* 飞书提醒：可选的补充文案输入（整行宽，虚线弱化，与成员输入框同一套视觉语言） */

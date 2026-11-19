@@ -74,6 +74,11 @@ const router = createRouter({
       component: () => import('@/pages/mine.vue'),
     },
     {
+      // 独立审批办理页：表格视图，只摆分配给我的独立审批环（提交后回写主审批单）
+      path: '/singleJudge',
+      component: () => import('@/pages/singleJudge.vue'),
+    },
+    {
       path: '/approvalDetail',
       component: () => import('@/pages/approvalDetail.vue'),
     },

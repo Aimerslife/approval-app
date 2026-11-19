@@ -1,0 +1,15 @@
+﻿src/components/FlowMiniMap.vue(161,38): error TS2339: Property 'branches' does not exist on type '(ApprovalFlowBranchNode & { branchStart?: boolean | undefined; }) | (ApprovalFlowIndependentNode & { branchStart?: boolean | undefined; }) | (ApprovalFlowProbeNode & { ...; })'.
+  Property 'branches' does not exist on type 'ApprovalFlowIndependentNode & { branchStart?: boolean | undefined; }'.
+src/pages/approvalPage.vue(241,12): error TS1484: 'IndependentSubmitPayload' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+src/pages/home.vue(235,12): error TS1484: 'IndependentSubmitPayload' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+src/pages/mine.vue(176,10): error TS1484: 'IndependentSubmitPayload' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+src/types/approval.ts(2353,22): error TS2339: Property 'options' does not exist on type 'ApprovalFlowStep'.
+src/types/approval.ts(2353,42): error TS2339: Property 'options' does not exist on type 'ApprovalFlowStep'.
+src/utils/approvalRotation.ts(151,26): error TS2339: Property 'branches' does not exist on type '(ApprovalFlowBranchNode & { branchStart?: boolean | undefined; }) | (ApprovalFlowIndependentNode & { branchStart?: boolean | undefined; }) | (ApprovalFlowProbeNode & { ...; })'.
+  Property 'branches' does not exist on type 'ApprovalFlowIndependentNode & { branchStart?: boolean | undefined; }'.
+src/utils/approvalRotation.ts(806,27): error TS2345: Argument of type '{ branches: ApprovalBranch[]; id: string; type: "branch"; branchStart?: boolean | undefined; } | { branches: ApprovalBranch[]; id: string; type: "independent"; name: string; members: ApprovalChainItem[]; options?: string[] | undefined; branchStart?: boolean | undefined; } | { ...; }' is not assignable to parameter of type 'ApprovalFlowNode'.
+  Object literal may only specify known properties, and 'branches' does not exist in type 'ApprovalFlowIndependentNode & { branchStart?: boolean | undefined; }'.
+src/utils/approvalRotation.ts(806,54): error TS2339: Property 'branches' does not exist on type '(ApprovalFlowBranchNode & { branchStart?: boolean | undefined; }) | (ApprovalFlowIndependentNode & { branchStart?: boolean | undefined; }) | (ApprovalFlowProbeNode & { ...; })'.
+  Property 'branches' does not exist on type 'ApprovalFlowIndependentNode & { branchStart?: boolean | undefined; }'.
+error Command failed with exit code 2.
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.

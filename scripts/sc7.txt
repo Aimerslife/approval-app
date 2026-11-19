@@ -1,0 +1,50 @@
+﻿37: <span v-if="pendingRows.length > 0 && (dedupePreview.duplicated || dedupePreview.missingKey)"
+190: const pendingRows = ref<Record<string, unknown>[]>([])
+191: const dedupePreview = computed(() => {
+194: for (const row of pendingRows.value) {
+205: duplicated: pendingRows.value.length - seen.size - missingKey,
+227: function defaultVisible(key: string): boolean {
+233: function isVisible(key: string): boolean {
+240: function widthOf(key: string): number {
+245: function exportColumns(): ExportColumn[] {
+253: async function exportToExcel() {
+277: function ensureFullOrder(): Array<{ field: string, width?: number }> {
+292: const orderedFields = computed(() => {
+308: const visibleFields = computed(() => orderedFields.value.filter(f => isVisible(f.key)))
+313: function mergeWidths(
+334: function applyLayoutPrefs() {
+365: function persistLayout() {
+400: function scheduleLayoutSave() {
+406: function setColumnWidth(key: string, width: number) {
+413: function resetColumnWidth(key: string) {
+427: function onDragStart(index: number) {
+431: function onDragOver(index: number) {
+435: function onDragEnd() {
+439: function onDrop(index: number) {
+451: function toggleVisible(key: string) {
+459: function resetColumnSettings() {
+465: function setFullScreen() {
+471: const tableHeight = computed(() => (fullSceen.value ? 'calc(100vh - 162px)' : 'calc(100vh - 198px)'))
+479: const headers = computed(() => [
+537: const tableHeaders = computed(() => [SELECT_HEADER, ...headers.value])
+543: function resizeTargetOf(e: { target: EventTarget | null, offsetX: number }) {
+554: function endResize() {
+565: function onPointerUp() {
+569: function onPointerMove(e: PointerEvent) {
+578: function onPointerDown(e: PointerEvent) {
+591: function onDblClick(e: MouseEvent) {
+652: function currentQuery(extra: Partial<BiRowQuery> = {}): BiRowQuery {
+721: async function taskStatusQuery(): Promise<Partial<BiRowQuery>> {
+728: const pending = orders.filter(o => o.status === APPROVAL_STATUS.PENDING)
+737: ? pending
+743: if (wanted !== '进行中' && pending.length > 0) {
+744: extra.matchNone = orderKeyGroups(pending)
+755: function guardTaskFilterSize(groups: Array<{ column: string, values: string[] }>, orders: number) {
+768: async function loadPage(force = false) {
+812: async function loadFacets(force = false) {
+823: async function reload(force = false) {
+846: function snapshotFilters() {
+853: const activeFilterCount = computed(() => {
+866: const noDataText = computed(() =>
+870: function toISO(value: Date | string): string {
+877: function distinctValues(field: string): string[] {

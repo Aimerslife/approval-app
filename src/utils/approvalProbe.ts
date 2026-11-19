@@ -108,6 +108,14 @@ export function collectProbes (flow: ApprovalFlow): Array<{ id: string, label: s
       walkSteps(node.steps)
       continue
     }
+    /*
+     * 「独立审批」子流程：放开节点类型后内部也允许放查询 ——
+     * 同轮询口径，在建单期取数（答案与审批结论无关，是确定性的），见 expandProbes 的同款下钻。
+     */
+    if (node.type === 'independent') {
+      walkSteps(node.steps)
+      continue
+    }
     if (node.type === 'branch') {
       for (const b of node.branches ?? []) {
         walkSteps(b.steps)
@@ -205,6 +213,11 @@ export function expandProbes (
      * 而且那时同一个查询会被复制成 N 份，每份都要答案。
      */
     if (node.type === 'loop') {
+      nodes.push({ ...node, steps: mapSteps(node.steps) })
+      continue
+    }
+    // 「独立审批」子流程：内部查询同口径在建单期展开（与 collectProbes 的下钻配对）
+    if (node.type === 'independent') {
       nodes.push({ ...node, steps: mapSteps(node.steps) })
       continue
     }

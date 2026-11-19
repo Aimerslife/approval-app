@@ -1,0 +1,14 @@
+﻿738: export const APPROVAL_STATUS = {
+  /** 进行中：仍有环节待办 */
+  PENDING: 0,
+  /** 通过：流程走完且未落入驳回类走向 */
+  APPROVED: 1,
+  /** 驳回：流程因驳回类走向而终止 */
+  REJECTED: 2,
+740:   PENDING: 0,
+  /** 通过：流程走完且未落入驳回类走向 */
+  APPROVED: 1,
+  /** 驳回：流程因驳回类走向而终止 */
+  REJECTED: 2,
+} as const
+

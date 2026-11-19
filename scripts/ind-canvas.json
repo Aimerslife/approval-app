@@ -1,0 +1,22 @@
+{
+  "button": {
+    "exists": true,
+    "orange": "rgb(234, 88, 12)"
+  },
+  "addNode": {
+    "before": 0,
+    "after": 1,
+    "ok": true
+  },
+  "card": {
+    "exists": true,
+    "orangeBar": true,
+    "title": "独立审批1",
+    "hint": true,
+    "hasOptions": true,
+    "hasAddBtn": true,
+    "hasRoleBtn": true,
+    "noBranch": true
+  },
+  "addMember": "skipped-deep"
+}

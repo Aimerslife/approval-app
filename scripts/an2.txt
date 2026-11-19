@@ -1,0 +1,22 @@
+﻿89: <button class="icon-btn del-btn" title="移除成员" @click.stop="removeMember(i)">
+104: <button class="add-btn" @click.stop="emit('addMember')">
+110: : '不指定具体的人：建单时按数据行字段（如「组别」）取对应部门的负责人'" @click.stop="emit('addRole')">
+118: <span v-for="(o, i) in independentOptions" :key="o" class="ind-option">
+119: {{ optionLabelOf(o) }}
+120: <button class="icon-btn" title="移除该结论选项" @click.stop="removeOption(i)">
+124: <span v-if="independentOptions.length === 0" class="ind-options__default">默认：通过 / 驳回</span>
+128: <input v-model="newOption" class="ind-option-input nodrag" placeholder="自定义结论，如：需复核"
+129: @keydown.enter.prevent="addOption">
+130: <button class="add-btn" title="加一个办理时的结论选项（内置默认：通过 / 驳回）" @click.stop="addOption">
+198: const independentOptions = computed<string[]>(() =>
+200: const newOption = ref('')
+202: function optionLabelOf (code: string) {
+205: function addOption () {
+206: const v = newOption.value.trim()
+210: newOption.value = ''
+214: newOption.value = ''
+216: function removeOption (i: number) {
+228: const emit = defineEmits<{
+230: 'addMember': []
+232: 'addRole': []
+258: function removeMember(i: number) {

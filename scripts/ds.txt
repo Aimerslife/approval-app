@@ -1,0 +1,192 @@
+﻿== home.vue:188
+      @prev="backStep"
+      @select="handleSelect"
+      @submit="onDrawerSubmit"
+    />
+  </v-navigation-drawer>
+
+  <!--
+    两个「清空」确认框：同一个组件、只换 scope（清的是哪一类由服务端按 status 精确筛）。
+    实例分开挂（而不是一个实例切 scope）：一起打开时状态不会互相串。
+  -->
+  <DeleteAllOrdersDialog ref="pendingClearDialog" scope="pending" @deleted="onOrdersCleared"
+== home.vue:234
+  import { drawerSet } from '@/composables/useEditorFullscreen'
+  // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
+  import { useNodeSubmit } from '@/composables/useNodeSubmit'
+  import { APPROVAL_TABLE_HEADERS, type ApprovalRow, toApprovalRow } from '@/utils/approvalRows'
+  // 重算链路：只为了把 chain / stepIds / currentStep 交给 useApprovalSelect（详情视图内部自己算展示）
+  import { runtimeOf } from '@/utils/approvalRuntime'
+  import { formatDate } from '@/utils/utils'
+
+  // 两个 tab 就是同一批数据的两个切面：当前 = 未结束，历史 = 已结束
+  const tab = ref<'home' | 'history'>('home')
+  const scrolled = ref(false)
+== home.vue:313
+  /** 右侧抽屉里展开的那一单 */
+  const selectedNode = ref<ApprovalRow | null>(null)
+  const selectedOrder = computed(() => orders.value.find(o => o.id === selectedNode.value?.id) ?? null)
+  /**
+   * 详情视图要用的三样东西 —— **只为「抄送 / 转办」的落库**准备：
+   * useApprovalSelect 需要知道挂到哪一环、当前经办人是谁。
+   * 展示用的链路 / 节点合并 / 弃置段标注 / 接收数量等全部收在 ApprovalDetailView 内部，
+   * 本页不再重复算一份（以前两处各算一次，口径一改就漂）。
+   */
+  const selectedChain = computed<ApprovalChainItem[][]>(() => {
+    const order = selectedOrder.value
+== home.vue:321
+   */
+  const selectedChain = computed<ApprovalChainItem[][]>(() => {
+    const order = selectedOrder.value
+    return order ? runtimeOf(order).chain : []
+  })
+  const selectedStepIds = computed(() => {
+    const order = selectedOrder.value
+    return order ? runtimeOf(order).stepIds : []
+  })
+  /** 当前待办环节的下标（-1 = 流程已走完） */
+  const selectedCurrentStep = computed(() =>
+== home.vue:325
+  })
+  const selectedStepIds = computed(() => {
+    const order = selectedOrder.value
+    return order ? runtimeOf(order).stepIds : []
+  })
+  /** 当前待办环节的下标（-1 = 流程已走完） */
+  const selectedCurrentStep = computed(() =>
+    selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1,
+  )
+
+  const selectedIndex = computed(() =>
+== home.vue:330
+  /** 当前待办环节的下标（-1 = 流程已走完） */
+  const selectedCurrentStep = computed(() =>
+    selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1,
+  )
+
+  const selectedIndex = computed(() =>
+    selectedNode.value ? visibleRows.value.findIndex(r => r.id === selectedNode.value?.id) : -1,
+  )
+  const hasPrevStep = computed(() => selectedIndex.value > 0)
+  const hasNextStep = computed(() =>
+    selectedIndex.value >= 0 && selectedIndex.value < visibleRows.value.length - 1,
+== home.vue:436
+  }
+
+  const { submitNode } = useNodeSubmit({
+    order: selectedOrder,
+    onMessage: showMsg,
+    onUpdated: updated => {
+      // 抽屉的时间线由 selectedOrder 派生、而它来自 orders ——
+      // 必须更新**列表里那条**（applyUpdated 就是干这件事）；只改 selectedNode 的话时间线不会动。
+      applyUpdated(updated)
+      // 表头的「审批状态 / 当前审批人 / 耗时」读的是行快照，一并刷新
+      const row = orders.value.find(o => o.id === updated.id)
+== home.vue:466
+  })
+
+  function onDrawerSubmit (payload: NodeSubmitPayload) {
+    void submitNode(payload)
+  }
+
+  onMounted(() => {
+    window.addEventListener('scroll', onScroll, { passive: true })
+    // 一次全量拉取、本地分页与筛选（与 v-data-table 的客户端模式配套），见 useApprovalTable.load
+    void load()
+  })
+== mine.vue:151
+        <ApprovalDetailView :closable="tab === 'history'" :has-next="hasNextStep" :has-prev="hasPrevStep"
+          :index="selectedIndex + 1" :order="selectedOrder" :readonly="tab === 'history'" :total="activeRows.length"
+          @close="closeDetail" @next="nextStep" @prev="backStep" @select="handleSelect" @submit="onDrawerSubmit" />
+      </v-sheet>
+    </div>
+
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" location="top" timeout="3000" variant="tonal">
+      {{ snackbar.text }}
+    </v-snackbar>
+  </v-container>
+</template>
+== mine.vue:175
+import { useApprovalSelect } from '@/composables/useApprovalSelect'
+// 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
+import { useNodeSubmit } from '@/composables/useNodeSubmit'
+// 头像目录：单据快照里不存成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
+import { useAvatarDirectory } from '@/stores/avatarDirectory'
+// 头像地址的逐级降级（代理 → 原地址 → 首字）：与时间线同一份实现
+import { useAvatarSrc } from '@/composables/useAvatarSrc'
+// 登录者（审批链成员的形状）：三档"我的单"都拿它跟链上成员比（见 orderPendingOn / orderCcTo）
+import { useUserStore } from '@/stores/user'
+import { APPROVAL_STATUS } from '@/types/approval'
+/*
+== mine.vue:614
+ * 但右栏显示的必须是眼前这一档的那张。
+ */
+const selectedOrder = computed(() => {
+  const id = selectedNode.value?.id
+  if (!id) {
+    return null
+  }
+  return tabOrders[tab.value].find(o => o.id === id) ?? null
+})
+
+/** 表格模式（所有审批单）必须有选中才显示右栏；卡片模式常驻（没有选中时显示空态） */
+== mine.vue:841
+}
+
+const { submitNode } = useNodeSubmit({
+  order: selectedOrder,
+  onMessage: showMsg,
+  onUpdated: onOrderUpdated,
+})
+
+/**
+ * 抄送 / 转办：落库逻辑在 composables/useApprovalSelect.ts（与审批页同一份）。
+ * 回填口径与提交一致 —— 必须更新**列表里那条**，右栏的时间线才会跟着变。
+== mine.vue:853
+const { handleSelect } = useApprovalSelect({
+  order: selectedOrder,
+  chain: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).chain : [])),
+  stepIds: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).stepIds : [])),
+  currentStep: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1)),
+  onMessage: showMsg,
+  onUpdated: onOrderUpdated,
+})
+
+function onDrawerSubmit(payload: NodeSubmitPayload) {
+  void submitNode(payload)
+== mine.vue:854
+  order: selectedOrder,
+  chain: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).chain : [])),
+  stepIds: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).stepIds : [])),
+  currentStep: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1)),
+  onMessage: showMsg,
+  onUpdated: onOrderUpdated,
+})
+
+function onDrawerSubmit(payload: NodeSubmitPayload) {
+  void submitNode(payload)
+}
+== mine.vue:855
+  chain: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).chain : [])),
+  stepIds: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).stepIds : [])),
+  currentStep: computed(() => (selectedOrder.value ? runtimeOf(selectedOrder.value).currentStep : -1)),
+  onMessage: showMsg,
+  onUpdated: onOrderUpdated,
+})
+
+function onDrawerSubmit(payload: NodeSubmitPayload) {
+  void submitNode(payload)
+}
+
+== mine.vue:860
+})
+
+function onDrawerSubmit(payload: NodeSubmitPayload) {
+  void submitNode(payload)
+}
+
+async function onOrderDeleted(summary: DeleteOrderSummary) {
+  if (selectedNode.value?.id === summary.id) {
+    selectedNode.value = null
+  }
+  await getDatas()

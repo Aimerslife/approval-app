@@ -78,6 +78,8 @@ const ROUTE_ROLES: Record<string, AppRole[]> = {
   // 「我的审批单」点进去的详情/审批页：员工必须能进
   '/approvalPage': ALL_ROLES,
   '/approvalDetail': ALL_ROLES,
+  // 「独立审批」办理页（表格视图）：独立审批的办理人往往是普通员工
+  '/singleJudge': ALL_ROLES,
 }
 
 /** 没权限时往哪送：取该档位的**首页**，避免又落在一个它进不去的地方（会来回跳） */

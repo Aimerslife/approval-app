@@ -148,7 +148,8 @@
       <v-sheet v-if="showDetail" class="mine-detail min-w-0" :class="{ 'mine-detail--fixed': tab === 'history' }">
         <ApprovalDetailView :closable="tab === 'history'" :has-next="hasNextStep" :has-prev="hasPrevStep"
           :index="selectedIndex + 1" :order="selectedOrder" :readonly="tab === 'history'" :total="activeRows.length"
-          @close="closeDetail" @next="nextStep" @prev="backStep" @select="handleSelect" @submit="onDrawerSubmit" />
+          @close="closeDetail" @next="nextStep" @prev="backStep" @select="handleSelect" @submit="onDrawerSubmit"
+          @submit-independent="onDrawerIndependentSubmit" />
       </v-sheet>
     </div>
 
@@ -172,7 +173,8 @@ import DeleteOrderButton from '@/components/DeleteOrderButton.vue'
 import FlowScopeChip from '@/components/approval/FlowScopeChip.vue'
 import { useApprovalSelect } from '@/composables/useApprovalSelect'
 // 环节办理的落库逻辑与审批页共用同一份（原先这里只关弹窗+跳页，用户填的内容被丢弃）
-import { useNodeSubmit } from '@/composables/useNodeSubmit'
+import { useIndependentSubmit, useNodeSubmit } from '@/composables/useNodeSubmit'
+import type { IndependentSubmitPayload } from '@/composables/useNodeSubmit'
 // 头像目录：单据快照里不存成员头像，展示时按 open_id / email 现查（见该 store 的文件头）
 import { useAvatarDirectory } from '@/stores/avatarDirectory'
 // 头像地址的逐级降级（代理 → 原地址 → 首字）：与时间线同一份实现
@@ -859,6 +861,20 @@ const { handleSelect } = useApprovalSelect({
 
 function onDrawerSubmit(payload: NodeSubmitPayload) {
   void submitNode(payload)
+}
+
+/*
+ * 独立审批的提交：与主链分开走 useIndependentSubmit（不推进流程、不改主单 status）。
+ * onOrderUpdated 与主链同一份回写（更新列表里那条，右栏时间线才会跟着变）。
+ */
+const { submitIndependent } = useIndependentSubmit({
+  order: selectedOrder,
+  onMessage: showMsg,
+  onUpdated: onOrderUpdated,
+})
+
+function onDrawerIndependentSubmit(payload: IndependentSubmitPayload) {
+  void submitIndependent(payload)
 }
 
 async function onOrderDeleted(summary: DeleteOrderSummary) {

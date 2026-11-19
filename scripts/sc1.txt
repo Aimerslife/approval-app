@@ -1,0 +1,104 @@
+﻿23: export interface NodeSubmitPayload {
+51: export interface ApprovalAttachment {
+60: export interface ApprovalChainItem {
+161: export interface ApprovalRole {
+196: export interface RotationSpec {
+252: export function roleLabel (role: ApprovalRole): string {
+258: export type ApprovalChain = ApprovalChainItem[][]
+268: export function mainOf (step?: ApprovalChainItem[]) {
+277: export function sameApprover (a?: ApprovalChainItem, b?: ApprovalChainItem) {
+303: export function mergeExtraMembers (
+338: export interface NodeDecision {
+377: export interface ApprovalFlowStep {
+477: export function stepMembersOf (
+484: export interface BranchCondition {
+524: export interface ConditionGroup {
+532: export type ConditionExpr = BranchCondition | ConditionGroup
+535: export function isConditionGroup (expr: ConditionExpr): expr is ConditionGroup {
+551: export const PICK_MEMBERS_RESULT = 'pick_members'
+562: export const PICK_TEAM_RESULT = 'pick_team'
+575: export const RECEIVE_QTY_RESULT = 'receive_qty'
+578: export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> = [
+699: export const APPROVAL_STATUS = {
+711: export const REJECT_RESULTS: ReadonlyArray<string> = ['reject']
+719: export const PENDING_RESULT = 'pending'
+733: export const CLOSE_FLOW_RESULTS: ReadonlyArray<string> = []
+742: export const LEGACY_CLOSE_FLOW_RESULTS: ReadonlyArray<string> = [PICK_MEMBERS_RESULT, PICK_TEAM_RESULT]
+750: export const RECEIVE_RESULTS: ReadonlyArray<string> = ['receive', 'part_receive', RECEIVE_QTY_RESULT]
+753: export const STOCK_QTY_FIELD = '总库存数量'
+756: export const RECEIVED_QTY_FIELD = '已接收数量'
+764: export const REMAINING_QTY_FIELD = '剩余接收数量'
+772: export interface ReceiverTeam extends ApprovalChainItem {
+800: export function receiversOf (order: ApprovalOrder | null | undefined): ReceiverTeam[] {
+822: export function receiverOf (order: ApprovalOrder | null | undefined): ReceiverTeam | undefined {
+827: export interface ApprovalBranch {
+917: export interface ApprovalNodeOption {
+952: export interface ApprovalOptionLeaf {
+967: export interface ApprovalOptionGroup {
+977: export function normalizeOptionGroups (raw: unknown): ApprovalOptionGroup[] {
+1007: export function normalizeOptionTexts (raw: unknown): string[] {
+1025: export function optionTextsToText (list?: string[]): string {
+1030: export interface ApprovalFlowApprovalNode {
+1049: export interface ApprovalFlowBranchNode {
+1070: export interface ApprovalFlowNotifyNode {
+1091: export interface ProbeSpec {
+1103: export const PROBE_EXISTS_BRANCH = '存在'
+1104: export const PROBE_EMPTY_BRANCH = '不存在'
+1113: export interface ApprovalFlowProbeNode {
+1139: export interface ApprovalFlowLoopNode {
+1171: export interface ApprovalFlowRefNode {
+1197: export type ApprovalFlowNode = (ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode | ApprovalFlowRefNode) & {
+1220: export type ApprovalFlow = ApprovalFlowNode[]
+1223: export interface ProbeNodeData {
+1237: export interface LoopNodeData {
+1281: export interface RefNodeData {
+1296: export interface ApprovalNodeData {
+1314: export function uid (): string {
+1321: export function findBranch (node: ApprovalFlowBranchNode, name: string): ApprovalBranch | null {
+1347: export const CURRENT_GROUP_FIELD = 'current_group'
+1357: export const BRANCH_NAME_FIELD = '条件分支'
+1360: export function branchByName (branches: ApprovalBranch[], name: unknown): ApprovalBranch | undefined {
+1369: export function branchConditions (b: ApprovalBranch): ConditionExpr[] {
+1382: export function evalConditionExpr (expr: ConditionExpr, form: Record<string, unknown>): boolean {
+1403: export function isResultCondition (expr: ConditionExpr): boolean {
+1414: export function firstResultValueOf (b: ApprovalBranch): string | undefined {
+1426: export function isDefaultBranch (b: ApprovalBranch): boolean {
+1440: export function conditionValues (c: BranchCondition): Array<string | number> {
+1454: export function collapseConditionValue (c: BranchCondition): void {
+1479: export const FIELD_REF_PREFIX = '@'
+1487: export function conditionRefField (c: BranchCondition): string | null {
+1615: export function matchBranch (branches: ApprovalBranch[], form: Record<string, unknown>): ApprovalBranch | null {
+1651: export interface RejectBackInfo {
+1676: export function collectRejectTargets (flow: ApprovalFlow): RejectBackInfo {
+1765: export function collectStepResultOptions (flow: ApprovalFlow): Record<string, string[]> {
+1788: export function filterOfferedOptions (
+1813: export function collectStepOptionItems (
+2162: export function collectStepNames (flow: ApprovalFlow): Record<string, string> {
+2190: export interface NotifyStepInfo {
+2208: export function collectNotifySteps (flow: ApprovalFlow): Record<string, NotifyStepInfo> {
+2248: export interface ApprovalStepInfo {
+2264: export function collectApprovalSteps (flow: ApprovalFlow): Record<string, ApprovalStepInfo> {
+2320: export type BranchTerminalMap = Record<string, boolean>
+2334: export type FlowContext = Record<string, unknown>
+2338: export function buildBranchTerminalMap (graph?: FlowGraph | null): BranchTerminalMap {
+2362: export function branchTerminalMapOf (
+2375: export function compactBranchTerminal (map: BranchTerminalMap): BranchTerminalMap {
+2391: export interface FlowEndInfo {
+2417: export interface FlowEndFacts {
+2456: export function receivedQuantities (
+2529: export function receiptLedgerAfter (
+2558: export function rebuildChain (
+3181: export interface FlowGraphNode {
+3189: export interface FlowGraphEdge {
+3226: export interface FlowGraph {
+3256: export function slimFlowMembers (
+3308: export interface FlowSnapshotRef {
+3313: export function isFlowRef (flow: unknown): flow is FlowSnapshotRef {
+3336: export interface CompactFlowSnapshotResult {
+3367: export function isRefExitsGroupId (id: unknown): boolean {
+3372: export function compactFlowSnapshot (flow: ApprovalFlow): CompactFlowSnapshotResult {
+3487: export function renameBranchTerminalKeys (
+3500: export function flowToChain (flow: ApprovalFlow): ApprovalChain {
+3593: export function chainToFlow (chain: ApprovalChain): ApprovalFlow {
+3605: export interface ApprovalOrder {
+3678: export interface ApprovalModal {

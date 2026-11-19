@@ -1,0 +1,55 @@
+﻿  const branchIdMap: Record<string, string> = {}
+  const stepIdMap: Record<string, string> = {}
+  let branchSeq = 0
+  let stepSeq = 0
+
+  /* 第一遍：收集全图 id，按出现顺序分配短 id（语义化组跳过：后缀要留着给运行期判定） */
+  const collectBranch = (b: ApprovalBranch) => {
+    if (b.id && !isSemanticGroupId(b.id) && !(b.id in branchIdMap)) {
+      branchIdMap[b.id] = `b${++branchSeq}`
+    }
+    for (const s of b.steps ?? []) {
+      collectStep(s)
+    }
+  }
+  const collectStep = (s: ApprovalFlowStep) => {
+    /*
+     * 语义化分支组（`:exits` / `:break:N` / `:after-loop`）在流程里是**嵌在 steps 里的
+     * `type:'branch'` 节点**（见 utils/templateRef 的 expandList、utils/approvalRotation），
+     * 走的是这条 step 收集路径 —— 不跳过的话组 id 被压成 sNN，后缀一丢，
+     * isRefExitGroup / isLoopInjectedGroup 就认不出它们（isRefExitGroup 连名字兜底都没有），
+     * 分流组会被当成"上一审批环节的办理结论"（实测：引用段首环的选项变成
+     * 引用卡片的两条出线「全部接收 / 弃置」，段内真正的结论一个不剩）。
+     * collectBranch 那边早有同款检查（bNN 命名空间），这里补齐 sNN 的。
+     */
+    if (s.id && !isSemanticGroupId(s.id) && !(s.id in stepIdMap)) {
+      stepIdMap[s.id] = `s${++stepSeq}`
+    }
+    for (const b of s.branches ?? []) {
+      collectBranch(b)
+    }
+    for (const s2 of s.steps ?? []) {
+      collectStep(s2)
+    }
+  }
+  for (const n of flow) {
+    const node = n as { branches?: ApprovalBranch[], steps?: ApprovalFlowStep[] }
+    for (const b of node.branches ?? []) {
+      collectBranch(b)
+    }
+    for (const s of node.steps ?? []) {
+      collectStep(s)
+    }
+  }
+
+  /*
+   * 旧 step id → 短 id。参数**必填**（调用点都在"该字段存在"的分支里）：返回类型跟着是 string，
+   * loopBackTo / exitTo / afterLoop / breakTo 的目标字段是 `{ stepId: string }`，可空返回会把
+   * 整条 compactBranch 判成类型不兼容（TS2322）。
+   */
+  const stepIdOf = (id: string): string => stepIdMap[id] ?? id
+
+  /* 第二遍：重建对象（重建顺便完成裁剪与键序归整） */
+  const compactBranch = (b: ApprovalBranch): ApprovalBranch => {
+    // conditions 为准：把 condition（若有）归并进来，单条件时代的重复就此消失
+    const conditions = b.conditions?.length ? b.conditions : (b.condition ? [b.condition] : [])

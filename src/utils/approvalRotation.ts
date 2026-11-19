@@ -148,9 +148,15 @@ export function collectRotations (flow: ApprovalFlow): Array<{ id: string, label
     if (node.type === 'ref') {
       continue
     }
-    for (const b of node.branches) {
-      note(b.id, b.members)
-      walkSteps(b.steps)
+    /*
+     * 「独立审批」是旁路环节（不阻塞主线），它**没有分支可走** ——
+     * 联合类型收窄到这里之后 TS 不知道前面已经把非分支类型全跳过了，用 in 判断兜住。
+     */
+    if ('branches' in node) {
+      for (const b of node.branches) {
+        note(b.id, b.members)
+        walkSteps(b.steps)
+      }
     }
   }
   return out
@@ -800,6 +806,11 @@ export function expandRotations (
     }
     // 未展开的引用原样带走（它不是分支节点，没有 branches 可映射）
     if (node.type === 'ref') {
+      nodes.push(node)
+      continue
+    }
+    // 「独立审批」同样原样带走：旁路环节没有 branches（它的成员已在角色解析期换成真人）
+    if (node.type === 'independent') {
       nodes.push(node)
       continue
     }

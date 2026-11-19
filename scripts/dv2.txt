@@ -1,0 +1,12 @@
+﻿approvalPage.vue:453: * ApprovalDetailView 同一口径；2026-11-16 定稿：审批类型清单是 mockRun 沙盒的独立
+home.vue:177: <ApprovalDetailView
+home.vue:217: import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
+home.vue:317: * 展示用的链路 / 节点合并 / 弃置段标注 / 接收数量等全部收在 ApprovalDetailView 内部，
+home.vue:489: * 抽屉内容区：交给 ApprovalDetailView 自己排版（头部固定 / 内容滚 / 办理栏贴底），
+mine.vue:149: <ApprovalDetailView :closable="tab === 'history'" :has-next="hasNextStep" :has-prev="hasPrevStep"
+mine.vue:166: import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
+mine.vue:932: * 再窄就会折成两三行（见 ApprovalDetailView 的 .detail-body）。它只是**下限**，
+mine.vue:938: /* 圆角裁切 + 内容滚动交给内部（见 ApprovalDetailView 的 .detail-body） */
+mockRun.vue:175: <ApprovalDetailView :order="mockOrder!" @select="onMockSelect" @submit="onMockSubmit" />
+mockRun.vue:252: import ApprovalDetailView from '@/components/approval/ApprovalDetailView.vue'
+mockRun.vue:391: // 办理选项不再单独下发：types 进 mockOrder.chain 快照后，ApprovalDetailView 按

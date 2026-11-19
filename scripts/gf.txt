@@ -1,0 +1,9 @@
+﻿482: * （见 types/approval 的 INDEPENDENT_DEFAULT_OPTIONS）。
+484: function independentOptionsField (d?: { options?: unknown }): { options?: string[] } {
+1113: if (pn.type === 'independent') {
+1137: type: 'independent',
+1140: ...independentOptionsField(pn.data),
+1712: // 独立审批：主流程旁路发起、不阻塞主线 —— 转成 flow 里的一个 independent 节点（运行期 pushIndependent 处理）
+1713: if (node.type === 'independent') {
+1736: type: 'independent',
+1739: ...independentOptionsField(node.data),

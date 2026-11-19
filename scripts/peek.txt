@@ -1,0 +1,148 @@
+array
+chain keys: ["chain","flow","graph"]
+TEMPLATE chain.flow head:
+[
+ {
+  "id": "3619c5a1-66b0-4c05-84be-73247c6069c9",
+  "nodes": [
+   {
+    "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cl_a9253ae4-e322-48e5-acd5-f8dceefdad6g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+    "department": "财务BP组",
+    "department_path": "总经理 / 财务部 / 财务BP组",
+    "email": "nernachen@gzyanxun.com",
+    "is_leader": false,
+    "is_tenant_manager": false,
+    "name": "陈曼娜",
+    "type": "cc"
+   },
+   {
+    "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_0013b_93000287-00ce-41fd-98f5-4cf9c1a65c8g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+    "department": "财务BP组",
+    "department_path": "总经理 / 财务部 / 财务BP组",
+    "email": "chenpf@gzyanxun.com",
+    "is_leader": false,
+    "is_tenant_manager": false,
+    "name": "陈培锋",
+    "open_id": "ou_6b6abc721d2c7421703b78dc4db51b4d",
+    "type": "manager"
+   }
+  ],
+  "type": "approval"
+ },
+ {
+  "branches": [
+   {
+    "condition": {
+     "field": "result",
+     "op": "eq",
+     "value": "pass"
+    },
+    "conditions": [
+     {
+      "field": "result",
+      "op": "eq",
+      "value": "pass"
+     }
+    ],
+    "id": "8e03e5d6-a03a-4107-9d74-0fddfcbd2f5e",
+    "isEnd": true,
+    "logic": "and",
+    "name": "通过",
+    "steps": [
+     {
+      "id": "0e5ab7dd-4bf9-4ca9-92e9-b8995e6e3074",
+      "members": [
+       {
+        "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cj_beaa185f-f1f6-4a62-9634-60494b3ed97g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+        "department": "美1组",
+        "department_path": "总经理 / B2C销售部 / 美区 / 美1组",
+        "email": "alinfan@gzyanxun.com",
+        "is_leader": true,
+        "is_tenant_manager": false,
+        "name": "范少玲",
+        "open_id": "ou_b0469a06dcbee23451bc8248b7d8a5eb",
+        "type": "manager"
+       }
+      ],
+      "name": "流程11"
+     },
+     {
+      "branches": [
+       {
+        "condition": {
+         "field": "result",
+         "op": "eq",
+         "value": "enter_approval"
+        },
+        "conditions": [
+         {
+          "field": "result",
+          "op": "eq",
+          "value": "enter_approval"
+         }
+        ],
+        "id": "032a9abc-6042-4847-a7d9-b71a21494019",
+        "isEnd": true,
+        "logic": "and",
+        "name": "开始审批",
+        "steps": [
+         {
+          "id": "017d578e-1c5d-4441-b06a-ab96937d1c46",
+          "members": [
+           {
+            "avatar": "https://s1-imfile.feishucdn.com/static-resource/v1/v3_00cj_beaa185f-f1f6-4a62-9634-60494b3ed97g~?image_size=noop&cut_type=&quality=&format=png&sticker_format=.webp",
+            "department": "美1组",
+            "department_path": "总经理 / B2C销售部 / 美区 / 美1组",
+            "email": "alinfan@gzyanxun.com",
+            "is_leader": true,
+            "is_tenant_manager": false,
+            "name": "范少玲",
+            "open_id": "ou_b0469a06dcbee23451bc8248b7d8a5eb",
+            "type": "manager"
+           }
+          ],
+          "name": "美1组",
+          "optionGroups": [
+           {
+            "items": [
+             {
+              "link": "other_reason",
+              "text": "市场需求分析不足/运营策略不当"
+             },
+             {
+              "link": "other_reason",
+              "text": "运营-其他因素"
+             }
+            ],
+            "title": "运营"
+           },
+           {
+            "items": [
+             {
+              "link": "other_reason",
+              "text": "销量预测偏差"
+             },
+             {
+              "link": "other_reason",
+              "text": "库存尾数弃置"
+             },
+             {
+              "link": "other_reason",
+              "text": "库存保管不善"
+             }
+            ],
+            "title": "库存管理"
+           },
+           {
+            "items": [
+             {
+              "link": "cat_infringe",
+              "text": "产品侵权-外观专利侵权（产品员自查）"
+             },
+             {
+              "link": "cat_infringe",
+              "text": "产品侵权-外观专利侵权（产品合规中心承接）"
+             },
+             
+
+snapshots=0

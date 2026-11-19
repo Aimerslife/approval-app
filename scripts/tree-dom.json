@@ -1,0 +1,21 @@
+{
+  "hasTree": true,
+  "treeCls": "v-list v-list--slim v-theme--light v-list--density-compact v-list--one-line v-treeview",
+  "firstChild": [
+    "v-list-group v-list-group--prepend v-list-group--subgroup v-list-group--open v-treeview-group",
+    "v-list-group v-list-group--prepend v-list-group--subgroup v-list-group--open v-treeview-group",
+    "v-list-group v-list-group--prepend v-list-group--subgroup v-list-group--open v-treeview-group",
+    "v-list-group v-list-group--prepend v-list-group--subgroup v-list-group--open v-treeview-group"
+  ],
+  "anyRows": [
+    {
+      "cls": "v-sheet v-theme--light v-sheet--rounded p-4 border border-dashed border-accent d-flex flex-column org-sheet",
+      "tag": "DIV"
+    },
+    {
+      "cls": "org-scroll mt-2",
+      "tag": "DIV"
+    }
+  ],
+  "leftHtmlHead": "<button type=\"button\" class=\"v-icon-btn v-icon-btn--small v-theme--light v-icon-btn--variant-text flow-col-left__toggle mr-5 mt-5\" tabindex=\"0\" title=\"收起组织架构\" style=\"--v-icon-btn-height: 24px; --v-icon-btn-width: 24px;\"><span class=\"v-icon-btn__overlay\"></span><span class=\"v-icon-btn__underlay\"></span><div class=\"v-icon-btn__content\" data-no-activator=\"\"><i class=\"mdi-chevron-double-left mdi v-icon notranslate v-theme--light\" aria-hidden=\"true\" style=\"font-size: 16px; height: 16px; width: 16px;\"></i></div><!----></button><div data-v-12c50c21=\"\" class=\"v-sheet v-theme--light v-sheet--rounded p-"
+}

@@ -1,0 +1,6 @@
+﻿190: <v-btn color="primary" size="small" variant="flat" @click="isActive = true">保存</v-btn>
+1098: :loading="saving"
+1193: const saving = ref(false)
+1199: function showMsg (text: string, color: 'success' | 'error' | 'warning' | 'info' = 'success') {
+2836: saving.value = true
+2859: saving.value = false

@@ -1,0 +1,8 @@
+﻿D:\project\vuetify_approval\vite-project\approval-app\src\components\streamNodes\SelectNode.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\FileUpload.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\OrgTree.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\ProductInfoCard.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\components\StreamPanel.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\approvalDetail.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\detail.vue
+D:\project\vuetify_approval\vite-project\approval-app\src\pages\editRule.vue

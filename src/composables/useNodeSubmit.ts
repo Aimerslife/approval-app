@@ -10,10 +10,13 @@ import { ref, type Ref } from 'vue'
 import {
   APPROVAL_STATUS,
   branchTerminalMapOf,
+  collectIndependentSteps,
   PICK_MEMBERS_RESULT,
   PICK_TEAM_RESULT,
   rebuildChain,
+  subApprovalStateOf,
 } from '@/types/approval'
+import { useUserStore } from '@/stores/user'
 import { flowContextOfOrder } from '@/utils/approvalFlow'
 // 「下一环还是不是同一个人办」：与页面上「连续同人环节合并成一条节点」同一口径
 import { nextStepSameApprover } from '@/utils/approvalRuntime'
@@ -246,6 +249,138 @@ export function useNodeSubmit (options: {
   }
 
   return { submitNode, submitting }
+}
+
+/** 「独立审批」办理弹窗收集到的结论（时间线组件 emit 出来，见 components/ApprovalNode.vue） */
+export interface IndependentSubmitPayload {
+  /** 独立审批对应的流程节点 / 步骤 id（decisions.stepId 就是它） */
+  nodeId: string
+  /** 结论码（如 pass / reject / 自定义码） */
+  result: string
+  /** 结论文案（如「通过」；自定义码原样） */
+  resultLabel: string
+  /** 办理意见（选填） */
+  opinion?: string
+  /** 收集组件的收尾回调：true 关弹窗 / false 保持打开便于重试（与 submitNode 同一约定） */
+  done: (ok: boolean) => void
+}
+
+/**
+ * 「独立审批」成员**提交自己的结论**（每人一条，互不阻塞）：
+ * 追加一条带 `by` 的办理流水 → 用流水重算 chain（结论按 by 对号回填到时间线那一环）→ 写库。
+ *
+ * 为什么**不**走 submitNode：那是主链路语义 —— stepId 重算、流程前进、终态判定、
+ * 「下一环还是不是我办」全是主链的事；独立审批**不阻塞主线**，提交后主单的
+ * currentStep / status 都不能动。两条通道分开，各自的口径才不会互相污染。
+ *
+ * 主单已办结后补办也成立：decisions 追加 → 重算时这一环照样回填（时间线补记），
+ * status 保持原值不动（不复活主单）。
+ *
+ * 为什么用 `by`（办理人姓名）对号而不是按顺序：独立审批是**各办各的**，
+ * 不是会签顺序 —— 谁的结论记在谁头上，靠姓名精确匹配（见 pushIndependent 的同一套逻辑）。
+ */
+export function useIndependentSubmit (options: {
+  order: Ref<ApprovalOrder | null | undefined>
+  /** 落库成功后回调 */
+  onUpdated?: (updated: ApprovalOrder) => void
+  /** 提示回调 */
+  onMessage?: (text: string, color: 'success' | 'error' | 'warning') => void
+}) {
+  const submitting = ref(false)
+  // pinia store 必须在 composable 调用时（组件 setup 上下文里）取，模块顶层调用会崩
+  const userStore = useUserStore()
+  /** 与 submitNode 的 latest 同一动机：读-改-写必须基于服务端最新那份（调用方回不回写都不影响正确性） */
+  let latest: ApprovalOrder | null = null
+
+  function currentRecord (): ApprovalOrder | null | undefined {
+    const o = options.order.value
+    return latest && o?.id === latest.id ? latest : o
+  }
+
+  async function submitIndependent (payload: IndependentSubmitPayload): Promise<ApprovalOrder | null> {
+    if (submitting.value) {
+      payload.done(false)
+      return null
+    }
+    const order = currentRecord()
+    const snapshot = order?.chain
+    const flow = snapshot?.flow
+    if (!order?.id || !flow?.length) {
+      options.onMessage?.('审批单数据未加载，请稍后重试', 'warning')
+      payload.done(false)
+      return null
+    }
+    // 流程里必须有这个独立审批节点（防旧快照/过期页面提交到不存在的环节上）。
+    // 传流水：子链 branch 求值后新出现的环节才注册得到（见 flattenIndependentChain）
+    const decisions = snapshot?.decisions ?? []
+    // 订单 context：子链分支要承接主链前面卡片的结论（见 mainChainFormOf）
+    const infos = collectIndependentSteps(flow, decisions, snapshot?.context)
+    const info = infos[payload.nodeId]
+    if (!info) {
+      options.onMessage?.('该独立审批不在当前流程快照中，请刷新后重试', 'warning')
+      payload.done(false)
+      return null
+    }
+    /*
+     * 子流程模式（容器有 steps）：提交的环节必须是**已解锁**的 —— 会签口径，
+     * 上一环全员提交才轮到这一环。正常界面不会出现越环入口（时间线只摆当前环），
+     * 这里拦的是过期页面 / 并发双开时绕过 UI 的提交。
+     */
+    const states = subApprovalStateOf(flow, decisions, new Set(), snapshot?.context)
+    const containerState = states.find(s => s.steps?.some(st => st.id === payload.nodeId))
+    const stepState = containerState?.steps?.find(st => st.id === payload.nodeId)
+    if (stepState && !stepState.unlocked) {
+      options.onMessage?.('上一环节还没有全员提交，这一环暂时不能办理', 'warning')
+      payload.done(false)
+      return null
+    }
+    submitting.value = true
+    try {
+      // 登录人姓名：independent 流水的 by（与链成员比较同一口径取 name；没登录时页面本不该显示办理入口，这里兜一层）
+      const by = String(userStore.member?.name ?? '').trim()
+      if (!by) {
+        options.onMessage?.('未获取到当前登录人，请刷新页面后重试', 'warning')
+        payload.done(false)
+        return null
+      }
+      const decisions: NodeDecision[] = [...(snapshot?.decisions ?? [])]
+      decisions.push({
+        stepId: payload.nodeId,
+        result: payload.result,
+        result_label: payload.resultLabel,
+        ...(payload.opinion?.trim() ? { opinion: payload.opinion.trim() } : {}),
+        by,
+        handled_at: new Date().toISOString(),
+      })
+      const terminalMap = branchTerminalMapOf(snapshot)
+      const context = flowContextOfOrder(order)
+      const rebuilt = rebuildChain(flow, decisions, terminalMap, context)
+      /*
+       * ⚠️ status **原样保留**：独立审批不参与主链终态判定 ——
+       * 主单进行中就还是进行中、已办结就还是已办结（补办只补时间线，不复活主单）。
+       */
+      const updated = await updateApprovalOrder(order.id, {
+        chain: {
+          ...snapshot, chain: rebuilt.chain, decisions,
+        },
+        status: order.status,
+      })
+      latest = { ...order, ...updated }
+      options.onUpdated?.(updated)
+      options.onMessage?.('独立审批结论已回填', 'success')
+      payload.done(true)
+      return updated
+    } catch (error) {
+      console.error('[useNodeSubmit] 保存独立审批结论失败:', error)
+      options.onMessage?.('保存失败，请稍后重试', 'error')
+      payload.done(false)
+      return null
+    } finally {
+      submitting.value = false
+    }
+  }
+
+  return { submitIndependent, submitting }
 }
 
 /**

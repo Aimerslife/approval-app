@@ -1,0 +1,16 @@
+{
+  "errors": [],
+  "cardVisible": true,
+  "titleAfter": {
+    "value": "供应商确认测试",
+    "focused": true
+  },
+  "memberLocatorFound": 0,
+  "selectedUserShown": false,
+  "memberAdded": [],
+  "optionAdded": [
+    "需复核"
+  ],
+  "titleRetyped": "再试一次",
+  "nodeTransform": "translate(1303.4px, 742.04px)"
+}

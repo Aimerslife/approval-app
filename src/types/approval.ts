@@ -142,6 +142,44 @@ export interface ApprovalChainItem {
     /** 提醒对象姓名（仅用于展示"通知谁"；真正发送时从 flow 的 members 取邮箱） */
     to?: string[]
   }
+
+  /**
+   * 仅「独立审批」环节会带（见 ApprovalFlowIndependentNode）：主流程旁路发起、
+   * **不阻塞主线**的独立审批 —— 每位成员各自办理，结论回填到本人这一项上展示。
+   *
+   * 与 notify 同一套嵌进成员数组的理由：时间线按 chain 逐环渲染，放进来就
+   * 不用改任何页面的渲染入口。成员的 result / opinion / handled_at 由
+   * rebuildChain 的 pushIndependent 从 decisions（带 by 的流水）回填，
+   * 展示完全复用普通审批人的渲染路径 —— 时间线上这就是一个"多人各办各的"环节。
+   */
+  independent?: {
+    /** 独立审批的名称（画布卡片标题） */
+    title: string
+    /**
+     * 结论选项（结论码，办理弹窗渲染用）。**冗余但刻意**：chain 本来就是展示快照
+     * （notify.to 同理）—— 办理弹窗直接从环上拿选项，不用给时间线组件再喂 flow。
+     */
+    options?: string[]
+    /**
+     * 对应流程节点 / 步骤的 id（办理流水 decisions.stepId 就是它）。
+     * 同样冗余进快照：时间线组件 emit 提交时直接带上，不用回查 flow。
+     *
+     * **子流程模式**下这是**组合 id** `${容器id}:${子环节id}`，指向"当前正在办的那个子环节"
+     * （时间线那一环只摆当前环节的成员，前面的环办完自动换下一环上来，见 pushIndependent）。
+     */
+    nodeId?: string
+    /**
+     * 仅**子流程模式**：当前环节名（如「环节2」），时间线标题旁显示，
+     * 让人知道这个独立审批进行到哪一环了。
+     */
+    stage?: string
+    /**
+     * 仅**子流程模式**：整条子链的进度快照（每环 `办完人数 / 总人数`）。
+     * 冗余但刻意（与 options/nodeId 同一理由）：办理弹窗直接展示整体进度，
+     * 不用把 flow 快照喂给时间线组件。
+     */
+    progress?: Array<{ name: string, done: number, total: number }>
+  }
 }
 
 /**
@@ -350,6 +388,15 @@ export interface NodeDecision {
   files?: ApprovalAttachment[]
   /** 办理时间（ISO 字符串） */
   handled_at?: string
+  /**
+   * 办理人姓名 —— **目前只有「独立审批」的办理流水在用**（主链路决策不需要：
+   * 主链结论按 stepId 顺序对号入座到环节成员上，见 rebuildChain 的 pushStep）。
+   *
+   * 独立审批为什么必须带：它的成员各自独立办理（不是会签顺序），结论记在**谁头上**
+   * 不能靠"第几条"推断 —— 用 by 按成员名精确对号（见 pushIndependent 的回填逻辑）。
+   * 同一个人重办（二期口径）取最后一条。
+   */
+  by?: string
 }
 
 // ===== 分支 =====
@@ -380,7 +427,8 @@ export interface ApprovalFlowStep {
   name?: string
   /**
    * 步骤形态：缺省 'approval'（兼容旧数据）；'branch' = 嵌套分支组；'notify' = 飞书提醒；
-   * 'probe' = 数据查询；**'loop' = 组间轮询卡片**（按组各走一遍内部子流程，见 ApprovalFlowLoopNode）。
+   * 'probe' = 数据查询；**'loop' = 组间轮询卡片**（按组各走一遍内部子流程，见 ApprovalFlowLoopNode）；
+   * 'independent' = 独立审批（主流程旁路发起、不阻塞主线，见 ApprovalFlowIndependentNode）。
    *
    * 为什么卡片既要是"节点"又要是"步骤"：它在画布上是**一个节点**，但可以摆在两个位置 ——
    * 主流程上（= 顶层节点）或某条分支的链上（= 分支里的步骤）。
@@ -388,12 +436,17 @@ export interface ApprovalFlowStep {
    * 运行时两者走**同一套**建单期展开（见 utils/approvalRotation），只是产物形态不同：
    * 顶层展开成节点、分支里展开成步骤。
    */
-  type?: 'approval' | 'branch' | 'notify' | 'probe' | 'loop' | 'ref'
+  type?: 'approval' | 'branch' | 'notify' | 'probe' | 'loop' | 'ref' | 'independent'
   /** 该步骤的审批人（多人即会签）；type='branch' 的分支组步骤可留空；
    *  type='notify' 时它是**提醒对象**（同样支持 role 动态负责人） */
   members?: ApprovalChainItem[]
   /** type='notify' 的补充文案（可选） */
   content?: string
+  /**
+   * 仅 type='independent' 会带：结论选项（结论码数组，同 ApprovalFlowIndependentNode.options）。
+   * 步骤与节点同一形状，编译期原样透传；没配 = 运行期按内置默认「通过 / 驳回」。
+   */
+  options?: string[]
   /** type='probe' 的查询配置（建单期求值，与顶层数据查询节点同一套） */
   probe?: ProbeSpec
   /**
@@ -669,6 +722,13 @@ export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> =
   { value: 'cat_dev', label: '开发类' },
   { value: 'cat_supply', label: '供应链类' },
 ]
+
+/**
+ * 「独立审批」容器拍平 0 环时的**一次性警告**登记表（模块级：同一容器整个会话只警告一次，
+ * 重放 / 轮询反复触发也不刷屏）。空容器是静默跳过的 —— 用户只会看到"独立审批没开启"，
+ * 这条 console.warn 是排障时唯一的线索。
+ */
+const EMPTY_CONTAINER_WARNED = new Set<string>()
 
 /**
  * 老模板里的**旧默认文案** → 现在码表里的文案（键是 `结论码|旧文案`）。
@@ -1079,6 +1139,60 @@ export interface ApprovalFlowNotifyNode {
 }
 
 /**
+ * 流程节点：**独立审批**（主流程旁路发起、不阻塞主线）。
+ *
+ * 语义（四条，与 notify 的三分法同源）：
+ *  1. **在主流程时间线上体现**：主链推进到它时记一环（看得见「发起了独立审批、谁参与」），
+ *     位置就是它在画布上所处的位置；
+ *  2. **不阻塞主流程**：不设 currentStep、不消费主链 decisions —— 主线办理**不等待**它，
+ *     主单可以比独立审批先办结；
+ *  3. **各自独立办理**：每位成员各提交一条带 `by` 的办理流水（NodeDecision.stepId =
+ *     本节点 id），办没办完互不影响，全员办完才算这个独立审批完成；
+ *  4. **结果回填展示**：办理流水按 `by` 对号回填到 chain 环的各成员上 ——
+ *     时间线上自动显示「张三：通过 · 意见…」，主单办结后补办的也照常回填（时间线补记）。
+ *
+ * 为什么**不需要**单独的发起动作/存储：实例状态全部从 (flow 快照 + decisions + 主链 stepIds)
+ * 派生（见 subApprovalStateOf）—— 符合「rebuildChain 纯函数 + 历史单确定性」的架构原则，
+ * 不动任何集合结构。
+ *
+ * ⚠️ 出线必须**恰好一条**（无结论无条件，多条无从选择，与 notify 同一校验）；
+ * ⚠️ 一期**不能放进轮询卡片内部**（编译期拦截），避免"每组各发起一次"的多实例语义。
+ */
+export interface ApprovalFlowIndependentNode {
+  id: string
+  type: 'independent'
+  /** 独立审批名称（画布卡片标题），如「供应商确认」；时间线徽标旁显示 */
+  name: string
+  /**
+   * 参与办理的成员（固定成员 / 动态负责人，建单期由 resolveFlowRoles 解析成真人）。
+   *
+   * **子流程模式**（配了 `steps`）下这个字段**不用**：成员改在内部子流程的每个环节上配
+   * （画布卡片点「编辑内部流程」），这里的 members 留空即可。
+   */
+  members: ApprovalChainItem[]
+  /**
+   * 办理结论选项（结论码数组，如 ['pass','reject']）；不配 = 默认 ['pass','reject']。
+   * 从画布卡片的「结论选项」编辑而来；标签文案按 APPROVAL_RESULTS 码表解析，
+   * 自定义码原样显示。**子流程模式下由全部子环节共用**（每个子环节办理时出其中一种结论）。
+   */
+  options?: string[]
+  /**
+   * **内部子流程**（子流程模式）：一条线性子链，每个审批环节各配成员、依次办理 ——
+   * 上一环**全员**提交后才解锁下一环（会签口径），全部办完才算这个独立审批完成。
+   *
+   * 数据来自画布卡片点「编辑内部流程」画的那张小图（`data.graph`，与轮询卡片同一套
+   * LoopCardDialog / LoopCardCanvas 编辑器），保存期由 cardGraphToSteps 编译而来；
+   * 一期只允许**审批环节**（线性推进，条件分支 / 数据查询 / 提醒不放进来），
+   * 主流程顶层与分支里的独立审批都支持（分支内的编译与校验同一套，
+   * 见 utils/approvalFlow 的 independentInnerSteps）。
+   *
+   * 子环节的办理流水 `decisions.stepId` 用**组合 id** `${本节点id}:${子环节id}`
+   * （见 collectIndependentSteps），既全局唯一又能反查出所属容器。
+   */
+  steps?: ApprovalFlowStep[]
+}
+
+/**
  * 「数据查询」节点的配置：**建单时**去 PocketBase 查"有没有满足条件的记录"。
  *
  * 为什么不能运行期查（三条理由，与 utils/approvalRotation 的说明同源）：
@@ -1194,7 +1308,7 @@ export interface ApprovalFlowRefNode {
   branches?: ApprovalBranch[]
 }
 
-export type ApprovalFlowNode = (ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode | ApprovalFlowRefNode) & {
+export type ApprovalFlowNode = (ApprovalFlowApprovalNode | ApprovalFlowBranchNode | ApprovalFlowNotifyNode | ApprovalFlowIndependentNode | ApprovalFlowProbeNode | ApprovalFlowLoopNode | ApprovalFlowRefNode) & {
   /**
    * 这一环是**一条「脱线支路」的起点**（由 utils/approvalFlow 的 graphToFlowFrom 在
    * 「结束」节点处按支路分段时写入）。
@@ -1301,6 +1415,13 @@ export interface ApprovalNodeData {
   /** 仅 notify 节点用：提醒的补充文案 */
   content?: string
   /**
+   * 仅 independent 节点用：**结论选项**（结论码数组，如 ['pass','reject']）。
+   * 画布卡片上编辑（见 components/flow/ApprovalNode 的「加结论」）；没配/配空 =
+   * 运行期按内置默认「通过 / 驳回」渲染（见 INDEPENDENT_DEFAULT_OPTIONS）。
+   * 编译期由 graphToFlowFrom 的 independentOptionsField 透传成 flow 节点的 options。
+   */
+  options?: string[]
+  /**
    * 仅 approval 节点用：本环节**共用的办理选项树**（类别 → 一级 → 二级，见 ApprovalOptionGroup）。
    *
    * 为什么挂在**节点**上而不是连线上：树里每个一级选项自带「实际链路」，
@@ -1308,6 +1429,14 @@ export interface ApprovalNodeData {
    * 由该环节的各条结果分支共用（配置入口见 createStream / LoopCardCanvas 的「配置选项」）。
    */
   optionGroups?: ApprovalOptionGroup[]
+  /**
+   * 仅 independent 节点用：**内部子流程**的小画布快照（与轮询卡片的 LoopNodeData.graph
+   * 同一形状）。配了实际内容（有审批节点）= 进入**子流程模式**：
+   * 成员改在内部环节上配、卡片上的 members 不再生效；编译期由 cardGraphToSteps
+   * 编译成 ApprovalFlowIndependentNode.steps（见 types/approval 里该字段的说明）。
+   * 存图而不是存 steps：编辑时要能原样还原（节点坐标、连线）—— 与轮询卡片同一决策。
+   */
+  graph?: { nodes: any[], edges: any[], viewport?: { x: number, y: number, zoom: number } }
 }
 
 /** 生成节点 / 分支的本地 id */
@@ -2216,6 +2345,11 @@ export function collectNotifySteps (flow: ApprovalFlow): Record<string, NotifySt
         }
         continue
       }
+      // 「独立审批」子链：放开节点类型后内部允许放提醒，同分支口径下钻
+      if (s.type === 'independent') {
+        walkSteps(s.steps)
+        continue
+      }
       if (s.type === 'notify') {
         out[s.id] = {
           name: s.name ?? '',
@@ -2235,11 +2369,505 @@ export function collectNotifySteps (flow: ApprovalFlow): Record<string, NotifySt
       }
       continue
     }
+    // 子流程模式独立审批：内部提醒同样要能查到配置（NotifyPlan 靠它发消息）
+    if (node.type === 'independent') {
+      walkSteps(node.steps)
+      continue
+    }
     if (node.type === 'branch') {
       for (const b of node.branches) {
         walkSteps(b.steps)
       }
     }
+  }
+  return out
+}
+
+/** 一个「独立审批」环节的配置（见 collectIndependentSteps） */
+export interface IndependentStepInfo {
+  /** 独立审批名称（画布卡片标题） */
+  name: string
+  /** 参与办理的成员（建单期已解析成真人） */
+  members: ApprovalChainItem[]
+  /** 结论选项（结论码；空数组 = 默认 通过/驳回） */
+  options: string[]
+}
+
+/** 「独立审批」结论选项的内置默认：没在卡片上配置时用它 */
+export const INDEPENDENT_DEFAULT_OPTIONS: readonly string[] = ['pass', 'reject']
+
+/** flattenIndependentChain 的产物：**游标已到达**的子链片段 */
+export interface FlattenedSubChain {
+  /**
+   * 已到达的审批环节（按推进顺序）。**游标停在最后一个未办完的环上**——
+   * 它后面的步骤（不管什么类型）都还没到，所以不会出现在这里。
+   * branch 里的环节是**求值后**才动态出现的（见 flattenIndependentChain 的说明）。
+   */
+  rings: Array<{ step: ApprovalFlowStep, key: string, name: string, index: number }>
+  /** 已到达段里穿过的「飞书提醒」stepId（摆时间线用，见 pushIndependentChain） */
+  notifies: string[]
+}
+
+/**
+ * 主链（不含独立审批子链）的分支求值上下文快照 —— 独立审批子链「承接前面结论」用。
+ *
+ * 独立审批是旁路：主流程到达它时，**前面卡片的结论早就落袋了**，所以子链完全
+ * 有条件按"主链最近一环的结论"分流。这里就复刻主链 walkSteps 的 form 口径
+ * （`{...订单context, result: 最近一环结论, ...extra}`），只算主链决策：
+ *   · stepId 命中主链环节 id（含分支内 / 轮询卡片内）才算 —— 子链决策是
+ *     `容器id:环节id` 组合 id，天然不会撞；
+ *   · decisions 数组序 = 办理序，取**最后一条**主链结论（与主链"后环覆盖前环"一致）。
+ *
+ * 与主链 form 的唯一差别：不做 withReceivedQuantities 的接收台账字段注入
+ * （那套依赖闭包累积状态，子链分支用到的概率低）。订单字段 / 审批结论都齐。
+ */
+export function mainChainFormOf (
+  flow: ApprovalFlow,
+  decisions: NodeDecision[] = [],
+  context: FlowContext = {} as FlowContext,
+): Record<string, unknown> {
+  /** 主链全部审批环 id（顶层 + 分支内 + 轮询卡片内）——子链环的结论不进来 */
+  const mainIds = new Set<string>()
+  const walkIds = (steps?: ApprovalFlowStep[]) => {
+    for (const s of steps ?? []) {
+      switch (s.type) {
+        case 'approval':
+        case undefined: {
+          // undefined：compactFlowSnapshot 会把子环节的 type:'approval' 当默认值裁掉
+          // （见 compactStep 的说明），与主链 walkSteps / 分支内成员收集同口径兜底，
+          // 否则前序环节的结论进不了 form，独立审批的分支条件永远取不到值。
+          mainIds.add(s.id)
+
+          break
+        }
+        case 'branch': {
+          for (const b of s.branches ?? []) {
+            walkIds(b.steps)
+          }
+
+          break
+        }
+        case 'loop': {
+          walkIds((s as { steps?: ApprovalFlowStep[] }).steps)
+
+          break
+        }
+      // No default
+      }
+    }
+  }
+  walkIds(flow)
+
+  let form: Record<string, unknown> = { ...(context as unknown as Record<string, unknown>) }
+  for (const d of decisions) {
+    if (mainIds.has(d.stepId) && d.result) {
+      form = { ...form, result: d.result, ...d.extra }
+    }
+  }
+  return form
+}
+
+/**
+ * 把「独立审批」子流程**按办理流水重放游标**，拍平成"已到达的审批环节序列"。
+ *
+ * 子链支持全部节点类型后（见 approvalFlow 独立编译分支），推进规则：
+ *   · approval：会签环节 —— 游标停在第一个没全员办完的环上；
+ *     全员办完则把**最后一条结论**并进分支求值上下文（与主链 formOf 同口径：result + extra）；
+ *   · notify：穿过（记录，时间线上摆一行提醒；真实发送走 NotifyPlan 的"新到达环节"链路）；
+ *   · branch：用**子链已产出的结论**求值（matchBranch，与主链 walkSteps 同一个函数），
+ *     命中哪条分支就递归拍平哪条 —— 没走到的分支里的环节**永远不出现**（这是设计而非缺陷：
+ *     分支没求值前"后面的环节有哪些"本身就是未知的）；
+ *   · probe/ref：建单期必须已展开（expandProbes / expandInside 下钻子链）；
+ *     万一旧快照残留，跳过不抛错 —— 别让一个坏数据炸掉整张单的重算。
+ *
+ * **承接主链结论**：baseForm 是主链上下文（mainChainFormOf 的产物 —— 订单字段 +
+ * 前面卡片的审批结论）。求值上下文从它起步，子链环办完用子链结论覆盖 ——
+ * 也就是「子链上一环结论优先，还没产出子链结论时承接主链前面卡片的结论」。
+ * 分支里的「审批结论」条件在子链环办完前 = 主链结论，办完后 = 子链结论，
+ * 两级兜底，两处口径（主链 walkSteps 与这里）天然一致。
+ */
+export function flattenIndependentChain (
+  containerId: string,
+  steps: ApprovalFlowStep[],
+  decisions: NodeDecision[] = [],
+  /** 主链上下文（mainChainFormOf）：子链分支求值的起步 form，承接主链前面卡片的结论 */
+  baseForm: Record<string, unknown> = {},
+): FlattenedSubChain {
+  const rings: FlattenedSubChain['rings'] = []
+  const notifies: string[] = []
+  let form: Record<string, unknown> = { ...baseForm }
+  /** 防环：同一容器无限递归（数据被改坏时兜底） */
+  let guard = 0
+
+  /*
+   * 返回 true = **游标已停**（撞上了没办完的环节）。必须把"停"贯穿递归：
+   * branch 命中分支里停在半路的环时，**外层**后面的步骤（提醒/下一环）同样不可达 ——
+   * 只退出内层递归的话，分支后面的环节会被错误地拍平出来（引擎探针抓到过）。
+   */
+  const walk = (list: ApprovalFlowStep[]): boolean => {
+    for (const s of list) {
+      if (++guard > 500) {
+        return true
+      }
+      // 无 type：compactFlowSnapshot 把容器内子环节的 type:'approval' 当默认值裁掉了
+      // （见 compactStep），与主链成员收集同口径兜底，否则命中分支也拍不出环节（0 环）
+      if (s.type === 'approval' || s.type === undefined) {
+        const key = `${containerId}:${s.id}`
+        const index = rings.length
+        rings.push({ step: s, key, name: s.name?.trim() || `环节${index + 1}`, index })
+        // 全员办完才继续走后面的步骤；否则游标停在这，后面的都不可见
+        const total = stepMembersOf(s).length
+        const subs = decisions.filter(d => d.stepId === key && d.result)
+        if (!(total > 0 && subs.length >= total)) {
+          return true
+        }
+        const last = subs.at(-1)
+        if (last) {
+          form = { ...form, result: last.result, ...last.extra }
+        }
+        continue
+      }
+      if (s.type === 'notify') {
+        notifies.push(s.id)
+        continue
+      }
+      if (s.type === 'branch') {
+        // 与主链 walkSteps 同一个求值函数；没命中任何分支（连兜底都没有）= 穿过继续
+        const hit = matchBranch(s.branches ?? [], form)
+        if (hit && walk(hit.steps ?? [])) {
+          return true
+        }
+        continue
+      }
+      // probe / ref / loop / independent：不该出现（见函数头），跳过
+    }
+    return false
+  }
+  walk(steps)
+  return { rings, notifies }
+}
+
+/**
+ * 收集流程里所有「独立审批」**可办理环节**：stepId → 配置。
+ *
+ * 与 collectNotifySteps 同一套遍历（顶层 + 分支内 + 轮询卡片内部都递归到）。
+ * 三个消费方：
+ *   1) rebuildChain 把它们作为一环写进 chain（不阻塞主线）；
+ *   2) subApprovalStateOf 据此派生每个独立审批的办理状态；
+ *   3) 办理端（时间线组件的独立审批弹窗）据此渲染结论选项。
+ *
+ * **子流程模式**（顶层独立审批配了 `steps`）：容器本身**不注册**，注册的是里面每个
+ * 审批子环节 —— key 是**组合 id** `${容器id}:${子环节id}`（decisions.stepId 用它），
+ * name 带容器名前缀（时间线上能看出属于哪个独立审批）、结论选项用容器的
+ * （子环节共用一套，见 ApprovalFlowIndependentNode.options 的说明）。
+ * 子链先经 flattenIndependentChain 按流水重放：只有**已到达**的环节才注册 ——
+ * 分支后面的环节要等分支求值后才存在（同推送/待办口径：没到的环节不该有人能办）。
+ * wantContainers = 容器清单（subApprovalStateOf / pushIndependent 按"整条子链"派生状态）。
+ */
+export function collectIndependentSteps (
+  flow: ApprovalFlow,
+  decisions: NodeDecision[] = [],
+  /** 订单 context：算主链 form（子链分支承接主链结论）用，缺省 = 只承接结论 */
+  context: FlowContext = {} as FlowContext,
+): Record<string, IndependentStepInfo> {
+  const out: Record<string, IndependentStepInfo> = {}
+  // 主链 form 只算一次（顶层与分支内的子链共用同一份承接上下文）
+  const baseForm = mainChainFormOf(flow, decisions, context)
+
+  const walkSteps = (steps?: ApprovalFlowStep[]) => {
+    for (const s of steps ?? []) {
+      if (s.type === 'branch') {
+        for (const b of s.branches ?? []) {
+          walkSteps(b.steps)
+        }
+        continue
+      }
+      if (s.type === 'independent') {
+        // 子流程模式（分支里的独立审批同样支持）：与顶层同款拍平注册组合 id
+        if (s.steps?.length) {
+          for (const ring of flattenIndependentChain(s.id, s.steps, decisions, baseForm).rings) {
+            out[ring.key] = {
+              name: `${s.name} · ${ring.name}`,
+              members: stepMembersOf(ring.step),
+              options: s.options?.length ? s.options : [...INDEPENDENT_DEFAULT_OPTIONS],
+            }
+          }
+          continue
+        }
+        out[s.id] = {
+          name: s.name ?? '',
+          members: stepMembersOf(s),
+          options: s.options?.length ? s.options : [...INDEPENDENT_DEFAULT_OPTIONS],
+        }
+      }
+    }
+  }
+
+  for (const node of flow) {
+    if (node.type === 'independent') {
+      // 子流程模式：按流水重放游标，只注册**已到达**的环节（组合 id）——
+      // branch 求值后新出现的环会自然进来；容器本身不产生办理环节
+      if (node.steps?.length) {
+        for (const ring of flattenIndependentChain(node.id, node.steps, decisions, baseForm).rings) {
+          out[ring.key] = {
+            name: `${node.name} · ${ring.name}`,
+            members: stepMembersOf(ring.step),
+            options: node.options?.length ? node.options : [...INDEPENDENT_DEFAULT_OPTIONS],
+          }
+        }
+        continue
+      }
+      out[node.id] = {
+        name: node.name,
+        members: stepMembersOf(node),
+        options: node.options?.length ? node.options : [...INDEPENDENT_DEFAULT_OPTIONS],
+      }
+      continue
+    }
+    if (node.type === 'branch') {
+      for (const b of node.branches) {
+        walkSteps(b.steps)
+      }
+    }
+  }
+  return out
+}
+
+/** 独立审批**子流程模式**的一个子环节（collectIndependentContainers 的产物） */
+export interface IndependentContainerStep {
+  /** 组合 id `${容器id}:${子环节id}`（decisions.stepId 就是它） */
+  key: string
+  /** 环节名（画布内部节点标题；没起名 = 「环节N」） */
+  name: string
+  /** 该环节的办理人（建单期已解析成真人） */
+  members: ApprovalChainItem[]
+}
+
+/**
+ * 收集流程里**子流程模式**的独立审批容器：容器 id → 子链。
+ *
+ * 顶层与**分支里**的独立审批都支持子流程（编译期 graphToFlowFrom 保证：带 steps 的
+ * 必然子链非空且至少一环审批）。消费方：rebuildChain 的 pushIndependentChain
+ * （按子链写时间线环）与 subApprovalStateOf（按子链派生进度）。
+ */
+export function collectIndependentContainers (
+  flow: ApprovalFlow,
+  decisions: NodeDecision[] = [],
+  /** 订单 context：算主链 form（子链分支承接主链结论）用，缺省 = 只承接结论 */
+  context: FlowContext = {} as FlowContext,
+): Record<string, { name: string, options: string[], steps: IndependentContainerStep[], notifies: string[] }> {
+  const out: Record<string, { name: string, options: string[], steps: IndependentContainerStep[], notifies: string[] }> = {}
+  // 主链 form 只算一次（多个容器共用同一份承接上下文）
+  const baseForm = mainChainFormOf(flow, decisions, context)
+
+  const putContainer = (
+    // steps 可选（ApprovalFlowIndependentNode 的 steps 就是可选的；调用点都先判了非空），
+    // flatten 处兜底空数组只是类型兜底，运行时不会走到
+    node: { id: string, name?: string, options?: string[], steps?: ApprovalFlowStep[] },
+  ) => {
+    // 子链先按流水重放游标拍平（见 flattenIndependentChain）：branch 求值后
+    // 命中分支里的环节才进子链；提醒/查询/引用这类非办理步骤被穿过或已展开
+    const flat = flattenIndependentChain(node.id, node.steps ?? [], decisions, baseForm)
+    out[node.id] = {
+      name: node.name ?? '',
+      options: node.options?.length ? node.options : [...INDEPENDENT_DEFAULT_OPTIONS],
+      steps: flat.rings.map(r => ({
+        key: r.key,
+        name: r.name,
+        members: stepMembersOf(r.step),
+      })),
+      // 游标已到达段穿过的提醒：pushIndependentChain 据此往时间线摆提醒行
+      notifies: flat.notifies,
+    }
+  }
+
+  /** 分支（含嵌套分支）里下钻：带子链的独立审批同样收进容器清单 */
+  const walkBranches = (steps?: ApprovalFlowStep[]) => {
+    for (const s of steps ?? []) {
+      if (s.type === 'branch') {
+        for (const b of s.branches ?? []) {
+          walkBranches(b.steps)
+        }
+        continue
+      }
+      if (s.type === 'independent' && s.steps?.length) {
+        putContainer(s)
+      }
+    }
+  }
+
+  for (const node of flow) {
+    if (node.type === 'independent' && node.steps?.length) {
+      putContainer(node)
+    }
+    if (node.type === 'branch') {
+      for (const b of node.branches) {
+        walkBranches(b.steps)
+      }
+    }
+  }
+  return out
+}
+
+/** 一个独立审批实例的**派生状态**（见 subApprovalStateOf；零存储，全部现算） */
+export interface SubApprovalState {
+  /** 对应流程节点 / 步骤的 id（decisions.stepId 就是它） */
+  nodeId: string
+  /** 独立审批名称 */
+  name: string
+  /** 参与成员（快照里的真人） */
+  members: ApprovalChainItem[]
+  /** 结论选项（结论码） */
+  options: string[]
+  /**
+   * 主流程**是否已到达**这一环（时间线上有没有它）。
+   * 没到达时即使单据已建，成员也不该看到办理入口 —— "发起"就是主线推进到它的那一刻。
+   */
+  reached: boolean
+  /** 每位成员的办理情况：与 members 同序，没办的对不上号（result 为空） */
+  handled: Array<{ name: string, result?: string, resultLabel?: string, opinion?: string, at?: string }>
+  /** 已办人数 */
+  doneCount: number
+  /** 是否全员办完（= 独立审批完成） */
+  done: boolean
+  /**
+   * 仅**子流程模式**：整条子链逐环的办理状态（与 handleable 的当前环口径一致，
+   * 办理弹窗/面板用它画整体进度）。单环节模式没有这个字段。
+   */
+  steps?: Array<{
+    /** 组合 id（decisions.stepId） */
+    id: string
+    name: string
+    members: ApprovalChainItem[]
+    options: string[]
+    /** 每位成员的办理情况（与容器级 handled 同一形状） */
+    handled: Array<{ name: string, result?: string, resultLabel?: string, opinion?: string, at?: string }>
+    doneCount: number
+    done: boolean
+    /**
+     * 是否已**解锁**（可以办理）：第一环恒解锁；后面每一环要等前一环**全员**提交
+     * （会签口径）。没解锁的环节即使成员是自己也不出办理入口。
+     */
+    unlocked: boolean
+  }>
+}
+
+/**
+ * 派生所有「独立审批」实例的办理状态（**零存储**：flow 定义 + decisions + 主链到达情况现算）。
+ *
+ * 为什么不落库（设计决策，2026-11-18）：rebuildChain 是纯函数、历史单必须
+ * "同一份 decisions 永远算出同一条链"（与 ProbeSpec/RotationSpec 同源的理由），
+ * 独立审批的实例内容（谁、什么标题、什么选项）本来就在快照 flow 里，
+ * 办理流水本来就在 decisions 里 —— 派生即可，不引入任何新存储与新同步问题。
+ *
+ * @param flow       单据快照的 flow（含 independent 节点/步骤）
+ * @param decisions  单据办理流水（独立审批的流水 stepId = 节点 id、带 by）
+ * @param reachedIds 主链已到达的 stepId 集合（rebuildChain().stepIds；判"发起了没有"）
+ */
+export function subApprovalStateOf (
+  flow: ApprovalFlow,
+  decisions: NodeDecision[],
+  reachedIds: ReadonlySet<string>,
+  /** 订单 context：子链分支承接主链结论（flatten 的 baseForm），缺省 = 只承接结论 */
+  context: FlowContext = {} as FlowContext,
+): SubApprovalState[] {
+  // 传流水：子链拍平要按游标重放（branch 求值依赖已产出的结论），见 flattenIndependentChain
+  const infos = collectIndependentSteps(flow, decisions, context)
+  const containers = collectIndependentContainers(flow, decisions, context)
+  const out: SubApprovalState[] = []
+
+  /** 一组成员的办理回填（按 by 对号；无 by 的按顺序兜底填空位）——容器级与子环节级共用 */
+  const handledOf = (members: ApprovalChainItem[], stepId: string) => {
+    const mine = decisions.filter(d => d.stepId === stepId)
+    const byName = new Map<string, NodeDecision>()
+    const anonymous: NodeDecision[] = []
+    for (const d of mine) {
+      const k = String(d.by ?? '').trim()
+      if (k) {
+        byName.set(k, d)
+      } else {
+        anonymous.push(d)
+      }
+    }
+    const taken = new Set(byName.keys())
+    const spare = members.filter(m => !taken.has(String(m.name ?? '').trim()))
+    const handled = members.map(m => {
+      const name = String(m.name ?? '').trim()
+      let d = name ? byName.get(name) : undefined
+      if (!d) {
+        const idx = spare.indexOf(m)
+        if (idx !== -1) {
+          d = anonymous[idx]
+        }
+      }
+      return {
+        name: m.name ?? '',
+        ...(d?.result ? { result: d.result } : {}),
+        ...(d?.result_label ? { resultLabel: d.result_label } : {}),
+        ...(d?.opinion ? { opinion: d.opinion } : {}),
+        ...(d?.handled_at ? { at: d.handled_at } : {}),
+      }
+    })
+    return { handled, doneCount: handled.filter(h => h.result).length }
+  }
+
+  /*
+   * 子流程模式的容器先算（它消费的是组合 id 的流水）；
+   * collectIndependentSteps 里属于容器的组合 key 在下面的单环节循环里跳过。
+   */
+  const containerKeys = new Set<string>()
+  for (const [containerId, c] of Object.entries(containers)) {
+    const stepStates = c.steps.map((s, i) => {
+      containerKeys.add(s.key)
+      const { handled, doneCount } = handledOf(s.members, s.key)
+      // 会签口径：第一环恒解锁；后面每一环要等前一环全员提交
+      const unlocked = i === 0 || (c.steps[i - 1].members.length > 0
+        && decisions.filter(d => d.stepId === c.steps[i - 1].key && d.result).length >= c.steps[i - 1].members.length)
+      return {
+        id: s.key,
+        name: s.name,
+        members: s.members,
+        options: c.options,
+        handled,
+        doneCount,
+        done: s.members.length > 0 && doneCount >= s.members.length,
+        unlocked,
+      }
+    })
+    // 容器级"当前环" = 第一个未办完的环（全办完 = 最后一环），与 pushIndependent 摆人口径一致
+    const active = stepStates.find(s => !s.done) ?? stepStates.at(-1)
+    // 子链拍平后一环不剩（子链全是提醒/引用未展开等）：跳过这个容器，别让一张坏单炸掉整个派生
+    if (!active) {
+      continue
+    }
+    out.push({
+      nodeId: containerId,
+      name: c.name,
+      members: active.members,
+      options: c.options,
+      reached: reachedIds.has(containerId),
+      handled: active.handled,
+      doneCount: stepStates.reduce((n, s) => n + s.doneCount, 0),
+      done: stepStates.length > 0 && stepStates.every(s => s.done),
+      steps: stepStates,
+    })
+  }
+
+  for (const [nodeId, info] of Object.entries(infos)) {
+    if (containerKeys.has(nodeId)) {
+      continue // 子流程模式的子环节：已在上面按容器算过
+    }
+    const { handled, doneCount } = handledOf(info.members, nodeId)
+    out.push({
+      nodeId,
+      name: info.name,
+      members: info.members,
+      options: info.options,
+      reached: reachedIds.has(nodeId),
+      handled,
+      doneCount,
+      done: info.members.length > 0 && doneCount >= info.members.length,
+    })
   }
   return out
 }
@@ -2656,6 +3284,15 @@ export function rebuildChain (
   /** stepId → 飞书提醒配置。这类环节**不产生待办**，到达即穿过（见 pushNotify） */
   const notifyById = collectNotifySteps(flow)
 
+  /** stepId → 独立审批配置。主流程到达即"发起"，但不阻塞主线（见 pushIndependent） */
+  const independentById = collectIndependentSteps(flow, decisions, context)
+
+  /**
+   * 独立审批的**子流程模式**容器：容器 id → 子链（每个审批环节一环，依次办理）。
+   * 顶层与分支里的都收（编译期保证带 steps 的子链非空）。
+   */
+  const independentContainers = collectIndependentContainers(flow, decisions, context)
+
   /**
    * 回退目标（**已跳过同一个人**）与「分支组 → 它归属的环节」：见 collectRejectTargets。
    *
@@ -2698,6 +3335,155 @@ export function rebuildChain (
       },
     }])
     stepIds.push(stepId)
+  }
+
+  /**
+   * 把一个「独立审批」环节写进 chain，并把**已办的结论回填到各成员**上。
+   *
+   * 关键：与 pushNotify 一样**不消费主链 decisions、不设 currentStep** ——
+   * 主流程到达即"发起"（时间线上出现这一环），然后立刻继续往下走，主线不等它。
+   *
+   * 回填口径（与 pushStep 的"按顺序对号"不同）：独立审批是**各办各的**，
+   * 每条流水带 `by`（办理人姓名），按名字精确对号到成员；没写 by 的旧数据
+   * 按成员顺序兜底填空位（见 subApprovalStateOf 的同一套逻辑）。
+   * 主单已办结后成员才来办理也没问题：decisions 追加 → 重算时这一环照样回填
+   * （时间线补记），不复活主单状态。
+   */
+  function pushIndependent (stepId: string) {
+    const info = independentById[stepId]
+    const subs = byStep.get(stepId) ?? []
+    // 同一人重办取最后一条（decisions 是追加式流水，后面的覆盖前面的）
+    const byName = new Map<string, NodeDecision>()
+    const anonymous: NodeDecision[] = []
+    for (const d of subs) {
+      const k = String(d.by ?? '').trim()
+      if (k) {
+        byName.set(k, d)
+      } else {
+        anonymous.push(d)
+      }
+    }
+    const taken = new Set(byName.keys())
+    const spare = (info?.members ?? []).filter(m => !taken.has(String(m.name ?? '').trim()))
+
+    const step: ApprovalChainItem[] = (info?.members ?? []).map(m => {
+      const name = String(m.name ?? '').trim()
+      let d = name ? byName.get(name) : undefined
+      if (!d) {
+        const idx = spare.indexOf(m)
+        if (idx !== -1) {
+          d = anonymous[idx]
+        }
+      }
+      return {
+        ...m,
+        type: 'manager',
+        independent: {
+          title: info?.name ?? '',
+          // 冗余进快照：办理弹窗直接从环上读结论选项与提交目标（notify.to 同一套理由）
+          ...(info?.options?.length ? { options: [...info.options] } : {}),
+          nodeId: stepId,
+        },
+        // 结论回填：与 pushStep 写在成员上的字段同一套（时间线复用普通审批人渲染）
+        ...(d?.result ? { result: d.result, result_label: d.result_label ?? d.result } : {}),
+        ...(d?.opinion ? { opinion: d.opinion } : {}),
+        ...(d?.handled_at ? { handled_at: d.handled_at } : {}),
+      }
+    })
+    chain.push(step)
+    stepIds.push(stepId)
+  }
+
+  /**
+   * 「独立审批」**子流程模式**：整条子链在时间线上仍是**一环**（不污染主链语义），
+   * 但环上摆的是**当前正在办的子环节**的成员 —— 第一个没办完的环；全办完 = 最后一环。
+   *
+   * 推进口径（会签）：一个环节**全员**提交后才解锁下一环；没解锁的环节成员看不到
+   * 办理入口（那一环的成员还不在环上，天然不可见 —— 解锁后重算，环自动换成新一环的成员）。
+   *
+   * 办理流水按**组合 id**（`${容器id}:${子环节id}`，见 collectIndependentSteps）对号，
+   * 结论照样按 `by` 回填到人。环上冗余一份整链进度（independent.progress），
+   * 办理弹窗不用回查 flow 就能画出"每一环办到哪了"。
+   */
+  function pushIndependentChain (containerId: string) {
+    const container = independentContainers[containerId]
+    const steps = container?.steps ?? []
+    // 编译期保证子链非空；数据被手改坏时宁可少这一环也别崩掉整张单的重算
+    if (steps.length === 0) {
+      // 「非空」只在编译期成立；运行期按分支条件拍平完全可能 0 环 —— 最常见是模板把
+      // 独立审批摆在了「产生它分流字段的环节」之前（分支条件要的字段还没人提交过）。
+      // 这里必须留痕：静默少一环，用户只会看到"独立审批没开启"，排查时没有任何线索。
+      if (!EMPTY_CONTAINER_WARNED.has(containerId)) {
+        EMPTY_CONTAINER_WARNED.add(containerId)
+        console.warn(`[独立审批] 容器 ${containerId} 按办理流水拍平后 0 环，已跳过（未发起）。` +
+          '常见原因：内部首层分支条件依赖的字段（如二级原因 second_reason）要等后续环节办理才产生，' +
+          '但独立审批在模板里被摆在了那个环节之前 —— 请调整模板分支内的节点顺序')
+      }
+      return
+    }
+
+    /** 一个子环节的办理对号结果（与 pushIndependent 同一套 by 回填） */
+    const settleOf = (s: { key: string, members: ApprovalChainItem[] }) => {
+      const subs = byStep.get(s.key) ?? []
+      const byName = new Map<string, NodeDecision>()
+      const anonymous: NodeDecision[] = []
+      for (const d of subs) {
+        const k = String(d.by ?? '').trim()
+        if (k) {
+          byName.set(k, d)
+        } else {
+          anonymous.push(d)
+        }
+      }
+      const taken = new Set(byName.keys())
+      const spare = s.members.filter(m => !taken.has(String(m.name ?? '').trim()))
+      const rows = s.members.map(m => {
+        const name = String(m.name ?? '').trim()
+        let d = name ? byName.get(name) : undefined
+        if (!d) {
+          const idx = spare.indexOf(m)
+          if (idx !== -1) {
+            d = anonymous[idx]
+          }
+        }
+        return { member: m, decision: d }
+      })
+      const done = rows.filter(r => r.decision?.result).length
+      return { rows, done, total: rows.length, finished: rows.length > 0 && done >= rows.length }
+    }
+
+    const settled = steps.map(settleOf)
+    // 当前环 = 第一个没全员办完的环；全办完 = 最后一环（补办/回看都显示它）
+    const activeIdx = Math.max(0, settled.some(s => !s.finished) ? settled.findIndex(s => !s.finished) : settled.length - 1)
+    const active = settled[activeIdx]
+    const activeStep = steps[activeIdx]
+
+    /*
+     * 子链里穿过的「飞书提醒」摆进时间线（在当前环之前）：与主链 notify 同一行形状，
+     * 真实发送走 NotifyPlan 的"新到达环节"链路（它认 chain 里的 notify 行）。
+     * container.notifies 是拍平时（按最新流水重放游标）已到达段穿过的提醒 ——
+     * 每次重算都会重新摆，与主链 notify 的纯函数口径一致。
+     */
+    for (const nid of container?.notifies ?? []) {
+      pushNotify(nid)
+    }
+
+    const step: ApprovalChainItem[] = active.rows.map(({ member, decision: d }) => ({
+      ...member,
+      type: 'manager' as const,
+      independent: {
+        title: `${container?.name ?? ''} · ${activeStep?.name ?? ''}`,
+        ...(container?.options?.length ? { options: [...container.options] } : {}),
+        nodeId: activeStep?.key ?? containerId,
+        stage: activeStep?.name ?? '',
+        progress: settled.map((s, i) => ({ name: steps[i]?.name ?? `环节${i + 1}`, done: s.done, total: s.total })),
+      },
+      ...(d?.result ? { result: d.result, result_label: d.result_label ?? d.result } : {}),
+      ...(d?.opinion ? { opinion: d.opinion } : {}),
+      ...(d?.handled_at ? { handled_at: d.handled_at } : {}),
+    }))
+    chain.push(step)
+    stepIds.push(containerId)
   }
 
   let currentStep = -1
@@ -3013,6 +3799,16 @@ export function rebuildChain (
         pushNotify(s.id)
         continue
       }
+      // 独立审批步骤：到达即"发起"（时间线记一环），主线立即继续（不阻塞、不消费决策）
+      // 分支里同样支持子流程模式：容器分叉与顶层 walkFlow 同一套
+      if (s.type === 'independent') {
+        if (independentContainers[s.id]) {
+          pushIndependentChain(s.id)
+        } else {
+          pushIndependent(s.id)
+        }
+        continue
+      }
       const d = pushStep(s.id)
       if (!d) {
         currentStep = chain.length - 1
@@ -3079,6 +3875,16 @@ export function rebuildChain (
       // （出线唯一性由 graphToFlowFrom 保证 —— 它没有结论也没有条件，多条出线无从选择）
       if (node.type === 'notify') {
         pushNotify(node.id)
+        i++
+        continue
+      }
+      // 独立审批：同上 —— 到达即"发起"，主线立即继续；主单办结与否不影响成员补办回填
+      if (node.type === 'independent') {
+        if (independentContainers[node.id]) {
+          pushIndependentChain(node.id)
+        } else {
+          pushIndependent(node.id)
+        }
         i++
         continue
       }
@@ -3428,7 +4234,7 @@ export function compactFlowSnapshot (flow: ApprovalFlow): CompactFlowSnapshotRes
     return {
       id: branchIdMap[b.id] ?? b.id,
       name: b.name,
-      ...(conditions.length ? { conditions } : {}),
+      ...(conditions.length > 0 ? { conditions } : {}),
       ...(b.logic === 'or' ? { logic: b.logic } : {}),
       ...(b.isEnd === true ? { isEnd: true } : {}),
       ...(b.members?.length ? { members: b.members } : {}),
@@ -3447,7 +4253,7 @@ export function compactFlowSnapshot (flow: ApprovalFlow): CompactFlowSnapshotRes
       id: stepIdMap[s.id] ?? s.id,
       ...(s.name ? { name: s.name } : {}),
       ...(s.type && s.type !== 'approval' ? { type: s.type } : {}),
-      ...(members.length ? { members } : {}),
+      ...(members.length > 0 ? { members } : {}),
       ...(s.content ? { content: s.content } : {}),
       ...(s.probe ? { probe: s.probe } : {}),
       ...(s.rotation ? { rotation: s.rotation } : {}),
@@ -3462,7 +4268,7 @@ export function compactFlowSnapshot (flow: ApprovalFlow): CompactFlowSnapshotRes
   }
 
   /* 顶层节点：数量少、id 从不被引用，只把里面的 branches / steps 换成压缩版，其余原样 */
-  const out = flow.map((n) => {
+  const out = flow.map(n => {
     const node = n as { branches?: ApprovalBranch[], steps?: ApprovalFlowStep[] }
     if (!node.branches?.length && !node.steps?.length) {
       return n
@@ -3552,6 +4358,15 @@ export function flowToChain (flow: ApprovalFlow): ApprovalChain {
     }
     // 提醒节点不进线性链，理由同上
     if (node.type === 'notify') {
+      continue
+    }
+    /*
+     * 「独立审批」同样不进线性链：它不是主链路的办理环（不阻塞、不在 currentStep 语义内），
+     * 进了这条近似链，服务端超时催办（pendingStepOf 按 type==='manager' 找待办）会把
+     * 独立审批的成员当主链待办人去催 —— 与提醒节点"误催提醒对象"是同一种错。
+     * 时间线上显示它是 rebuildChain 的事（pushIndependent 写 type:'manager' + independent 标记）。
+     */
+    if (node.type === 'independent') {
       continue
     }
     /*

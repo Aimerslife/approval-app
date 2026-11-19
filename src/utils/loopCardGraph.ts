@@ -74,6 +74,12 @@ export function cardGraphToSteps (
      * "不是漏配了、而是卡片上有多条线得指明走哪一条"，否则他会以为是程序没读到他画的线。
      */
     earlyLineCount?: number
+    /**
+     * 允许内部放「引用模板」卡片。默认关（轮询形态维持原口径）；
+     * **独立审批**子流程传 true —— 引用的整段流程在建单期会被拍平进子链
+     * （见 utils/templateRef 的 expandInside），运行时游标按普通步骤推进，语义确定。
+     */
+    allowRef?: boolean
   } = {},
 ): CardGraphResult {
   const nodes = graph?.nodes ?? []
@@ -85,19 +91,24 @@ export function cardGraphToSteps (
     return { steps: [], error: '卡片内部不能再放「组间轮询」卡片（一个环里再套一层环没有确定的含义）' }
   }
   /*
-   * 「引用模板」卡片同理：轮询卡片内部是"按组各走一遍"，
-   * 而引用搬进来的是一整段流程（还可能自带轮询），"每组各引一份"的语义虽然能实现，
-   * 但先明确拒绝 —— 好过留一个没人验证过的组合（见 utils/templateRef 的文件头）。
+   * 「引用模板」卡片：轮询卡片内部是"按组各走一遍"，而引用搬进来的是一整段流程
+   * （还可能自带轮询），"每组各引一份"的语义没验证过 —— 明确拒绝好过留隐患。
+   * 独立审批子流程传 allowRef 放行：引用在建单期拍平进子链（expandInside 下钻），
+   * 之后就是普通步骤序列，运行语义确定。
    */
-  if (nodes.some(n => n.type === 'ref')) {
+  if (!opts.allowRef && nodes.some(n => n.type === 'ref')) {
     return { steps: [], error: '轮询卡片内部不能再放「引用模板」卡片，请把它放在卡片外的流程里' }
   }
   /*
    * 至少要有一个审批节点：只有「飞书提醒」的卡片，展开后是一串"到达即穿过"的环 ——
    * 没人办、流程自己走完，单据看起来"已通过"却没有任何人做过决定。
    * 与主流程"至少要有一个审批环节"同一口径（见 utils/approvalFlow）。
+   * 「引用模板」卡片**也算有人办**（allowRef 时）：它搬进来的是另一张模板的整段流程，
+   * 里面必须有审批环节 —— 这一条在**建单期**展开时逐段校验（见 utils/templateRef 的
+   * countApprovals），这里放开只是允许"只放一张引用卡片"的内部流程
+   * （内容不在本图里，同步函数看不到），与主流程 graphToFlowFrom 的口径一致。
    */
-  if (!nodes.some(n => n.type === 'approval')) {
+  if (!nodes.some(n => n.type === 'approval' || (opts.allowRef && n.type === 'ref'))) {
     return {
       steps: [],
       error: '卡片内部至少要有一个审批节点（飞书提醒只通知、不办理，整张卡片会没人办）',
@@ -195,6 +206,21 @@ export function flowNodesToSteps (flow: ApprovalFlow): ApprovalFlowStep[] {
     }
     if (node.type === 'branch') {
       out.push({ id: node.id, type: 'branch', branches: node.branches.map(b => clearExit(b)) })
+      continue
+    }
+    /*
+     * 「引用模板」步骤（独立审批子流程放行后才有）：原样透传 ——
+     * 源模板的内容在**建单期**拍平进子链（见 utils/templateRef 的 expandInside），
+     * 运行时游标不会再遇到 ref。出线分组的分支同样清掉出口标记。
+     */
+    if (node.type === 'ref') {
+      out.push({
+        id: node.id,
+        type: 'ref',
+        name: node.name,
+        refTemplateId: node.refTemplateId,
+        ...(node.branches?.length ? { branches: node.branches.map(b => clearExit(b)) } : {}),
+      })
       continue
     }
     /*

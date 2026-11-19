@@ -10,7 +10,7 @@ import type {
   ConditionExpr,
   FlowContext, LoopNodeData, ProbeNodeData, ProbeSpec, RefNodeData, RotationSpec,
 } from '../types/approval'
-import { APPROVAL_RESULTS, branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, normalizeOptionGroups, normalizeOptionTexts, uid } from '../types/approval'
+import { APPROVAL_RESULTS, branchConditions, FIELD_REF_PREFIX, isConditionGroup, isResultCondition, normalizeOptionGroups, normalizeOptionTexts, stepMembersOf, uid } from '../types/approval'
 import { findBadProbe } from './approvalProbe'
 import { collectRotations, findBadRotation } from './approvalRotation'
 import { deriveFlowFields } from './biRowFields'
@@ -74,6 +74,56 @@ function findBad (items: ConditionExpr[], where: string): string | null {
     }
   }
   return null
+}
+
+/**
+ * 独立审批卡片**内部画布 → 线性子链**（主流程与分支内同一套编译与校验，见
+ * graphToFlowFrom 两处调用点）。没画内部流程返回空对象（= 单环节简单模式）。
+ * error 为「内部流程：xxx」不带容器名的文案，调用方自己拼「「容器名」...」。
+ */
+function independentInnerSteps (
+  graph: { nodes?: any[], edges?: any[] } | undefined,
+): { subSteps?: ApprovalFlowStep[], error?: string } {
+  const hasInner = !!graph?.nodes?.some((n: any) => n.type !== 'start' && n.type !== 'end')
+  if (!hasInner) {
+    return {}
+  }
+  /*
+   * 复用轮询卡片同一套 cardGraphToSteps —— 分支命名 / 成环检测 / 校验规则全部继承，
+   * 不写第二套转换器（理由见 loopCardGraph 文件头）。放开的类型与各自推进语义
+   * （见 types/approval 的 flattenIndependentChain）：审批=会签环节；提醒/查询=穿过；
+   * 条件分支=按子链已产出结论拍平；引用模板=建单期整段拍平。
+   * 仍不放行：嵌套轮询 / 嵌套独立审批（cardGraphToSteps 拦 loop）。
+   */
+  const inner = cardGraphToSteps({ nodes: graph?.nodes ?? [], edges: graph?.edges ?? [] }, { allowEmptyMembers: true, allowRef: true })
+  if (inner.error) {
+    return { error: `内部流程：${inner.error}` }
+  }
+  for (const s of inner.steps) {
+    // 成员校验只针对审批环节：提醒/查询/分支没有"必须有人办"的概念
+    if (s.type === 'approval' && stepMembersOf(s).length === 0) {
+      return { error: `内部的「${s.name?.trim() || '某一环节'}」还没有审批人，请点开卡片编辑内部流程添加` }
+    }
+  }
+  // 至少一环审批：纯提醒/查询的子链没人办，独立审批等于空转
+  // 「引用模板」步骤**算有人办**：内容建单期才拍平（同步校验看不到源模板），
+  // 源模板里没有审批环节会在建单期展开时逐段报出来（见 utils/templateRef 的 countApprovals）
+  // —— 与主流程 graphToFlowFrom 的口径一致
+  if (!inner.steps.some(s => s.type === 'approval' || s.type === 'ref')) {
+    return { error: '内部流程里没有审批环节，请点开卡片编辑' }
+  }
+  // 环节名从内部画布节点的标题补上（cardGraphToSteps 不带 name，时间线要显示「容器名 · 环节名」）
+  const titleById = new Map<string, string>()
+  for (const n of graph?.nodes ?? []) {
+    const t = String(n?.data?.title ?? '').trim()
+    if (t) titleById.set(String(n.id), t)
+  }
+  return {
+    subSteps: inner.steps.map(s => {
+      const t = titleById.get(s.id)
+      return t ? { ...s, name: t } : s
+    }),
+  }
 }
 
 /**
@@ -474,6 +524,18 @@ export function graphToFlowFrom (
   function optionGroupsField (d?: ApprovalNodeData): { optionGroups?: ApprovalOptionGroup[] } {
     const groups = normalizeOptionGroups(d?.optionGroups)
     return groups.length > 0 ? { optionGroups: groups } : {}
+  }
+
+  /**
+   * 「独立审批」卡片上配的**结论选项**（`data.options`：结论码数组）→ 编译产物的字段。
+   * 没配 / 配空 = 不写字段，运行期按内置默认「通过 / 驳回」渲染
+   * （见 types/approval 的 INDEPENDENT_DEFAULT_OPTIONS）。
+   */
+  function independentOptionsField (d?: { options?: unknown }): { options?: string[] } {
+    const list = Array.isArray(d?.options)
+      ? d!.options.map(v => String(v ?? '').trim()).filter(Boolean)
+      : []
+    return list.length > 0 ? { options: [...new Set(list)] } : {}
   }
 
   /**
@@ -1097,6 +1159,54 @@ export function graphToFlowFrom (
         continue
       }
 
+      // 独立审批：分支里的一环，同样旁路发起、不阻塞主线（校验与主循环同一套）
+      if (pn.type === 'independent') {
+        const subName = String(pn.data?.title ?? '').trim() || '独立审批'
+        /*
+         * **子流程模式在分支里同样支持**：内部画布编译走 independentInnerSteps（与主循环
+         * 完全同一套转换与校验）。驳回回退不用特例 —— 独立审批本来就「不占 prevId」
+         * （ensureRejectLoopBack 系一律跳过）；快照拍平 / 时间线推进由 types/approval 的
+         * collectIndependentContainers + rebuildChain 分支内 walkSteps 按容器分叉处理。
+         */
+        const g = pn.data?.graph as { nodes?: any[], edges?: any[] } | undefined
+        const inner = independentInnerSteps(g)
+        if (inner.error) {
+          return { steps, territory, error: `「${subName}」${inner.error}`, errorNodeId: p }
+        }
+        const subSteps = inner.subSteps
+        const hasInner = subSteps !== undefined
+        if (outs.length !== 1) {
+          return {
+            steps,
+            territory,
+            error: `「${subName}」是独立审批节点，必须恰好有一条出线（它没有审批结论，无法分流）`,
+            errorNodeId: p,
+          }
+        }
+        const ms = (pn.data?.members ?? []).map((m: any) => ({ ...m }))
+        // 简单模式（没画内部流程）才要求卡片上有人；子流程模式的成员在内部环节上配
+        if (!hasInner && ms.length === 0) {
+          return {
+            steps,
+            territory,
+            error: `「${subName}」还没有添加独立审批人，请点击该节点添加`,
+            errorNodeId: p,
+          }
+        }
+        if (!visit(p)) {
+          return { steps, territory, error: '流程中检测到环（节点被重复经过），请检查连线' }
+        }
+        steps.push({
+          id: pn.id,
+          type: 'independent',
+          name: subName,
+          ...(hasInner ? { steps: subSteps ?? [], members: [] as any[] } : { members: ms }),
+          ...independentOptionsField(pn.data),
+        })
+        p = outs[0].target
+        continue
+      }
+
       /*
        * 「组间轮询」卡片（落在分支链里的形态）：转成 `type='loop'` 的**步骤**。
        *
@@ -1663,6 +1773,52 @@ export function graphToFlowFrom (
       continue
     }
 
+    // 独立审批：主流程旁路发起、不阻塞主线 —— 转成 flow 里的一个 independent 节点（运行期 pushIndependent 处理）
+    if (node.type === 'independent') {
+      visited.add(cur)
+      const subName = String(node.data?.title ?? '').trim() || '独立审批'
+      const outs: any[] = out.get(cur) ?? []
+      // 它没有审批结论、也没有条件可分流，所以出线必须恰好一条（与 notify 同一校验）
+      if (outs.length !== 1) {
+        return {
+          flow: [],
+          error: `「${subName}」是独立审批节点，必须恰好有一条出线（它没有审批结论，无法分流）`,
+          errorNodeId: cur,
+        }
+      }
+      /*
+       * **子流程模式**：卡片里画过内部流程（data.graph 有实际节点）→ 编译成线性子链
+       * （每个审批环节一环，依次办理）。编译与校验统一走 independentInnerSteps ——
+       * 与分支内的独立审批同一套（放开类型见该 helper 注释）。
+       */
+      const g = node.data?.graph as { nodes?: any[], edges?: any[] } | undefined
+      const inner = independentInnerSteps(g)
+      if (inner.error) {
+        return { flow: [], error: `「${subName}」${inner.error}`, errorNodeId: cur }
+      }
+      const subSteps = inner.subSteps
+      const hasInner = subSteps !== undefined
+      const members = (node.data?.members ?? []).map((m: any) => ({ ...m }))
+      // 简单模式（没画内部流程）才要求卡片上有人；子流程模式的成员在内部环节上配（上面已逐环拦空）
+      if (!hasInner && members.length === 0) {
+        return {
+          flow: [],
+          error: `「${subName}」还没有添加独立审批人，请点击该节点添加`,
+          errorNodeId: cur,
+        }
+      }
+      flow.push({
+        id: node.id,
+        type: 'independent',
+        name: subName,
+        // 子流程模式下 members 恒为空（成员在子环节上），保留字段让节点形状稳定
+        ...(hasInner ? { steps: subSteps ?? [], members: [] as any[] } : { members }),
+        ...independentOptionsField(node.data),
+      })
+      cur = outs[0].target
+      continue
+    }
+
     return { flow: [], error: `未知的节点类型「${String(node.type ?? '')}」，请检查画布`, errorNodeId: cur }
   }
   return { flow: [], error: '流程中检测到环，请检查画布' }
@@ -1947,6 +2103,17 @@ export function ensureRejectLoopBack (flow: ApprovalFlow): ApprovalFlow {
       continue
     }
 
+    /*
+     * 「独立审批」：旁路环节、不可被「驳回回退」（它不是主链上的办理环节，
+     * 没有可驳回的结论）——所以**不占 prevId**：它后面环节的「驳回 → 回退上一级」
+     * 要跳过它、直接回到上一个真实审批环节。若让它落进默认分支，后面环节的
+     * 回退目标会指向它，办理端点「驳回」就会报"目标环节不可办"。
+     */
+    if (node.type === 'independent') {
+      out.push(node)
+      continue
+    }
+
     out.push(node)
     const next = flow[i + 1]
     if (prevId) {
@@ -2020,6 +2187,12 @@ export function ensureRejectLoopBackInSteps (
     if (s.type === 'ref') {
       out.push(s)
       prevId = s.id
+      continue
+    }
+
+    // 「独立审批」步骤：同顶层口径 —— 不占 prevId（不可被回退），见 ensureRejectLoopBack 里的说明
+    if (s.type === 'independent') {
+      out.push(s)
       continue
     }
 

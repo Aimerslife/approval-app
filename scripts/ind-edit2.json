@@ -1,0 +1,35 @@
+{
+  "errors": [],
+  "tplId": "9smpsbs709bj1km",
+  "echo": {
+    "cardVisible": true,
+    "title": "供应商确认",
+    "members": [
+      "陈培锋办理"
+    ],
+    "options": [
+      "通过",
+      "驳回",
+      "需复核"
+    ]
+  },
+  "edited": {
+    "title": "供应商确认（改）",
+    "options": [
+      "驳回",
+      "需复核",
+      "待定价"
+    ]
+  },
+  "saveToast": null,
+  "saveErrBar": "1",
+  "saved": {
+    "flowTypes": [],
+    "indInFlow": [],
+    "graphInd": 1
+  },
+  "sceneB": {
+    "toast": null,
+    "nameDialogOpen": false
+  }
+}

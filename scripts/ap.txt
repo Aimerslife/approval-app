@@ -1,0 +1,12 @@
+﻿69: <v-container class="pb-10" :style="{ paddingBottom: timelinePaddingBottom }">
+80: <v-timeline density="compact" side="end" truncate-line="both" width="100%">
+81: <ApprovalNode
+105: <v-timeline-item v-if="receivers.length > 0" class="mb-6" dot-color="#1055C9" size="small">
+146: </v-timeline-item>
+149: </v-timeline>
+234: import ApprovalNode from '@/components/ApprovalNode.vue'
+412: const timelinePaddingBottom = computed(() => (dockHeight.value > 0
+453: * ApprovalDetailView 同一口径；2026-11-16 定稿：审批类型清单是 mockRun 沙盒的独立
+689: * 传给 ApprovalNode 后即可算出与上级的时间差：已办理 → 耗时，未办理 → 已等待。
+695: // 与 ApprovalNode 取 manager 的口径保持一致
+771: *   · 抄送 → type 'cc'（ApprovalNode 里 nodeTargets 渲染 type != 'manager' 的成员）；

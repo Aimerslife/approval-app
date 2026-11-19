@@ -16,13 +16,22 @@
         <v-btn prepend-icon="mdi-arrow-left" size="small" variant="text" @click="emit('close')">返回</v-btn>
         <v-spacer />
 
-        <span class="dialog-sub">每个组都会把下面这段子流程走一遍</span>
+        <span class="dialog-sub">{{ variant === 'independent'
+          ? '下面的环节会按顺序依次办理（上一环全员提交后解锁下一环）'
+          : '每个组都会把下面这段子流程走一遍' }}</span>
       </v-card-title>
 
       <v-card-text>
         <div class="dialog-tip">
-          轮询条件（组字段、排序、行条件、统计范围…）在画布上的**卡片**里直接修改；
-          这里画的是"每个组各走一遍"的那段子流程。改完点「保存」，点「返回」则这次修改不生效。
+          <template v-if="variant === 'independent'">
+            这张「独立审批」卡片走**子流程模式**：在里面放若干审批环节，依次办理、
+            全部办完才算独立审批完成。结论选项在**卡片上**配（所有环节共用）。
+            改完点「保存」，点「返回」则这次修改不生效。
+          </template>
+          <template v-else>
+            轮询条件（组字段、排序、行条件、统计范围…）在画布上的**卡片**里直接修改；
+            这里画的是"每个组各走一遍"的那段子流程。改完点「保存」，点「返回」则这次修改不生效。
+          </template>
         </div>
 
         <!--
@@ -40,6 +49,10 @@
           :early-exits="earlyExits"
           :graph="draft"
           :outer-approvals="outerApprovals"
+          :templates="templates"
+          :variant="variant"
+          @open="emit('open', $event)"
+          @preview="emit('preview', $event)"
         />
       </v-card-text>
 
@@ -56,7 +69,6 @@
 </template>
 
 <script lang="ts" setup>
-  import type { LoopNodeData } from '@/types/approval'
   import type { CardGraph } from '@/utils/loopCardGraph'
   import LoopCardCanvas from '@/components/flow/LoopCardCanvas.vue'
 
@@ -72,8 +84,16 @@
    */
   const props = defineProps<{
     open: boolean
-    /** 卡片数据（保存时把草稿写回它的 graph） */
-    data: LoopNodeData
+    /**
+     * 卡片数据（保存时把草稿写回它的 graph）。
+     *
+     * 两种卡片共用本对话框：轮询卡片（LoopNodeData）与独立审批卡片（ApprovalNodeData + graph）
+     * —— 真正读写到的只有 `title` / `graph` 两个字段，所以放宽成这个最小形状，
+     * 调用方传哪个卡片的 data 都行。
+     */
+    data: { title: string, graph?: CardGraph }
+    /** 卡片形态：'loop' 组间轮询（默认）/ 'independent' 独立审批 —— 只影响文案与可放的节点 */
+    variant?: 'loop' | 'independent'
     /**
      * **卡片外**的审批环节（`{ id, label }`）：原样透传给内部画布，
      * 供内部连线选「提前结束轮询 → 跳到卡片外哪个环节」（见 LoopCardCanvas 的同名 prop）。
@@ -84,14 +104,23 @@
      * 环内那条「提前结束轮询」可以直接选"跳到哪一条"（见 LoopCardCanvas 的同名 prop）。
      */
     earlyExits?: { id: string, label: string, targetId: string }[]
+    /**
+     * 「引用模板」卡片的下拉候选：原样透传给内部画布（独立审批子流程支持引用模板，
+     * 见 LoopCardCanvas 的同名 prop）。没传 = 引用卡片没有候选可挑。
+     */
+    templates?: { id: string, name: string, status: number }[]
   }>()
 
   const emit = defineEmits<{
     close: []
+    /** 内部引用模板卡片点「预览」：继续往上传，父级弹 RefPreviewDialog */
+    'preview': [templateId: string]
+    /** 内部引用模板卡片点「打开」：继续往上传，父级新开源模板编辑页 */
+    'open': [templateId: string]
   }>()
 
   /** 取卡片数据引用（绕开"直接改 prop"的告警，见项目里 roleOf / rotationOf 的同一写法） */
-  function dataRef (): LoopNodeData {
+  function dataRef (): { title: string, graph?: CardGraph } {
     return props.data
   }
 
@@ -169,7 +198,9 @@
     }
   }
 
-  const footNote = '内部环节的默认审批人是「本环的组负责人」（展开时按这一环轮到的组解析），可改成固定团队负责人或组织管理员'
+  const footNote = props.variant === 'independent'
+    ? '内部环节的默认审批人是「组织管理员」，可改成固定成员或其它动态负责人；上一环全员提交后才解锁下一环'
+    : '内部环节的默认审批人是「本环的组负责人」（展开时按这一环轮到的组解析），可改成固定团队负责人或组织管理员'
 </script>
 
 <style lang="scss" scoped>

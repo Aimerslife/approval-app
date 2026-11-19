@@ -1,0 +1,8 @@
+﻿9: <span class="text-[13px]">审批单号：<strong>{{ orderDatas?.order_no }}</strong>
+10: <v-icon-btn icon="mdi-content-copy" size="x-small" @click="copyOrderNo(orderDatas?.order_no)" /></span>
+273: import { getApprovalOrder, getApprovalOrderByNo, updateApprovalOrder } from '@/utils/collection'
+283: async function copyOrderNo (order_no: string | undefined) {
+285: if (order_no) {
+286: await toClipboard(order_no)
+319: const orderNo = ref((route.query.order_no as string) ?? '')
+354: const link = `${base}/approvalPage?order_no=${encodeURIComponent(orderNo.value)}&from=feishu`

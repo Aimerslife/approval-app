@@ -1,0 +1,12 @@
+﻿51: name: string
+52: en_name?: string
+62: name: string
+129: department_name: string
+142: * company_name 是服务端写死的常量（server/config.ts 的 companyName）——
+148: department_name: string
+152: company_name: string
+241: const tokenTime = localStorage.getItem('tokenTime')
+242: if (!ifNew && token && tokenTime && Date.now() - Number.parseInt(tokenTime) < 3600 * 1000) {
+255: localStorage.setItem('tokenTime', Date.now().toString())
+263: * ⚠️ `name` 必须是**仪表板级参数名**（仪表板里的「参数」控件，如筛选器绑定的参数），
+267: *   GET /api/public/analysis/v1/dashboards/{dashboardId}/meta  →  data.parameters[].name

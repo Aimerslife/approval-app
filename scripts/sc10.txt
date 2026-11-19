@@ -1,0 +1,5 @@
+﻿11: import { flowHasRoles, resolveFlowRoles } from '@/utils/approvalRoles'
+19: import { expandFlowForOrder } from '@/utils/expandFlowForOrder'
+528: * 最后按组展开「组间轮询」。见 utils/expandFlowForOrder —— flow 是**静态快照**，
+532: const expanded = await expandFlowForOrder(templateFlow, context)
+545: const resolved = resolveFlowRoles(flow, await orgTree(), context)

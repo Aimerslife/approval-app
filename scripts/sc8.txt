@@ -1,0 +1,10 @@
+﻿242: if (s.type === 'branch') {
+266: if (node.type === 'approval') {
+274: if (node.type === 'notify') {
+286: if (node.type === 'loop') {
+295: if (node.type === 'ref') {
+357: if (s.type === 'branch') {
+375: if (node.type === 'approval') {
+379: if (node.type === 'notify') {
+387: if (node.type === 'loop') {
+391: if (node.type === 'ref') {

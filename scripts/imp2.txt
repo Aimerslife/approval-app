@@ -1,0 +1,8 @@
+﻿29: result_label: string
+94: result_label?: string
+358: result_label?: string
+602: export const APPROVAL_RESULTS: ReadonlyArray<{ value: string, label: string }> = [
+603: { value: 'pass', label: '通过' },
+611: * 文案改动说明：这里原来写「接收」，与办理端真正落库的 result_label「全部接收」不一致，
+701: * 而码表、以及办理端落库的 result_label 都已经叫「全部接收」。不统一的话同一条结论
+939: * `result` 是运行时匹配连线用的结论码；`text` 只给人看（提交时随 result_label 落到单据上）。

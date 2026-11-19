@@ -1,0 +1,18 @@
+﻿35: export function runtimeOf (order: ApprovalOrder) {
+121: export function lastHandledIn (
+139: export function lastHandledOf (chain: ApprovalChain): ApprovalChainItem | undefined {
+151: export function orderPendingOn (order: ApprovalOrder, who?: ApprovalChainItem | null): boolean {
+178: export function orderHandledBy (order: ApprovalOrder, who?: ApprovalChainItem | null): boolean {
+197: export function orderCcTo (order: ApprovalOrder, who?: ApprovalChainItem | null): boolean {
+215: export function orderCreatedBy (order: ApprovalOrder, userId?: string | null): boolean {
+239: export function queueCursorOf (
+293: export function legacyFlowEndOf (order: ApprovalOrder): FlowEndInfo | undefined {
+354: export function groupApproverSteps (
+408: export function nextStepsOf (
+439: export function nextStepSameApprover (chain: ApprovalChainItem[][], index: number): boolean {
+459: export function stepStartTimesOf (order: ApprovalOrder, chain: ApprovalChainItem[][]) {
+507: export function rotationReceiptsOf (
+588: export const DISCARD_MIN_INDEX = 3
+603: export function discardMarksOf (
+843: export function discardMarkOf (
+886: export function flowScopeOf (
