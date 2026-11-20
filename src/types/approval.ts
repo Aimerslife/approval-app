@@ -179,6 +179,14 @@ export interface ApprovalChainItem {
      * 不用把 flow 快照喂给时间线组件。
      */
     progress?: Array<{ name: string, done: number, total: number }>
+    /**
+     * 仅**子流程模式**：整条子链**全部环节**的成员结论快照（环名 + 各成员及其回填结论）。
+     * 时间线用它按环节分组渲染"每一环是谁、办到哪、结论是什么" —— 此前环上只摆
+     * 当前环的成员（第一个没办完的环；全办完 = 最后一环），历史环办完就从时间线上
+     * 消失了，只能看到"最后一环"的内容。每环成员沿用 ApprovalChainItem 形态且结论
+     * 已按 `by` 对号回填，展示层零对号；冗余但刻意（options/progress 同一套理由）。
+     */
+    history?: Array<{ name: string, members: ApprovalChainItem[] }>
   }
 }
 
@@ -1661,6 +1669,31 @@ function evalCondition (c: BranchCondition, raw: unknown, form: Record<string, u
    */
   const exprText = String(c.lhsExpr ?? '').trim()
   const exprValue = exprText ? evalArithmetic(exprText, form) : null
+  /*
+   * 「办理时选择的原因分类」（field=reason_belong）的兼容口径：
+   * reason_belong 本是审批类型表单「原因」项带出的**分类名**（见 approvalTypes 的 REASON_OPTIONS），
+   * 只有走老表单的决策才会写进 extra；环节级办理选项树落库的是 option_group/option_link/option_text，
+   * 没有 reason_belong —— 模板按「办理时选择的原因分类」配的条件会在选项树单据上永远取不到值。
+   * 口径：决策里真有 reason_belong（老表单）时原样参与比较（语义不变）；取不到时回落到选项树两键，
+   * **任一候选命中即算命中**——完整叶子文案比 option_text、分类名比 option_group，都能对上。
+   * 仅 eq / ne 参与（分类与文案都是字符串比较）；其余 op 与空值短路同口径判不命中。
+   */
+  const fallbackRaws = (c.field === 'reason_belong' && !exprText && (raw === undefined || raw === null || raw === ''))
+    ? [form.option_text, form.option_group].filter(v => v !== undefined && v !== null && v !== '')
+    : []
+  if (fallbackRaws.length > 0) {
+    let expectV: unknown = c.value
+    const rf = conditionRefField(c)
+    if (rf) {
+      expectV = form[rf]
+    }
+    if (expectV === undefined || expectV === null || expectV === '') {
+      return false
+    }
+    if (c.op === 'eq') { return fallbackRaws.some(v => String(v) === String(expectV)) }
+    if (c.op === 'ne') { return fallbackRaws.every(v => String(v) !== String(expectV)) }
+    return false
+  }
   if (raw === undefined || raw === null || raw === '') {
     return false
   }
@@ -3477,6 +3510,17 @@ export function rebuildChain (
         nodeId: activeStep?.key ?? containerId,
         stage: activeStep?.name ?? '',
         progress: settled.map((s, i) => ({ name: steps[i]?.name ?? `环节${i + 1}`, done: s.done, total: s.total })),
+        // 全链结论快照：时间线按环节分组渲染**全部环**（历史环不再"办完即消失"），见 independent.history
+        history: settled.map((s, i) => ({
+          name: steps[i]?.name ?? `环节${i + 1}`,
+          members: s.rows.map(({ member, decision: d }) => ({
+            ...member,
+            type: 'manager' as const,
+            ...(d?.result ? { result: d.result, result_label: d.result_label ?? d.result } : {}),
+            ...(d?.opinion ? { opinion: d.opinion } : {}),
+            ...(d?.handled_at ? { handled_at: d.handled_at } : {}),
+          })),
+        })),
       },
       ...(d?.result ? { result: d.result, result_label: d.result_label ?? d.result } : {}),
       ...(d?.opinion ? { opinion: d.opinion } : {}),

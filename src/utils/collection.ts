@@ -2,6 +2,7 @@ import type { ApprovalAttachment, ApprovalChain, ApprovalFlow, ApprovalModal, Ap
 // 只要类型：团队/部门 → 默认审批人的"覆盖记录"形状（合并口径见 utils/groupApprovers）
 import type { DeptApproverOverride, GroupApproverOverride } from '@/utils/groupApprovers'
 import type { WarehouseRow } from '@/utils/warehouse'
+import type { ResponsibilityRow } from '@/utils/responsibility'
 import pb from '@/pocketbase.ts'
 import { APPROVAL_STATUS, branchTerminalMapOf, rebuildChain } from '@/types/approval'
 // 流程快照层（模板版本化）：写侧引用化 + 读侧解包，见 utils/flowSnapshot 的文件头
@@ -16,6 +17,7 @@ import { PB_REQUEST_KEY } from '@/utils/pbRequestKeys'
 import { collectTemplateRefs } from '@/utils/templateRef'
 // 仓库清单的取舍口径是纯逻辑（PB 有记录就全用它，否则回落默认值），放在 utils/warehouse 里
 import { normalizeWarehouses, resolveWarehouses, warehouseKey } from '@/utils/warehouse'
+import { normalizeResponsibilities, resolveResponsibilities } from '@/utils/responsibility'
 
 export interface DocumentModel {
   collectionId: string
@@ -1063,3 +1065,97 @@ export async function resetWarehouses (): Promise<void> {
  * 飞书推送规则（定时推送 / 推送人员 / 白名单）的读写**不在这里**，在 utils/pushRulesStore ——
  * 到达提醒（utils/notifySteps）也要读白名单，而本文件已经 import 了它，放这里会成环。
  */
+
+/**
+ * 在「角色设置 → 责任划分」里维护的呆滞库存责任划分规则
+ * （《全渠道呆滞库存管理制度-责任归属与标准》那张表，默认值在 utils/responsibility.ts）。
+ *
+ * 与仓库设置同款：**整表替换** —— 规则要能新增、编辑、删除，逐行覆盖表达不了"删掉某一条"。
+ * 口径：本表有记录就完全以它为准；一条都没有就回落到默认的 24 条。
+ */
+const RESP_COLLECTION = 'responsibility_rules'
+
+type RespRecord = ResponsibilityRow & { id: string }
+
+/**
+ * 写失败时的报错（与 warehouseWriteError 同款）：集合不存在（PB 还没应用
+ * 1794500000 迁移）是最常见的一种，PocketBase 默认的报错对用户毫无指向性。
+ */
+function respWriteError (error: unknown): Error {
+  if ((error as { status?: number } | null)?.status === 404) {
+    const e = new Error('责任划分维护表还没建：请重启 PocketBase 以应用迁移 1794500000_created_responsibility_rules')
+    e.name = RESP_SETUP_ERROR
+    return e
+  }
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+/** 上面那种"环境没准备好"的错误名：界面据此直接展示原因，而不是笼统的"保存失败" */
+export const RESP_SETUP_ERROR = 'ResponsibilitySetupError'
+
+export interface ResponsibilityList {
+  /** 本次要用的清单（已清洗） */
+  rows: ResponsibilityRow[]
+  /** true = 用的是维护表里的那份；false = 回落到文件默认（界面据此显示"默认 / 已自定义"） */
+  custom: boolean
+}
+
+/**
+ * 读取本次要用的责任划分清单。
+ *
+ * 与 loadWarehouses 同款：**读失败返回默认值**而不是抛错 ——
+ * 集合可能还没建（PB 没应用 1794500000 迁移），那种情况下界面应当照常显示默认清单。
+ */
+export async function loadResponsibilities (): Promise<ResponsibilityList> {
+  let overrides: ResponsibilityRow[] = []
+  try {
+    overrides = await pb
+      .collection(RESP_COLLECTION)
+      .getFullList<RespRecord>({ sort: 'created', requestKey: PB_REQUEST_KEY.respList })
+  } catch (error) {
+    console.warn('[responsibility] 读取维护表失败（多半是还没应用迁移），先用默认清单:', error)
+  }
+  return { rows: resolveResponsibilities(overrides), custom: overrides.length > 0 }
+}
+
+/**
+ * 把整份清单写回维护表（**全删全建**）。
+ *
+ * 为什么不做仓库那种"按键 diff"：责任规则**没有唯一索引**（同名规则合法共存，
+ * 见迁移文件注释），diff 无键可比；全删全建 24 行级的量，简单直接。
+ * 只 normalize 不 resolve：传空数组的语义是"清空"，不能被默认清单又填满。
+ * 失败**向上抛**（与读取相反）：这是"改数据"的动作，静默失败会让用户以为改好了。
+ */
+export async function saveResponsibilities (rows: readonly ResponsibilityRow[]): Promise<void> {
+  const want = normalizeResponsibilities(rows)
+  try {
+    const existing = await pb.collection(RESP_COLLECTION).getFullList<RespRecord>({
+      requestKey: PB_REQUEST_KEY.respWrite,
+    })
+
+    for (const rec of existing) {
+      await pb.collection(RESP_COLLECTION).delete(rec.id)
+    }
+    for (const row of want) {
+      await pb
+        .collection(RESP_COLLECTION)
+        .create({ reason: row.reason, category: row.category, ratios: row.ratios })
+    }
+  } catch (error) {
+    throw respWriteError(error)
+  }
+}
+
+/** 恢复默认：清空维护表（之后 loadResponsibilities 会回落到 utils/responsibility.ts 的默认 24 条） */
+export async function resetResponsibilities (): Promise<void> {
+  try {
+    const existing = await pb.collection(RESP_COLLECTION).getFullList<RespRecord>({
+      requestKey: PB_REQUEST_KEY.respReset,
+    })
+    for (const rec of existing) {
+      await pb.collection(RESP_COLLECTION).delete(rec.id)
+    }
+  } catch (error) {
+    throw respWriteError(error)
+  }
+}

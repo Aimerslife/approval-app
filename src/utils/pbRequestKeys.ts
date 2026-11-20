@@ -92,6 +92,14 @@ export const PB_REQUEST_KEY = {
   /** 恢复默认（清空表）前的读 —— `resetWarehouses` */
   warehousesReset: 'warehouses:reset',
 
+  // ===== responsibility_rules（呆滞库存责任划分，见 utils/collection）=====
+  /** 读本次要用的清单（读失败回落默认清单）—— `loadResponsibilities` */
+  respList: 'responsibility_rules:list',
+  /** 整表替换写入前的读 —— `saveResponsibilities` */
+  respWrite: 'responsibility_rules:write',
+  /** 恢复默认（清空表）前的读 —— `resetResponsibilities` */
+  respReset: 'responsibility_rules:reset',
+
   // ===== push_rules（飞书推送规则，见 utils/pushRulesStore）=====
   /** 读规则（失败回落默认规则）—— `loadPushRules` */
   pushRulesLoad: 'push_rules:load',

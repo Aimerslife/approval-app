@@ -343,6 +343,11 @@ function removeMember(i: number) {
     background: #EA580C;
 }
 
+/* 独立审批整卡用橙色虚线框包住：实线 = 主线必经环节，虚线 = 旁路发起、不阻塞主线 */
+.node-card.is-independent {
+    border: 1px dashed rgb(234 88 12 / 60%);
+}
+
 /* 独立审批的结论选项 chips（默认 通过/驳回；加了自定义码就按配置显示） */
 .ind-options {
     display: flex;

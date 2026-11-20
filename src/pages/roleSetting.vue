@@ -302,6 +302,81 @@
       </v-data-table>
     </v-sheet>
 
+    <!--
+      呆滞库存责任划分：数据源自《全渠道呆滞库存管理制度-责任归属与标准》那张表
+      （默认 24 条规则在 utils/responsibility.ts，改文件即刻生效）。
+      与仓库配置同款整表替换口径：维护表里有记录就完全以它为准，空表才用默认值。
+    -->
+    <div class="my-5 px-1">
+      <div class="font-bold block-title">责任划分</div>
+      <div class="text-[12px] text-medium-emphasis mt-1">
+        呆滞库存管理制度 · 责任归属与标准：二级原因 → 各部门承担比率（合计超 100% 的行是"按归属部门各担"，属正常）
+      </div>
+    </div>
+
+    <v-sheet class="overflow-hidden card-border px-4 pt-4 pb-2" rounded="15">
+      <div class="d-flex align-center flex-wrap ga-4 pr-5 pl-2 pt-1 pb-3">
+        <div class="flex-grow-1 d-flex align-center ga-2">
+          <span class="text-[13px] text-medium-emphasis">
+            <b class="text-primary">{{ respRows.length }}</b> 条规则</span>
+
+          <span v-if="respCustom" class="text-[12px] text-medium-emphasis">· 已自定义（非制度表默认）</span>
+        </div>
+
+        <v-btn v-if="respCustom" size="small" variant="text" @click="askResetResp">恢复默认</v-btn>
+
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-plus"
+          size="small"
+          variant="flat"
+          @click="openRespAdd"
+        >新增规则</v-btn>
+
+        <v-text-field
+          v-model="respSearch"
+          class="filter-input"
+          clearable
+          density="compact"
+          hide-details
+          label="搜索原因类别 / 二级原因"
+          prepend-inner-icon="mdi-magnify"
+          single-line
+          style="max-width: 260px"
+          variant="outlined"
+        />
+      </div>
+
+      <v-divider />
+
+      <v-data-table
+        class="text-[12px]"
+        density="compact"
+        :headers="respHeaders"
+        hover
+        :items="respDisplayRows"
+        :items-per-page="10"
+        :items-per-page-options="[10, 20, 50]"
+        :loading="respLoading"
+        :search="respSearch"
+      >
+        <template #item.category="{ value }">
+          <v-chip color="info" label size="small" variant="tonal">{{ value || '—' }}</v-chip>
+        </template>
+
+        <template #item.reason="{ value }">
+          <span class="text-[12px]">{{ value }}</span>
+        </template>
+
+        <template #item.action="{ item }">
+          <div class="d-flex justify-center ga-1">
+            <v-btn color="primary" size="small" variant="tonal" @click="openRespEdit(item)">编辑</v-btn>
+            <v-btn size="small" variant="text" @click="askRemoveResp(item)">删除</v-btn>
+          </div>
+        </template>
+      </v-data-table>
+    </v-sheet>
+
     <v-dialog v-model="warehouseDialog" max-width="520">
       <v-card class="overflow-hidden" rounded="xl">
         <v-card-title class="d-flex align-center justify-space-between px-6 py-4">
@@ -355,16 +430,98 @@
       </v-card>
     </v-dialog>
 
+    <!--
+      责任划分编辑弹窗：10 个部门各一格比率输入（0~1，留空 = 不承担）。
+      合计只展示不拦截 —— "按归属部门各担 100%" 的规则（如产品质量问题五个部门各 1）合计天然 > 100%。
+    -->
+    <v-dialog v-model="respDialog" max-width="640">
+      <v-card class="overflow-hidden" rounded="xl">
+        <v-card-title class="d-flex align-center justify-space-between px-6 py-4">
+          <div class="d-flex align-center ga-2">
+            <v-avatar color="primary" size="28" variant="tonal">
+              <v-icon icon="mdi-chart-donut" size="16" />
+            </v-avatar>
+
+            <span class="text-[15px] font-bold">{{ respEditing !== null ? '编辑责任划分' : '新增责任划分规则' }}</span>
+          </div>
+
+          <v-icon-btn icon="mdi-close" size="small" variant="text" @click="respDialog = false" />
+        </v-card-title>
+
+        <v-divider />
+
+        <v-card-text class="px-6 py-5">
+          <div class="d-flex ga-3 mb-3">
+            <v-text-field
+              v-model="respDraft.reason"
+              class="filter-input"
+              density="compact"
+              hide-details="auto"
+              label="二级原因"
+              placeholder="如：产品侵权-发明专利侵权"
+              variant="outlined"
+            />
+
+            <v-combobox
+              v-model="respDraft.category"
+              class="filter-input"
+              clearable
+              density="compact"
+              hide-details="auto"
+              :items="respCategoryOptions"
+              label="原因类别"
+              placeholder="运营类 / 库存管理类 / …"
+              variant="outlined"
+            >
+              <template #message>
+                <span class="text-[11px]">可直接输入新的类别名</span>
+              </template>
+            </v-combobox>
+          </div>
+
+          <div class="text-[12px] text-medium-emphasis mb-2">各部门承担比率（0 ~ 1，留空 = 该部门不承担）</div>
+
+          <div class="resp-ratio-grid">
+            <v-text-field
+              v-for="d in RESPONSIBILITY_DEPTS"
+              :key="d"
+              v-model="respDraft.ratios[d]"
+              clearable
+              density="compact"
+              hide-details="auto"
+              :label="d"
+              max="1"
+              min="0"
+              step="0.05"
+              type="number"
+              variant="outlined"
+            />
+          </div>
+
+          <div class="text-[11px] text-medium-emphasis mt-3">
+            当前合计：<b>{{ respDraftSumText }}</b>；多部门各担 100%（合计 &gt; 100%）的规则属正常形态
+          </div>
+        </v-card-text>
+
+        <v-divider />
+
+        <v-card-actions class="px-6 py-3">
+          <v-spacer />
+          <v-btn variant="text" @click="respDialog = false">取消</v-btn>
+          <v-btn color="primary" :loading="respSaving" variant="flat" @click="saveRespDraft">保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 删除 / 恢复默认确认弹窗：仓库与责任划分共用，按 confirmKind 切换文案与动作 -->
     <v-dialog v-model="confirmOpen" max-width="460">
       <v-card class="overflow-hidden" rounded="xl">
         <v-card-title class="d-flex align-center ga-2 px-6 py-4">
-          <v-avatar :color="confirmKind === 'reset' ? 'warning' : 'error'" size="28" variant="tonal">
-            <v-icon size="16">{{ confirmKind === 'reset' ? 'mdi-backup-restore' : 'mdi-delete-outline' }}</v-icon>
+          <v-avatar :color="confirmIsReset ? 'warning' : 'error'" size="28" variant="tonal">
+            <v-icon size="16">{{ confirmIsReset ? 'mdi-backup-restore' : 'mdi-delete-outline' }}</v-icon>
           </v-avatar>
 
-          <span class="text-[15px] font-semibold">
-            {{ confirmKind === 'reset' ? '恢复默认仓库清单' : '删除仓库' }}
-          </span>
+          <span class="text-[15px] font-semibold">{{ confirmTitle }}</span>
         </v-card-title>
 
         <v-divider />
@@ -374,8 +531,17 @@
             将清空维护表里的 <b>{{ warehouseRows.length }}</b> 条记录
           </template>
 
+          <template v-else-if="confirmKind === 'resp-reset'">
+            将清空维护表里的 <b>{{ respRows.length }}</b> 条记录，回到制度表默认的
+            <b>{{ DEFAULT_RESPONSIBILITY_ROWS.length }}</b> 条
+          </template>
+
+          <template v-else-if="confirmKind === 'resp-remove'">
+            确定删除「<b>{{ respConfirmLabel }}</b>」吗？删除后呆滞库存将不再按它划分责任。
+          </template>
+
           <template v-else>
-            确定删除「<b>{{ confirmTarget?.parent }}</b> / <b>{{ confirmTarget?.name }}</b>」吗？
+            确定删除「<b>{{ warehouseConfirmLabel }}</b>」吗？
             删除后新建的审批单里不会再出现它。
           </template>
         </v-card-text>
@@ -387,7 +553,7 @@
           <v-btn variant="text" @click="closeConfirm">取消</v-btn>
 
           <v-btn
-            :color="confirmKind === 'reset' ? 'warning' : 'error'"
+            :color="confirmIsReset ? 'warning' : 'error'"
             :loading="confirmLoading"
             variant="flat"
             @click="runConfirm"
@@ -672,13 +838,17 @@
     getDeptApproverOverrides,
     getGroupApproverOverrides,
     getUserInfo,
+    loadResponsibilities,
     loadWarehouses,
+    resetResponsibilities,
     resetWarehouses,
     saveDeptApprover,
     saveGroupApprover,
+    saveResponsibilities,
     saveWarehouses,
     updateUserRole,
     type UserInfo,
+    RESP_SETUP_ERROR,
     WAREHOUSE_SETUP_ERROR,
   } from '@/utils/collection'
   import {
@@ -704,6 +874,15 @@
    * 权限静默失效（见 roleList 上的说明）。
    */
   import { type AppRole, normalizeRole, ROLE_LABELS } from '@/utils/permissions'
+  import {
+    cleanResponsibilityRow,
+    DEFAULT_RESPONSIBILITY_ROWS,
+    findBadResponsibility,
+    formatRatio,
+    RESPONSIBILITY_DEPTS,
+    responsibilityCategories,
+    type ResponsibilityRow,
+  } from '@/utils/responsibility'
   import {
     cleanWarehouse,
     findBadWarehouse,
@@ -1250,10 +1429,12 @@
 
   /*
    * 删除与「恢复默认」都动维护表，所以都要先确认。
-   * 一个弹窗按 `confirmKind` 切换文案与动作，避免为两件"取消/确定"几乎一样的事写两套。
+   * 仓库与责任划分共用这一个弹窗，按 `confirmKind` 切换文案与动作，
+   * 避免为四件"取消/确定"几乎一样的事写两套弹窗。
    */
-  const confirmKind = ref<'remove' | 'reset' | null>(null)
-  const confirmTarget = ref<WarehouseRow | null>(null)
+  const confirmKind = ref<'remove' | 'reset' | 'resp-remove' | 'resp-reset' | null>(null)
+  /** 仓库删除存行对象；责任划分删除存带 idx 的行（同名规则合法共存，按索引定位才稳） */
+  const confirmTarget = ref<WarehouseRow | (ResponsibilityRow & { idx: number }) | null>(null)
   const confirmLoading = ref(false)
   const confirmOpen = computed({
     get: () => confirmKind.value !== null,
@@ -1262,6 +1443,23 @@
         confirmKind.value = null
       }
     },
+  })
+
+  const confirmIsReset = computed(() => confirmKind.value === 'reset' || confirmKind.value === 'resp-reset')
+  const confirmTitle = computed(() => {
+    if (confirmKind.value === 'reset') return '恢复默认仓库清单'
+    if (confirmKind.value === 'resp-reset') return '恢复默认责任划分'
+    if (confirmKind.value === 'resp-remove') return '删除责任划分规则'
+    return '删除仓库'
+  })
+  /** 确认文案里"删除对象"的名字（模板里不直接摸联合类型的字段，类型上过不去） */
+  const warehouseConfirmLabel = computed(() => {
+    const t = confirmTarget.value
+    return t && !('reason' in t) ? `${t.parent} / ${t.name}` : ''
+  })
+  const respConfirmLabel = computed(() => {
+    const t = confirmTarget.value
+    return t && 'reason' in t ? t.reason : ''
   })
 
   function askRemoveWarehouse (row: WarehouseRow) {
@@ -1295,25 +1493,204 @@
       if (kind === 'reset') {
         await resetWarehouses()
         showHint('已恢复为默认仓库清单', 'success')
-      } else if (target) {
+      } else if (kind === 'resp-reset') {
+        await resetResponsibilities()
+        showHint('已恢复为制度表默认的责任划分', 'success')
+      } else if (kind === 'resp-remove' && target && 'idx' in target) {
+        // 同名规则合法共存（制度表里"外观专利侵权（产品合规中心承接）"本就有两行），按索引删
+        await saveResponsibilities(respRows.value.filter((_, i) => i !== target.idx))
+        showHint(`已删除「${target.reason}」`, 'success')
+      } else if (target && !('reason' in target)) {
         const list = warehouseRows.value.filter(r => warehouseKey(r) !== warehouseKey(target))
         await saveWarehouses(list)
         showHint(`已删除「${target.parent} / ${target.name}」`, 'success')
       }
-      await loadWarehouseList()
+      if (kind === 'reset' || kind === 'remove') {
+        await loadWarehouseList()
+      } else {
+        await loadRespList()
+      }
       closeConfirm()
     } catch (error) {
-      console.error('[roleSetting] 仓库清单写入失败:', error)
-      showHint(warehouseErrorHint(error), 'error')
+      console.error('[roleSetting] 清单写入失败:', error)
+      showHint(kind.startsWith('resp') ? respErrorHint(error) : warehouseErrorHint(error), 'error')
     } finally {
       confirmLoading.value = false
     }
+  }
+
+  /* ==================== 责任划分（呆滞库存 · 责任归属与标准） ==================== */
+  /*
+   * 与仓库配置同款整表替换口径（见 utils/responsibility 的文件头）：
+   * 维护表（PB responsibility_rules）有记录就完全以它为准，空表才用文件里的默认 24 条。
+   * 「恢复默认」= 清空维护表。
+   */
+
+  /** 表格显示行：比率拍平成 '60%' / '—' 字符串列（v-data-table 直接渲染，无需逐列写 slot） */
+  type RespDisplayRow = ResponsibilityRow & { idx: number, cells: string[] }
+
+  const respRows = ref<ResponsibilityRow[]>([])
+  const respCustom = ref(false)
+  const respLoading = ref(false)
+  const respSearch = ref('')
+  const respHeaders = computed(() => [
+    { title: '原因类别', key: 'category', align: 'start' },
+    { title: '二级原因', key: 'reason', align: 'start' },
+    ...RESPONSIBILITY_DEPTS.map((d, i) => ({
+      title: d,
+      key: `cells.${i}`,
+      align: 'center' as const,
+      sortable: false,
+    })),
+    { title: '操作', key: 'action', align: 'center', sortable: false },
+  ] as const)
+
+  const respDisplayRows = computed<RespDisplayRow[]>(() =>
+    respRows.value.map((r, idx) => ({
+      ...r,
+      ratios: { ...r.ratios },
+      idx,
+      cells: RESPONSIBILITY_DEPTS.map(d => formatRatio(r.ratios[d])),
+    })),
+  )
+
+  /** 写失败时的提示：环境没准备好（没应用迁移）就把原因原样说出来，其余换成通用文案 */
+  function respErrorHint (error: unknown): string {
+    return error instanceof Error && error.name === RESP_SETUP_ERROR
+      ? error.message
+      : '操作失败，请稍后重试'
+  }
+
+  /** 维护表读不出来（未应用迁移）时 loadResponsibilities 会回落默认值，页面照常可用 */
+  async function loadRespList () {
+    respLoading.value = true
+    try {
+      const res = await loadResponsibilities()
+      respRows.value = res.rows
+      respCustom.value = res.custom
+    } finally {
+      respLoading.value = false
+    }
+  }
+
+  const respDialog = ref(false)
+  /** 正在编辑的行索引；null = 新增（同名规则合法共存，按索引定位才稳） */
+  const respEditing = ref<number | null>(null)
+  /** 草稿：比率存字符串，输入框友好（空串 = 该部门不承担） */
+  const respDraft = ref<{ reason: string, category: string, ratios: Record<string, string> }>({
+    reason: '',
+    category: '',
+    ratios: {},
+  })
+  const respSaving = ref(false)
+
+  /** 原因类别候选：现有清单里出现过的（combobox，可直接输入新的） */
+  const respCategoryOptions = computed(() => responsibilityCategories(respRows.value))
+
+  const respDraftSumText = computed(() => {
+    const sum = RESPONSIBILITY_DEPTS.reduce((s, d) => s + (Number(respDraft.value.ratios[d]) || 0), 0)
+    return `${Math.round(sum * 1000) / 10}%`
+  })
+
+  function emptyRatioDraft (): Record<string, string> {
+    return Object.fromEntries(RESPONSIBILITY_DEPTS.map(d => [d, '']))
+  }
+
+  function openRespAdd () {
+    respEditing.value = null
+    respDraft.value = {
+      reason: '',
+      category: respCategoryOptions.value[0] ?? '',
+      ratios: emptyRatioDraft(),
+    }
+    respDialog.value = true
+  }
+
+  function openRespEdit (row: RespDisplayRow) {
+    respEditing.value = row.idx
+    respDraft.value = {
+      reason: row.reason,
+      category: row.category,
+      ratios: Object.fromEntries(
+        RESPONSIBILITY_DEPTS.map(d => [d, row.ratios[d] != null ? String(row.ratios[d]) : '']),
+      ),
+    }
+    respDialog.value = true
+  }
+
+  /** 把草稿里的字符串比率解析成数字；返回错误文案（字符串）或解析结果 */
+  function parseRespRatios (): Record<string, number> | string {
+    const out: Record<string, number> = {}
+    for (const d of RESPONSIBILITY_DEPTS) {
+      const raw = String(respDraft.value.ratios[d] ?? '').trim()
+      if (raw === '') continue
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n < 0 || n > 1) {
+        return `「${d}」的承担比率需在 0 ~ 1 之间`
+      }
+      out[d] = n
+    }
+    return out
+  }
+
+  async function saveRespDraft () {
+    const ratios = parseRespRatios()
+    if (typeof ratios === 'string') {
+      showHint(ratios, 'warning')
+      return
+    }
+    const candidate = cleanResponsibilityRow({
+      reason: respDraft.value.reason,
+      category: respDraft.value.category,
+      ratios,
+    })
+    // 前端先拦一道（原因必填 / 至少一个部门有比率），口径与 utils/responsibility 共用
+    const bad = findBadResponsibility(candidate)
+    if (bad) {
+      showHint(bad, 'warning')
+      return
+    }
+
+    const editing = respEditing.value
+    const list = editing !== null
+      ? respRows.value.map((r, i) => (i === editing ? candidate : r))
+      : [...respRows.value, candidate]
+
+    respSaving.value = true
+    try {
+      await saveResponsibilities(list)
+      await loadRespList()
+      respDialog.value = false
+      showHint(`「${candidate.reason}」已保存`, 'success')
+    } catch (error) {
+      console.error('[roleSetting] 保存责任划分失败:', error)
+      // 与仓库同理：写失败必须说出来，否则下次进页面又变回旧值
+      showHint(respErrorHint(error), 'error')
+    } finally {
+      respSaving.value = false
+    }
+  }
+
+  function askRemoveResp (row: RespDisplayRow) {
+    // 只留一条时不给删：删掉最后一条 = 清空维护表 = 整份默认清单又回来
+    if (respRows.value.length <= 1) {
+      showHint('至少要留一条规则；想回到制度表默认清单请点「恢复默认」', 'warning')
+      return
+    }
+    confirmTarget.value = { ...row }
+    confirmKind.value = 'resp-remove'
+  }
+
+  function askResetResp () {
+    confirmTarget.value = null
+    confirmKind.value = 'resp-reset'
   }
 
   onMounted(() => {
     getDatas()
     loadApprovers()
     loadWarehouseList()
+    loadRespList()
     document.body.classList.add('role-setting-page')
   })
 
@@ -1461,5 +1838,12 @@
 }
 .dept-inline-input {
   max-width: 220px;
+}
+
+/* 责任划分编辑弹窗：10 个部门比率两列排布（列宽收住，输入窄一点） */
+.resp-ratio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
 }
 </style>

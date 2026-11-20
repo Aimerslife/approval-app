@@ -152,6 +152,17 @@ const ACTION_ROLES = {
   'approval:manageAll': ADMIN_UP,
 
   /**
+   * 独立审批「代批」：只给超级管理员。
+   *
+   * 与 `approval:manageAll`（能**看到**所有独立审批环）刻意分开一档：
+   * 代批会把结论**记到环内未提交成员名下**（pushIndependent 按 by=成员姓名对号回填），
+   * 是替人做决定的写操作，风险高于"看得到"——与 `approval:delete` 同档，不给「管理员」。
+   *
+   * 留痕口径：意见统一标注「超级管理员某人代批」（见 useNodeSubmit 的 useIndependentSubmit）。
+   */
+  'approval:independent': ['superAdmin'],
+
+  /**
    * 删除审批单（整条 `approval_chain` + 它的附件）：只给超级管理员。
    *
    * 比「清空 BI 数据」更要小心：`bi_rows` 是 BI 的镜像，删了还能再同步回来；

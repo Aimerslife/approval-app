@@ -261,6 +261,15 @@ export interface IndependentSubmitPayload {
   resultLabel: string
   /** 办理意见（选填） */
   opinion?: string
+  /**
+   * 超级管理员「代批」（'approval:independent'，见 utils/permissions）：把这条结论记到这些
+   * **环内未提交成员**名下（逐人一条流水，by = 成员姓名；意见统一标注代批人留痕）。
+   *
+   * 为什么逐人一条而不是一条汇总：pushIndependent / handledOf 按 `by` 对号回填
+   * （见 types/approval），认不上成员姓名的流水不会推进任何人的"已提交"。
+   * 不传 / 空 = 成员本人提交（by = 登录人姓名，原行为不变）。
+   */
+  onBehalfOf?: string[]
   /** 收集组件的收尾回调：true 关弹窗 / false 保持打开便于重试（与 submitNode 同一约定） */
   done: (ok: boolean) => void
 }
@@ -343,15 +352,38 @@ export function useIndependentSubmit (options: {
         payload.done(false)
         return null
       }
+      const now = new Date().toISOString()
+      const opinion = payload.opinion?.trim() ?? ''
       const decisions: NodeDecision[] = [...(snapshot?.decisions ?? [])]
-      decisions.push({
-        stepId: payload.nodeId,
-        result: payload.result,
-        result_label: payload.resultLabel,
-        ...(payload.opinion?.trim() ? { opinion: payload.opinion.trim() } : {}),
-        by,
-        handled_at: new Date().toISOString(),
-      })
+      /*
+       * 超管代批（onBehalfOf 非空）：逐个未提交成员写一条 by=成员姓名 的流水
+       * （pushIndependent / handledOf 按 by 对号，认不上人的流水不推进任何人的"已提交"）；
+       * 意见统一标注「超级管理员某某代批」——真正的办理人是登录的超管，不是成员本人。
+       * 成员本人提交（onBehalfOf 不传）维持原样：by = 登录人。
+       */
+      const onBehalf = (payload.onBehalfOf ?? []).map(n => String(n).trim()).filter(Boolean)
+      if (onBehalf.length > 0) {
+        const marked = `超级管理员${by}代批${opinion ? `：${opinion}` : ''}`
+        for (const name of onBehalf) {
+          decisions.push({
+            stepId: payload.nodeId,
+            result: payload.result,
+            result_label: payload.resultLabel,
+            opinion: marked,
+            by: name,
+            handled_at: now,
+          })
+        }
+      } else {
+        decisions.push({
+          stepId: payload.nodeId,
+          result: payload.result,
+          result_label: payload.resultLabel,
+          ...(opinion ? { opinion } : {}),
+          by,
+          handled_at: now,
+        })
+      }
       const terminalMap = branchTerminalMapOf(snapshot)
       const context = flowContextOfOrder(order)
       const rebuilt = rebuildChain(flow, decisions, terminalMap, context)

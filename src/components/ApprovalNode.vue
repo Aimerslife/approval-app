@@ -1,6 +1,6 @@
 <template>
   <v-timeline-item class="mb-12"
-    :class="{ 'discard-zone': inDiscardSegment !== undefined, 'waiting-approval': waitingApproval }"
+    :class="{ 'discard-zone': inDiscardSegment !== undefined, 'waiting-approval': waitingApproval, 'ind-ring': isIndependentStep }"
     :dot-color="dotColor" size="35" :style="[discardZoneStyle, waitingGlowStyle]">
     <template #icon>
       <!-- 飞书提醒环节没有人可显示首字，圆点里放一个铃铛 -->
@@ -134,6 +134,10 @@
             <v-btn v-if="canHandleIndependent" color="orange" size="x-small" variant="tonal" v-bind="activatorProps">
               填写结论
             </v-btn>
+            <!-- 超管代批：不是成员（或已提交过）但环里还有人没交，可以代他们提交整环结论 -->
+            <v-btn v-else-if="canOverrideIndependent" color="orange" size="x-small" variant="tonal" v-bind="activatorProps">
+              代批
+            </v-btn>
             <span v-else-if="myIndependentMember?.handled_at" class="text-[11px] text-medium-emphasis">
               我已提交
             </span>
@@ -148,6 +152,11 @@
             <v-divider />
 
             <div class="px-4 py-3 d-flex flex-column ga-3">
+              <!-- 超管代批提示：结论记到未提交成员名下，意见里会标注真正的办理人 -->
+              <div v-if="canOverrideIndependent" class="text-[12px] text-orange-darken-3">
+                超级管理员代批：结论将记到 {{ pendingIndependentMembers.length }} 位未提交成员名下（意见里会标注代批人）
+              </div>
+
               <!-- 子流程模式：整条子链的进度（每一环 办完/总人数），来自 pushIndependent 冗余进环上的快照 -->
               <div v-if="(independentItem?.independent?.progress?.length ?? 0) > 1">
                 <div class="text-[12px] text-medium-emphasis mb-1">办理进度</div>
@@ -208,26 +217,69 @@
       结论是 pushIndependent 按办理人姓名回填到各成员上的（带 by 的流水对号），
       谁办完显示谁 —— 没办的成员行给"待提交"占位，全员办完才算这个独立审批完成。
       不复用主链 resultChips（那是 manager[0] 单人口径，会把多人环显示成一个人的结论）。
+
+      子流程模式（环上带 independent.history 全链快照）：按环节分组渲染**全部环** ——
+      每环一行「环名 + 完成度」，下面逐人结论（行样式与平铺完全同款）；当前环没办的
+      照旧显示"待提交"。此前环上只摆当前环成员，历史环办完就从时间线上消失了。
+      老单 / 单环节没有 history，回退到平铺行。
     -->
     <div v-if="isIndependentStep" class="mt-2 d-flex flex-column ga-1">
-      <div v-for="(row, ri) in independentRows" :key="ri" class="d-flex align-center flex-wrap gap-2">
-        <v-avatar size="22">
-          <v-img v-if="memberAvatar(row.member)" cover :src="memberAvatar(row.member)"
-            @error="onAvatarError(row.member)" />
-          <span v-else class="text-[10px] font-weight-semibold">{{ row.member.name?.slice(0, 1) }}</span>
-        </v-avatar>
+      <template v-if="independentHistory.length > 1">
+        <div v-for="(g, gi) in independentHistory" :key="gi" class="ind-group d-flex flex-column ga-1">
+          <!-- 环名行：状态图标 + 完成度着色 —— 办完的环绿勾、办到一半的环空心圆，一眼分清 -->
+          <div class="d-flex align-center flex-wrap gap-2">
+            <v-icon :color="groupDone(g) ? 'success' : 'grey'" size="13">
+              {{ groupDone(g) ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+            </v-icon>
+            <span class="text-[12px] font-weight-medium">{{ g.name }}</span>
+            <span class="text-[11px]" :class="groupDone(g) ? 'text-success' : 'text-medium-emphasis'">
+              {{ historyDoneText(g) }}
+            </span>
+          </div>
 
-        <span class="text-[12px]">{{ row.member.name }}</span>
+          <div class="ind-members d-flex flex-column ga-1">
+            <div v-for="(row, ri) in historyRowsOf(g)" :key="ri" class="d-flex align-center flex-wrap gap-2">
+              <v-avatar size="22">
+                <v-img v-if="memberAvatar(row.member)" cover :src="memberAvatar(row.member)"
+                  @error="onAvatarError(row.member)" />
+                <span v-else class="text-[10px] font-weight-semibold">{{ row.member.name?.slice(0, 1) }}</span>
+              </v-avatar>
 
-        <v-chip v-if="row.resultLabel" :color="row.result === 'reject' ? 'error' : 'success'" label size="x-small"
-          variant="tonal">
-          {{ row.resultLabel }}
-        </v-chip>
-        <span v-else class="text-[11px] text-medium-emphasis">待提交</span>
+              <span class="text-[12px]">{{ row.member.name }}</span>
 
-        <span v-if="row.opinion" class="text-[11px] text-medium-emphasis">意见：{{ row.opinion }}</span>
-        <span v-if="row.at" class="text-[11px] text-medium-emphasis">{{ formatDate(row.at) }}</span>
-      </div>
+              <v-chip v-if="row.resultLabel" :color="independentResultColor(row.result)" label size="x-small"
+                variant="tonal">
+                {{ row.resultLabel }}
+              </v-chip>
+              <span v-else class="text-[11px] text-medium-emphasis">待提交</span>
+
+              <span v-if="row.opinion" class="text-[11px] text-medium-emphasis">意见：{{ row.opinion }}</span>
+              <span v-if="row.at" class="text-[11px] text-medium-emphasis">{{ formatDate(row.at) }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template v-else>
+        <div v-for="(row, ri) in independentRows" :key="ri" class="d-flex align-center flex-wrap gap-2">
+          <v-avatar size="22">
+            <v-img v-if="memberAvatar(row.member)" cover :src="memberAvatar(row.member)"
+              @error="onAvatarError(row.member)" />
+            <span v-else class="text-[10px] font-weight-semibold">{{ row.member.name?.slice(0, 1) }}</span>
+          </v-avatar>
+
+          <span class="text-[12px]">{{ row.member.name }}</span>
+
+          <v-chip v-if="row.resultLabel" :color="independentResultColor(row.result)" label size="x-small"
+            variant="tonal">
+            {{ row.resultLabel }}
+          </v-chip>
+          <span v-else class="text-[11px] text-medium-emphasis">待提交</span>
+
+          <span v-if="row.opinion" class="text-[11px] text-medium-emphasis">意见：{{ row.opinion }}</span>
+          <span v-if="row.at" class="text-[11px] text-medium-emphasis">{{ formatDate(row.at) }}</span>
+        </div>
+      </template>
     </div>
 
     <!-- 已办理：渲染该审批人的选项 / 信息 / 文件 -->
@@ -345,13 +397,15 @@ import { useAvatarDirectory } from '@/stores/avatarDirectory'
 // 头像地址的逐级降级（代理 → 原地址 → 首字）：见 composables/useAvatarSrc 的文件头
 import { useAvatarSrc } from '@/composables/useAvatarSrc'
 // 「选择接收团队」的结论码：历史单的 members 没记 pick，按结论码补粒度（见 pickedReceivers）
-import { APPROVAL_RESULTS, PICK_TEAM_RESULT } from '@/types/approval'
+import { APPROVAL_RESULTS, PICK_TEAM_RESULT, RECEIVE_QTY_RESULT } from '@/types/approval'
 // 环节负责人口径（mainOf）与「连续同人环节」的类型都来自这里，别在组件里另写一套
 import { type ApprovalNextStep, mainOf, type RotationReceipt } from '@/utils/approvalRuntime'
 // 独立审批"是不是该环成员"的判定：与主链成员比较同一套口径（sameApprover）
 import { sameApprover } from '@/types/approval'
 // 登录人：判定"独立审批这一环是不是我办"（userStore.member 与链成员同形状）
 import { useUserStore } from '@/stores/user'
+// 动作权限：超管「代批」入口（'approval:independent'，见 utils/permissions）
+import { canAct } from '@/utils/permissions'
 
 const userStore = useUserStore()
 import { buildColorScale, discardColorStep, hexToRgb, pickColorStep } from '@/utils/color'
@@ -634,19 +688,57 @@ const independentOptions = computed<string[]>(() => {
 function independentOptionLabel (code: string) {
   return APPROVAL_RESULTS.find(r => r.value === code)?.label ?? code
 }
+/** 单个成员 → 结论行（历史环与当前环同一套转换，展示层零对号：结论已按 by 回填在成员上） */
+function independentRowOf (m: ApprovalChainItem) {
+  return {
+    member: m,
+    result: m.result ?? '',
+    resultLabel: m.result_label || (m.result ? APPROVAL_RESULTS.find(r => r.value === m.result)?.label ?? m.result : ''),
+    opinion: m.opinion ?? '',
+    at: m.handled_at ?? '',
+  }
+}
 /**
  * 逐人结论行：独立环的每位成员一条（结果由 pushIndependent 按 by 对号回填，
  * 没办的 result 为空 → 「待提交」）。
  */
 const independentRows = computed(() => props.data
   .filter(m => m.type === 'manager')
-  .map(m => ({
-    member: m,
-    result: m.result ?? '',
-    resultLabel: m.result_label || (m.result ? APPROVAL_RESULTS.find(r => r.value === m.result)?.label ?? m.result : ''),
-    opinion: m.opinion ?? '',
-    at: m.handled_at ?? '',
-  })))
+  .map(independentRowOf))
+/**
+ * 子流程**全链**快照（pushIndependentChain 冗余进环上的 independent.history）：
+ * 每环环名 + 该环全部成员及结论。有它（且不止一环）时按环节分组渲染**全部环**——
+ * 此前环上只摆当前环成员，历史环办完就从时间线上"消失"，只剩最后一环的内容。
+ * 老单 / 简单模式（单环）没有这个字段，回退到上面的平铺行。
+ */
+const independentHistory = computed(() => independentItem.value?.independent?.history ?? [])
+/** 某一环是否全员提交（环名行的状态图标与完成度着色用） */
+function groupDone (g: { members: ApprovalChainItem[] }) {
+  const rows = historyRowsOf(g)
+  return rows.length > 0 && rows.every(r => !!r.result)
+}
+/** 全链快照里某一环 → 与 independentRows 同款行结构（模板里逐人渲染完全复用） */
+function historyRowsOf (g: { members: ApprovalChainItem[] }) {
+  return g.members.map(independentRowOf)
+}
+/** 某一环的完成度文案：全员提交 =「已完成」，否则「x/y 已提交」 */
+function historyDoneText (g: { members: ApprovalChainItem[] }) {
+  const rows = historyRowsOf(g)
+  const done = rows.filter(r => r.result).length
+  return done >= rows.length ? '已完成' : `${done}/${rows.length} 已提交`
+}
+/**
+ * 独立审批结论语义色（error/success/primary 三档）：与 ApprovalHandleForm.radioColorOf、
+ * /singleJudge 的 radioColorOf 同一份清单 —— 驳回/处置类 = error、
+ * 推进类（通过/接收/收量/进入审批）= success、其余（含自定义码）= primary。
+ * 那边是私有函数抽不出来，这里按同一份清单复制；改口径要几处一起改。
+ */
+function independentResultColor (result: string): string {
+  if (['reject', 'discard', 'scrap', 'dispose'].includes(result)) return 'error'
+  return ['pass', 'receive', RECEIVE_QTY_RESULT, 'enter_approval'].includes(result)
+    ? 'success'
+    : 'primary'
+}
 /** 进度文案（头部小字）：「2/3 已提交」；没人参与时不显示 */
 const independentDoneText = computed(() => {
   const rows = independentRows.value
@@ -667,6 +759,19 @@ const myIndependentMember = computed<ApprovalChainItem | undefined>(() => {
 /** 我可以提交结论：我是成员、还没办过（重办覆盖走页面层，一期入口上办过就不显示） */
 const canHandleIndependent = computed(() =>
   !!myIndependentMember.value && !myIndependentMember.value?.handled_at)
+/** 还没提交结论的成员姓名（超管代批时逐人写流水，见 useIndependentSubmit 的 onBehalfOf） */
+const pendingIndependentMembers = computed(() => props.data
+  .filter(m => m?.type === 'manager' && !m.result)
+  .map(m => String(m.name ?? '').trim())
+  .filter(Boolean))
+/**
+ * 超管「代批」入口（'approval:independent'，只给 superAdmin，见 utils/permissions）：
+ * 我不是这一环的成员（或已提交过），但环里还有人没交 —— 可以代他们提交整环结论。
+ * 提交走同一个 useIndependentSubmit，结论按成员姓名记到他们名下（意见标注代批人）。
+ */
+const canOverrideIndependent = computed(() =>
+  isIndependentStep.value && pendingIndependentMembers.value.length > 0
+  && canAct(userStore.appRole, 'approval:independent'))
 
 /* 独立审批办理弹窗状态 */
 const indDialog = ref(false)
@@ -683,6 +788,8 @@ function submitMyIndependent () {
     result: indResult.value,
     resultLabel: independentOptionLabel(indResult.value),
     opinion: indOpinion.value,
+    // 超管代批（走的不是成员入口）：结论逐人记到未提交成员名下；成员本人提交不带这个字段
+    ...(canHandleIndependent.value ? {} : { onBehalfOf: pendingIndependentMembers.value }),
     done: (ok: boolean) => {
       indSubmitting.value = false
       if (ok) indDialog.value = false
@@ -1101,6 +1208,43 @@ const emit = defineEmits<{
 .node-head-left {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/*
+ * 独立审批环：内容包一圈橙色虚线框 —— 与画布卡片同款视觉约定：
+ * 实线框 = 主线必经环节，虚线框 = 旁路发起、不阻塞主线。
+ * 同弃置段的做法：判定类挂在根元素上只筛这一条，`:deep` 穿透圈住 Vuetify 内部的 `__body`
+ * （根元素是 display: contents 没有盒子，边框只能画在内容容器上）。
+ */
+.ind-ring :deep(.v-timeline-item__body) {
+  // width:auto（覆盖上面全局的 100%）靠 stretch 撑满：边框、内边距与外缩进都由 grid 自动扣掉，不会横向溢出
+  width: auto;
+  // 左右各缩 8px：虚线框作为「旁路环节」与主链环节左右错开，也不顶满面板边缘
+  margin-left: 8px;
+  margin-right: 8px;
+  padding: 6px 10px 8px;
+  border: 1px dashed rgb(234 88 12 / 60%);
+  border-radius: 10px;
+}
+
+/*
+ * 子流程环节分组块：浅底圆角 + 组间留白，多环依次解锁时一眼分清
+ * 「哪环办完了、哪环还在办」；组内成员行挂一条主色细竖线，环名 → 成员行的归属更直观。
+ */
+.ind-group {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.03);
+}
+
+.ind-group + .ind-group {
+  margin-top: 6px;
+}
+
+.ind-members {
+  margin-left: 5px;
+  padding-left: 9px;
+  border-left: 2px solid rgba(var(--v-theme-primary), 0.25);
 }
 
 /*
